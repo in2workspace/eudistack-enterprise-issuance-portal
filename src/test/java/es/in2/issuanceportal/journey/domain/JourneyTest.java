@@ -65,11 +65,11 @@ class JourneyTest {
     }
 
     @Test
-    void expiresAfterFifteenMinutesWithoutActivity() {
+    void isInactiveAfterFifteenMinutesWithoutActivity() {
         Journey journey = Journey.start(UUID.randomUUID(), T0);
 
-        assertThat(journey.isExpired(T0.plus(Duration.ofMinutes(15)).minusMillis(1))).isFalse();
-        assertThat(journey.isExpired(T0.plus(Duration.ofMinutes(15)))).isTrue();
+        assertThat(journey.isInactive(T0.plus(Duration.ofMinutes(15)).minusMillis(1))).isFalse();
+        assertThat(journey.isInactive(T0.plus(Duration.ofMinutes(15)))).isTrue();
     }
 
     @Test
@@ -78,16 +78,27 @@ class JourneyTest {
 
         journey.touch(T0.plus(Duration.ofMinutes(14)));
 
-        assertThat(journey.isExpired(T0.plus(Duration.ofMinutes(20)))).isFalse();
-        assertThat(journey.isExpired(T0.plus(Duration.ofMinutes(29)))).isTrue();
+        assertThat(journey.isInactive(T0.plus(Duration.ofMinutes(20)))).isFalse();
+        assertThat(journey.isInactive(T0.plus(Duration.ofMinutes(29)))).isTrue();
     }
 
     @Test
-    void aClosedJourneyNeverExpires() {
+    void aCompletedJourneyKeepsCountingActivityForItsSession() {
+        Journey journey = Journey.start(UUID.randomUUID(), T0);
+        journey.complete(T0);
+
+        journey.touch(T0.plus(Duration.ofMinutes(10)));
+
+        assertThat(journey.isInactive(T0.plus(Duration.ofMinutes(20)))).isFalse();
+        assertThat(journey.isInactive(T0.plus(Duration.ofMinutes(25)))).isTrue();
+    }
+
+    @Test
+    void aWithdrawnJourneyIsNeverInactive() {
         Journey journey = Journey.start(UUID.randomUUID(), T0);
         journey.withdraw(WithdrawalReason.CANCELLED, T0);
 
-        assertThat(journey.isExpired(T0.plus(Duration.ofHours(1)))).isFalse();
+        assertThat(journey.isInactive(T0.plus(Duration.ofHours(1)))).isFalse();
     }
 
     @Test

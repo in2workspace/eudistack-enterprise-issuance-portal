@@ -56,9 +56,14 @@ public final class Journey {
                 createdAt, lastActivity, endedAt);
     }
 
-    /** Records activity, which pushes back the expiry. */
+    /**
+     * Records activity, which pushes back the expiry. A completed journey keeps its session, to ask for
+     * a new offer, until it is closed or goes inactive (prd.md §3.2), so its activity counts too.
+     */
     public void touch(Instant now) {
-        requireInProgress();
+        if (state == JourneyState.WITHDRAWN) {
+            throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
+        }
         lastActivity = now;
     }
 
@@ -86,9 +91,13 @@ public final class Journey {
         endedAt = now;
     }
 
-    /** True once the inactivity limit has passed, even if the expiry job has not withdrawn it yet. */
-    public boolean isExpired(Instant now) {
-        return state == JourneyState.IN_PROGRESS && !now.isBefore(lastActivity.plus(INACTIVITY_LIMIT));
+    /**
+     * True once the inactivity limit has passed for a journey that still has a session, even if the
+     * expiry job has not handled it yet. In progress, it is withdrawn as expired; completed, only its
+     * session closes.
+     */
+    public boolean isInactive(Instant now) {
+        return state != JourneyState.WITHDRAWN && !now.isBefore(lastActivity.plus(INACTIVITY_LIMIT));
     }
 
     public boolean isInProgress() {

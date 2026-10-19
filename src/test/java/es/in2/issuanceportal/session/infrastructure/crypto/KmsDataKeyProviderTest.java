@@ -1,5 +1,6 @@
 package es.in2.issuanceportal.session.infrastructure.crypto;
 
+import es.in2.issuanceportal.MutableClock;
 import es.in2.issuanceportal.shared.error.ProblemCode;
 import es.in2.issuanceportal.shared.error.ProblemException;
 import org.junit.jupiter.api.Test;
@@ -10,10 +11,8 @@ import software.amazon.awssdk.services.kms.model.GenerateDataKeyResponse;
 import software.amazon.awssdk.services.kms.model.KmsException;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -105,33 +104,5 @@ class KmsDataKeyProviderTest {
     void aKeyIdIsRequired() {
         assertThatThrownBy(() -> new KmsDataKeyProvider(kms, " ", ROTATION, clock))
                 .isInstanceOf(IllegalArgumentException.class);
-    }
-
-    private static final class MutableClock extends Clock {
-
-        private Instant now;
-
-        MutableClock(Instant now) {
-            this.now = now;
-        }
-
-        void advance(Duration duration) {
-            now = now.plus(duration);
-        }
-
-        @Override
-        public Instant instant() {
-            return now;
-        }
-
-        @Override
-        public java.time.ZoneId getZone() {
-            return ZoneOffset.UTC;
-        }
-
-        @Override
-        public Clock withZone(java.time.ZoneId zone) {
-            return this;
-        }
     }
 }
