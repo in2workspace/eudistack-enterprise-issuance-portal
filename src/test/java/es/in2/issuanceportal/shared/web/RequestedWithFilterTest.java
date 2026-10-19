@@ -57,7 +57,8 @@ class RequestedWithFilterTest {
     @ParameterizedTest
     @ValueSource(strings = {"/issuance-portal/%61pi/v1/journey", "/issuance-portal/api;x/v1/journey",
             "/issuance-portal/api/v1/journey;jsessionid=1", "/issuance-portal/new-endpoint",
-            "/issuance-portal/actuator/../api/v1/journey", "/issuance-portal/actuator/./health"})
+            "/issuance-portal/actuator/../api/v1/journey", "/issuance-portal/actuator/%2e%2e/api/v1/journey",
+            "/issuance-portal/actuator/./health"})
     void encodedPathsAndNewEndpointsAreProtectedToo(String path) throws Exception {
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
