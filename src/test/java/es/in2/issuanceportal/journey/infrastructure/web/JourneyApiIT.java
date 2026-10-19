@@ -207,6 +207,23 @@ class JourneyApiIT {
     }
 
     @Test
+    void es03AnEncodedPathCannotSkipTheHeaderCheck() throws Exception {
+        long before = journeyCount();
+
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post(java.net.URI.create(CONTEXT + "/%61pi/v1/journey"))
+                        .contextPath(CONTEXT).with(host(SANDBOX_HOST)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.type").value("request_not_allowed"));
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post(java.net.URI.create(CONTEXT + "/api;x/v1/journey"))
+                        .contextPath(CONTEXT).with(host(SANDBOX_HOST)))
+                .andExpect(status().isForbidden());
+
+        assertThat(journeyCount()).isEqualTo(before);
+    }
+
+    @Test
     void anUnknownTenantIsNotFound() throws Exception {
         mvc.perform(post(JOURNEY, "altia.127.0.0.1.nip.io"))
                 .andExpect(status().isNotFound())

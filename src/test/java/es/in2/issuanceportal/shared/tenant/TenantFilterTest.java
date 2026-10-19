@@ -60,6 +60,18 @@ class TenantFilterTest {
     }
 
     @Test
+    void anEncodedApiPathStillNeedsATenant() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/issuance-portal/%61pi/v1/journey");
+        request.setContextPath("/issuance-portal");
+        request.setServerName("unknown.eudistack.net");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, new MockFilterChain());
+
+        assertThat(response.getStatus()).isEqualTo(404);
+    }
+
+    @Test
     void leavesRequestsOutsideTheApiAlone() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/issuance-portal/actuator/health");
         request.setContextPath("/issuance-portal");

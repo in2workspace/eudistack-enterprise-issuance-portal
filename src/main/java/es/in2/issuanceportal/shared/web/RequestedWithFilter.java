@@ -27,12 +27,10 @@ public class RequestedWithFilter extends OncePerRequestFilter {
     static final String HEADER = "X-Requested-With";
     static final String EXPECTED = "issuance-portal";
     private static final Set<String> STATE_CHANGING = Set.of("POST", "PUT", "PATCH", "DELETE");
-    private static final String API_PATH = "/api/";
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !STATE_CHANGING.contains(request.getMethod())
-                || !request.getRequestURI().startsWith(request.getContextPath() + API_PATH);
+        return !STATE_CHANGING.contains(request.getMethod()) || OperationalPaths.isOperational(request);
     }
 
     @Override

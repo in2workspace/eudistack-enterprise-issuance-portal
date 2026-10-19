@@ -55,7 +55,20 @@ class RequestedWithFilterTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/issuance-portal/actuator/health"})
+    @ValueSource(strings = {"/issuance-portal/%61pi/v1/journey", "/issuance-portal/api;x/v1/journey",
+            "/issuance-portal/api/v1/journey;jsessionid=1", "/issuance-portal/new-endpoint"})
+    void encodedPathsAndNewEndpointsAreProtectedToo(String path) throws Exception {
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        filter.doFilter(request("POST", path), response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(403);
+        assertThat(chain.getRequest()).isNull();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"/issuance-portal/actuator/health", "/issuance-portal/actuator"})
     void requestsOutsideTheApiAreLeftAlone(String path) throws Exception {
         MockFilterChain chain = new MockFilterChain();
 
