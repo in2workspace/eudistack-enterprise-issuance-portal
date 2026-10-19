@@ -5,9 +5,6 @@ import es.in2.issuanceportal.journey.domain.Journey;
 import es.in2.issuanceportal.journey.domain.JourneyState;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 
-import java.time.Instant;
-import java.util.Comparator;
-import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -36,18 +33,6 @@ public class InMemoryJourneyRepository implements JourneyRepository {
     @Override
     public Optional<Journey> findById(TenantId tenant, UUID id) {
         return Optional.ofNullable(journeys.get(key(tenant, id))).map(InMemoryJourneyRepository::copy);
-    }
-
-    @Override
-    public List<Journey> findInProgressInactiveSince(TenantId tenant, Instant cutoff, int limit) {
-        return journeys.entrySet().stream()
-                .filter(e -> e.getKey().startsWith(tenant.value() + "/"))
-                .map(Map.Entry::getValue)
-                .filter(j -> j.isInProgress() && !j.lastActivity().isAfter(cutoff))
-                .sorted(Comparator.comparing(Journey::lastActivity))
-                .limit(limit)
-                .map(InMemoryJourneyRepository::copy)
-                .toList();
     }
 
     private static String key(TenantId tenant, UUID id) {

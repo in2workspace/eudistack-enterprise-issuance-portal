@@ -25,9 +25,6 @@ CREATE TABLE journey (
         CHECK ((state = 'in_progress') = (ended_at IS NULL))
 );
 
--- The expiry job looks for journeys in progress by inactivity.
-CREATE INDEX journey_state_last_activity_idx ON journey (state, last_activity);
-
 -- Temporary session of a journey in progress. Personal data, encrypted by the application.
 -- The row is physically deleted when the journey leaves in_progress or the session closes.
 CREATE TABLE journey_session (

@@ -138,6 +138,46 @@ class JourneyServiceTest {
         assertJourneyClosed(() -> service.withdraw(SANDBOX, started.session(), JourneyWithdrawal.Cause.NOT_ENTITLED));
     }
 
+    @Test
+    void theExpirySweepWithdrawsInactiveJourneysInProgressAndKeepsThem() {
+        JourneyService.Started inactive = service.start(SANDBOX, Optional.empty());
+        service.reach(SANDBOX, inactive.session(), JourneyProgress.Step.IDENTIFIED);
+        clock.advance(Duration.ofMinutes(10));
+        JourneyService.Started active = service.start(SANDBOX, Optional.empty());
+        clock.advance(Duration.ofMinutes(6));
+
+        assertThat(service.expireInactive(SANDBOX)).isEqualTo(1);
+
+        Journey expired = stored(inactive);
+        assertThat(expired.state()).isEqualTo(JourneyState.WITHDRAWN);
+        assertThat(expired.step()).isEqualTo(JourneyStep.IDENTIFIED);
+        assertThat(expired.withdrawalReason()).contains(WithdrawalReason.EXPIRED);
+        assertThat(sessions.journeyOf(SANDBOX, inactive.session())).isEmpty();
+        assertThat(stored(active).state()).isEqualTo(JourneyState.IN_PROGRESS);
+        assertThat(sessions.journeyOf(SANDBOX, active.session())).isPresent();
+    }
+
+    @Test
+    void theExpirySweepOnlyClosesTheSessionOfAnInactiveCompletedJourney() {
+        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
+        complete(started);
+        clock.advance(Duration.ofMinutes(15));
+
+        assertThat(service.expireInactive(SANDBOX)).isEqualTo(1);
+
+        assertThat(stored(started).state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(sessions.journeyOf(SANDBOX, started.session())).isEmpty();
+    }
+
+    @Test
+    void aSecondSweepFindsNothingLeft() {
+        service.start(SANDBOX, Optional.empty());
+        clock.advance(Duration.ofMinutes(15));
+        service.expireInactive(SANDBOX);
+
+        assertThat(service.expireInactive(SANDBOX)).isZero();
+    }
+
     private void complete(JourneyService.Started started) {
         Journey journey = stored(started);
         journey.complete(clock.instant());

@@ -12,7 +12,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 
-import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
@@ -25,8 +24,6 @@ class JdbcJourneyRepositoryIT {
 
     private static final TenantId SANDBOX = new TenantId("sandbox");
     private static final TenantId KPMG = new TenantId("kpmg");
-    // Far in the past so journeys written by other tests never fall inside these cutoffs.
-    private static final Instant T0 = Instant.parse("2001-01-01T10:00:00Z");
 
     @Autowired
     private JourneyRepository repository;
@@ -76,32 +73,11 @@ class JdbcJourneyRepositoryIT {
     }
 
     @Test
-    void findsOnlyInactiveJourneysInProgressOldestFirst() {
-        Journey oldest = startedAt(T0);
-        Journey older = startedAt(T0.plusSeconds(60));
-        Journey recent = startedAt(T0.plus(Duration.ofMinutes(30)));
-        Journey withdrawn = startedAt(T0);
-        withdrawn.withdraw(WithdrawalReason.CANCELLED, T0);
-        repository.update(SANDBOX, withdrawn, JourneyState.IN_PROGRESS);
-
-        var found = repository.findInProgressInactiveSince(SANDBOX, T0.plus(Duration.ofMinutes(10)), 10);
-
-        assertThat(found).extracting(Journey::id).containsExactly(oldest.id(), older.id())
-                .doesNotContain(recent.id(), withdrawn.id());
-    }
-
-    @Test
     void aJourneyOfOneTenantDoesNotExistForAnother() {
         Journey journey = Journey.start(UUID.randomUUID(), now());
         repository.insert(KPMG, journey);
 
         assertThat(repository.findById(SANDBOX, journey.id())).isEmpty();
-    }
-
-    private Journey startedAt(Instant at) {
-        Journey journey = Journey.start(UUID.randomUUID(), at);
-        repository.insert(SANDBOX, journey);
-        return journey;
     }
 
     private static Instant now() {

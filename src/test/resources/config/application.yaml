@@ -4,3 +4,6 @@ issuance-portal:
     provider: local
     # Test-only key, never used outside the test suite.
     local-key: VV4OSyWM8BydULUYWMb92hUKKZZWmlYXo3TTa/7BDhI=
+  # Tests run the expiry sweep explicitly, never on the minute.
+  expiry:
+    enabled: false

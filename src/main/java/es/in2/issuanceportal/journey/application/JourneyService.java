@@ -97,6 +97,38 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
         });
     }
 
+    /**
+     * Expiry sweep of a tenant (design.md AD-4): every session inactive for 15 minutes is closed, and a
+     * journey still in progress is withdrawn as expired. A journey a request changed in the meantime is
+     * left to that request. Returns how many sessions were closed.
+     */
+    public int expireInactive(TenantId tenant) {
+        Instant now = clock.instant();
+        int closed = 0;
+        for (UUID id : sessions.openJourneys(tenant)) {
+            if (journeys.findById(tenant, id).map(journey -> expireIfInactive(tenant, journey, now)).orElse(true)) {
+                sessions.close(tenant, id);
+                closed++;
+            }
+        }
+        return closed;
+    }
+
+    /** Whether the journey's session must close: inactive, or left behind by a withdrawn journey. */
+    private boolean expireIfInactive(TenantId tenant, Journey journey, Instant now) {
+        if (journey.state() == JourneyState.WITHDRAWN) {
+            return true;
+        }
+        if (!journey.isInactive(now)) {
+            return false;
+        }
+        if (journey.isInProgress()) {
+            journey.withdraw(WithdrawalReason.EXPIRED, now);
+            return journeys.update(tenant, journey, JourneyState.IN_PROGRESS);
+        }
+        return true;
+    }
+
     /** The open journey of the session, with its activity recorded, or {@code journey_closed}. */
     private Journey active(TenantId tenant, SessionId session) {
         Journey journey = sessions.journeyOf(tenant, session)

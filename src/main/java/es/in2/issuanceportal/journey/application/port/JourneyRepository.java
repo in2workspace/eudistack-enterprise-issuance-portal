@@ -4,8 +4,6 @@ import es.in2.issuanceportal.journey.domain.Journey;
 import es.in2.issuanceportal.journey.domain.JourneyState;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 
-import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -21,7 +19,4 @@ public interface JourneyRepository {
     boolean update(TenantId tenant, Journey journey, JourneyState readInState);
 
     Optional<Journey> findById(TenantId tenant, UUID id);
-
-    /** Journeys in progress whose last activity is at or before the cutoff, oldest first. */
-    List<Journey> findInProgressInactiveSince(TenantId tenant, Instant cutoff, int limit);
 }

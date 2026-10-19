@@ -8,6 +8,7 @@ import es.in2.issuanceportal.shared.error.ProblemException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 
 import java.util.EnumMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -56,6 +57,14 @@ public class InMemoryJourneySessions implements JourneySessions {
         SessionId rotated = SessionId.generate();
         sessions.put(key(tenant, rotated.hash()), entry);
         return rotated;
+    }
+
+    @Override
+    public List<UUID> openJourneys(TenantId tenant) {
+        return sessions.entrySet().stream()
+                .filter(e -> e.getKey().startsWith(tenant.value() + "/"))
+                .map(e -> e.getValue().journeyId())
+                .toList();
     }
 
     private Entry existing(TenantId tenant, SessionId session) {

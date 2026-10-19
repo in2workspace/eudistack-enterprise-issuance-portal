@@ -12,7 +12,6 @@ import org.springframework.stereotype.Component;
 
 import java.sql.Array;
 import java.sql.Timestamp;
-import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -79,17 +78,6 @@ class JdbcJourneyRepository implements JourneyRepository {
                 .param("id", id)
                 .query(ROW)
                 .optional();
-    }
-
-    @Override
-    public List<Journey> findInProgressInactiveSince(TenantId tenant, Instant cutoff, int limit) {
-        return jdbc.sql("SELECT " + COLUMNS + " FROM " + table(tenant)
-                        + " WHERE state = :state AND last_activity <= :cutoff ORDER BY last_activity LIMIT :limit")
-                .param("state", JourneyState.IN_PROGRESS.code())
-                .param("cutoff", Timestamp.from(cutoff))
-                .param("limit", limit)
-                .query(ROW)
-                .list();
     }
 
     private static String table(TenantId tenant) {

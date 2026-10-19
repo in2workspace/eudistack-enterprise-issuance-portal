@@ -11,6 +11,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -87,6 +88,11 @@ class JdbcJourneySessions implements JourneySessions {
             throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
         }
         return rotated;
+    }
+
+    @Override
+    public List<UUID> openJourneys(TenantId tenant) {
+        return jdbc.sql("SELECT journey_id FROM " + table(tenant)).query(UUID.class).list();
     }
 
     private UUID existingJourney(TenantId tenant, SessionId session) {

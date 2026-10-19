@@ -93,6 +93,21 @@ abstract class JourneySessionsContract {
     }
 
     @Test
+    void listsTheJourneysThatStillHaveASession() {
+        SessionId open = SessionId.generate();
+        UUID openJourney = newJourney(SANDBOX);
+        sessions().open(SANDBOX, open, openJourney);
+        SessionId closed = SessionId.generate();
+        UUID closedJourney = newJourney(SANDBOX);
+        sessions().open(SANDBOX, closed, closedJourney);
+        sessions().close(SANDBOX, closedJourney);
+        UUID otherTenant = newJourney(KPMG);
+        sessions().open(KPMG, SessionId.generate(), otherTenant);
+
+        assertThat(sessions().openJourneys(SANDBOX)).contains(openJourney).doesNotContain(closedJourney, otherTenant);
+    }
+
+    @Test
     void aSessionOfOneTenantDoesNotExistForAnother() {
         SessionId session = openSession(KPMG);
 
