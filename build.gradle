@@ -49,6 +49,10 @@ dependencies {
     implementation 'org.flywaydb:flyway-database-postgresql'
     runtimeOnly 'org.postgresql:postgresql'
 
+    // --- Cryptography ---
+    // Envelope encryption of the personal data in the journey session (design.md §5).
+    implementation 'software.amazon.awssdk:kms:2.31.78'
+
     // --- Caching ---
     implementation 'com.github.ben-manes.caffeine:caffeine'
 

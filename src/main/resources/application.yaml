@@ -20,6 +20,13 @@ server:
     # The API lives under /issuance-portal/api/v1; health and metrics under /issuance-portal/actuator.
     context-path: /issuance-portal
 
+issuance-portal:
+  crypto:
+    # kms in AWS environments, local in Docker Compose. Empty: the service does not start.
+    provider: ${PORTAL_CRYPTO_PROVIDER:}
+    kms-key-id: ${PORTAL_KMS_KEY_ID:}
+    local-key: ${PORTAL_LOCAL_DATA_KEY:}
+
 management:
   endpoints:
     web:
