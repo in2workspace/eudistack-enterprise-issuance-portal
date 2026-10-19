@@ -16,7 +16,9 @@ import es.in2.issuanceportal.shared.error.ProblemException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionOperations;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -38,12 +40,15 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
     private final JourneyRepository journeys;
     private final JourneySessions sessions;
     private final JourneyAuditTrail trail;
+    private final TransactionOperations transactions;
     private final Clock clock;
 
-    public JourneyService(JourneyRepository journeys, JourneySessions sessions, JourneyAuditTrail trail, Clock clock) {
+    public JourneyService(JourneyRepository journeys, JourneySessions sessions, JourneyAuditTrail trail,
+                          TransactionOperations transactions, Clock clock) {
         this.journeys = journeys;
         this.sessions = sessions;
         this.trail = trail;
+        this.transactions = transactions;
         this.clock = clock;
     }
 
@@ -112,16 +117,30 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
      * journey still in progress is withdrawn as expired. A journey a request changed in the meantime is
      * left to that request. Returns how many sessions were closed.
      */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public int expireInactive(TenantId tenant) {
         Instant now = clock.instant();
         int closed = 0;
+        // One transaction per journey: a journey that cannot be handled must not keep the
+        // personal data of every other session of the tenant past its expiry.
         for (UUID id : sessions.openJourneys(tenant)) {
-            if (journeys.findById(tenant, id).map(journey -> expireIfInactive(tenant, journey, now)).orElse(true)) {
-                sessions.close(tenant, id);
-                closed++;
+            try {
+                if (Boolean.TRUE.equals(transactions.execute(status -> expireOne(tenant, id, now)))) {
+                    closed++;
+                }
+            } catch (RuntimeException e) {
+                log.error("Could not expire journey {}", id, e);
             }
         }
         return closed;
+    }
+
+    private boolean expireOne(TenantId tenant, UUID id, Instant now) {
+        if (journeys.findById(tenant, id).map(journey -> expireIfInactive(tenant, journey, now)).orElse(true)) {
+            sessions.close(tenant, id);
+            return true;
+        }
+        return false;
     }
 
     /** Whether the journey's session must close: inactive, or left behind by a withdrawn journey. */
@@ -180,10 +199,18 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
         sessions.journeyOf(tenant, session)
                 .flatMap(id -> journeys.findById(tenant, id))
                 .ifPresent(journey -> {
-                    if (journey.isInProgress()) {
-                        withdraw(tenant, journey, WithdrawalReason.CANCELLED);
-                    } else {
+                    if (!journey.isInProgress()) {
                         sessions.close(tenant, journey.id());
+                        return;
+                    }
+                    try {
+                        withdraw(tenant, journey, WithdrawalReason.CANCELLED);
+                    } catch (ProblemException e) {
+                        // A parallel request (a double submit) or the expiry job closed it first: it is
+                        // closed either way, and the holder still gets a new journey.
+                        if (e.problem() != ProblemCode.JOURNEY_CLOSED) {
+                            throw e;
+                        }
                     }
                 });
     }

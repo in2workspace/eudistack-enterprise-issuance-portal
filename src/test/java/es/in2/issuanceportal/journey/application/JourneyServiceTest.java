@@ -18,10 +18,12 @@ import es.in2.issuanceportal.shared.error.ProblemException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
+import org.springframework.transaction.support.TransactionOperations;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -34,7 +36,8 @@ class JourneyServiceTest {
     private final InMemoryJourneySessions sessions = new InMemoryJourneySessions();
     private final MutableClock clock = new MutableClock(Instant.parse("2026-10-19T10:00:00Z"));
     private final RecordingJourneyAuditTrail trail = new RecordingJourneyAuditTrail();
-    private final JourneyService service = new JourneyService(journeys, sessions, trail, clock);
+    private final JourneyService service =
+            new JourneyService(journeys, sessions, trail, TransactionOperations.withoutTransaction(), clock);
 
     @Test
     void startCreatesAJourneyInProgressWithItsSession() {
@@ -231,6 +234,56 @@ class JourneyServiceTest {
 
         assertThat(journey.state()).isEqualTo(JourneyState.WITHDRAWN);
         assertThat(sessions.journeyOf(SANDBOX, started.session())).isEmpty();
+    }
+
+    @Test
+    void aJourneyThatCannotBeExpiredDoesNotStopTheOthers() {
+        UUID[] poisoned = new UUID[1];
+        InMemoryJourneyRepository failingOnOne = new InMemoryJourneyRepository() {
+            @Override
+            public Optional<Journey> findById(TenantId tenant, UUID id) {
+                if (id.equals(poisoned[0])) {
+                    throw new IllegalStateException("unreadable row");
+                }
+                return super.findById(tenant, id);
+            }
+        };
+        JourneyService sweeping = new JourneyService(failingOnOne, sessions, trail,
+                TransactionOperations.withoutTransaction(), clock);
+        JourneyService.Started bad = sweeping.start(SANDBOX, Optional.empty());
+        JourneyService.Started good = sweeping.start(SANDBOX, Optional.empty());
+        poisoned[0] = bad.journey().id();
+        clock.advance(Duration.ofMinutes(15));
+
+        assertThat(sweeping.expireInactive(SANDBOX)).isEqualTo(1);
+
+        assertThat(sessions.journeyOf(SANDBOX, good.session())).isEmpty();
+        assertThat(failingOnOne.findById(SANDBOX, good.journey().id()).orElseThrow().withdrawalReason())
+                .contains(WithdrawalReason.EXPIRED);
+    }
+
+    @Test
+    void startingAgainStillWorksWhenAParallelRequestClosedThePreviousJourneyFirst() {
+        boolean[] parallelWins = {false};
+        InMemoryJourneyRepository racing = new InMemoryJourneyRepository() {
+            @Override
+            public boolean update(TenantId tenant, Journey journey, JourneyState readInState) {
+                if (parallelWins[0] && journey.state() == JourneyState.WITHDRAWN) {
+                    parallelWins[0] = false;
+                    return false;
+                }
+                return super.update(tenant, journey, readInState);
+            }
+        };
+        JourneyService starting = new JourneyService(racing, sessions, trail,
+                TransactionOperations.withoutTransaction(), clock);
+        JourneyService.Started previous = starting.start(SANDBOX, Optional.empty());
+        parallelWins[0] = true;
+
+        JourneyService.Started next = starting.start(SANDBOX, Optional.of(previous.session()));
+
+        assertThat(next.journey().state()).isEqualTo(JourneyState.IN_PROGRESS);
+        assertThat(sessions.journeyOf(SANDBOX, next.session())).contains(next.journey().id());
     }
 
     private void complete(JourneyService.Started started) {
