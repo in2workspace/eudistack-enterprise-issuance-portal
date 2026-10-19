@@ -29,7 +29,12 @@ public record TenantId(String value) {
 
     /** The tenant's schema for this service, quoted so a hyphen in the identifier stays valid SQL. */
     public String schema() {
-        return "\"" + value + SCHEMA_SUFFIX + "\"";
+        return "\"" + schemaName() + "\"";
+    }
+
+    /** The tenant's schema for this service, unquoted, for tools that quote it themselves. */
+    public String schemaName() {
+        return value + SCHEMA_SUFFIX;
     }
 
     @Override

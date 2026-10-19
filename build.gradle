@@ -45,6 +45,8 @@ dependencies {
     // --- Persistence ---
     // Journey, session and configuration live in the tenant's schema (design.md AD-2).
     implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'org.flywaydb:flyway-core'
+    implementation 'org.flywaydb:flyway-database-postgresql'
     runtimeOnly 'org.postgresql:postgresql'
 
     // --- Caching ---

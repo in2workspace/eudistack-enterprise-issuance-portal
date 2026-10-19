@@ -8,6 +8,9 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/eudistack}
     username: ${DB_USERNAME:admin}
     password: ${DB_PASSWORD:}
+  flyway:
+    # Migrations run per tenant schema in TenantSchemaMigrator, never on the default schema.
+    enabled: false
 
 server:
   port: ${SERVER_PORT:8080}
