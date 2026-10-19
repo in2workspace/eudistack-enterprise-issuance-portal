@@ -24,32 +24,32 @@ class TenantSchemaMigratorIT {
     private TenantSchemaMigrator migrator;
 
     @Test
-    void everyActiveTenantHasItsOwnSchemaAndNoOtherDoes() {
+    void migrate_activeTenants_createsOneSchemaEach() {
         assertThat(jdbc.sql("SELECT schema_name FROM information_schema.schemata WHERE schema_name LIKE '%_issuance_portal'")
                 .query(String.class).list())
                 .containsExactlyInAnyOrder("sandbox_issuance_portal", "kpmg_issuance_portal");
     }
 
     @Test
-    void eachTenantSchemaHasTheJourneySessionAndLockTables() {
+    void migrate_tenantSchema_hasJourneySessionAndLockTables() {
         assertThat(jdbc.sql("SELECT table_name FROM information_schema.tables WHERE table_schema = 'sandbox_issuance_portal'")
                 .query(String.class).list())
                 .contains("journey", "journey_session", "shedlock");
     }
 
     @Test
-    void migratingAgainChangesNothing() {
+    void migrate_alreadyMigrated_changesNothing() {
         assertThatNoException().isThrownBy(() -> migrator.migrate(new TenantId("sandbox")));
     }
 
     @Test
-    void aWithdrawnJourneyNeedsAReason() {
+    void insertJourney_withdrawnWithoutReason_isRejected() {
         assertThatThrownBy(() -> insertJourney("withdrawn", null, "now()"))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
-    void aJourneyInProgressHasNoReasonAndNoEnd() {
+    void insertJourney_inProgressWithReasonOrEnd_isRejected() {
         assertThatThrownBy(() -> insertJourney("in_progress", "cancelled", "NULL"))
                 .isInstanceOf(DataIntegrityViolationException.class);
         assertThatThrownBy(() -> insertJourney("in_progress", null, "now()"))
@@ -57,13 +57,13 @@ class TenantSchemaMigratorIT {
     }
 
     @Test
-    void onlyTheStatesOfTheContractAreAccepted() {
+    void insertJourney_unknownState_isRejected() {
         assertThatThrownBy(() -> insertJourney("deleted", null, "now()"))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     @Test
-    void aValidWithdrawnJourneyIsAccepted() {
+    void insertJourney_validWithdrawn_isAccepted() {
         assertThatNoException().isThrownBy(() -> insertJourney("withdrawn", "expired", "now()"));
     }
 

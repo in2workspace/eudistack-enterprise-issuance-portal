@@ -20,19 +20,19 @@ class ArchitectureTest {
             .importPackages(ArchitectureRules.BASE);
 
     @Test
-    void domainDoesNotDependOnInfrastructureOrSpringWeb() {
+    void domainRules_productionCode_haveNoViolations() {
         ArchitectureRules.DOMAIN_DOES_NOT_DEPEND_ON_INFRASTRUCTURE.check(PRODUCTION);
         ArchitectureRules.DOMAIN_DOES_NOT_DEPEND_ON_SPRING_WEB.check(PRODUCTION);
     }
 
     @Test
-    void modulesOnlyTalkThroughPublishedPackages() {
+    void moduleBoundaryRules_productionCode_haveNoViolations() {
         ArchitectureRules.moduleBoundaries().forEach(rule -> rule.check(PRODUCTION));
         ArchitectureRules.SESSION_DOES_NOT_DEPEND_ON_MODULES.check(PRODUCTION);
     }
 
     @Test
-    void moduleRuleDetectsACallIntoAnotherModulesInternals() {
+    void moduleBoundaryRule_callIntoAnotherModulesInternals_reportsViolation() {
         JavaClasses classes = new ClassFileImporter().importClasses(IllegalCaller.class, JourneyInternal.class);
 
         assertThat(ArchitectureRules.moduleOnlyUsesPublishedPackagesOfOthers("identification")
@@ -40,7 +40,7 @@ class ArchitectureTest {
     }
 
     @Test
-    void moduleRuleAllowsACallIntoAnotherModulesPublishedPackage() {
+    void moduleBoundaryRule_callIntoPublishedPackage_reportsNoViolation() {
         JavaClasses classes = new ClassFileImporter().importClasses(LegalCaller.class, PublishedPort.class);
 
         assertThat(ArchitectureRules.moduleOnlyUsesPublishedPackagesOfOthers("identification")
@@ -48,7 +48,7 @@ class ArchitectureTest {
     }
 
     @Test
-    void sessionRuleDetectsADependencyOnAModule() {
+    void sessionRule_sessionDependsOnModule_reportsViolation() {
         JavaClasses classes = new ClassFileImporter().importClasses(SessionKnowingJourney.class, PublishedPort.class);
 
         assertThat(ArchitectureRules.SESSION_DOES_NOT_DEPEND_ON_MODULES.evaluate(classes).hasViolation()).isTrue();

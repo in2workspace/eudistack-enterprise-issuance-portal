@@ -9,7 +9,7 @@ import org.springframework.context.annotation.Import;
 class IssuancePortalApplicationTests {
 
     @Test
-    void contextLoads() {
+    void applicationContext_testConfiguration_loads() {
         // Fails if any bean, port binding or configuration-properties record is misconfigured.
     }
 }

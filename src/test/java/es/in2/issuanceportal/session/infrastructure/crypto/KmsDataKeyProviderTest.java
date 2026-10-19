@@ -48,7 +48,7 @@ class KmsDataKeyProviderTest {
     }
 
     @Test
-    void reusesTheDataKeyUntilTheRotationPeriodEnds() {
+    void currentKey_withinRotationPeriod_reusesDataKey() {
         DataKey first = provider.currentKey();
         clock.advance(ROTATION.minusSeconds(1));
 
@@ -57,7 +57,7 @@ class KmsDataKeyProviderTest {
     }
 
     @Test
-    void generatesANewDataKeyAfterTheRotationPeriod() {
+    void currentKey_afterRotationPeriod_generatesNewDataKey() {
         DataKey first = provider.currentKey();
         clock.advance(ROTATION);
 
@@ -65,7 +65,7 @@ class KmsDataKeyProviderTest {
     }
 
     @Test
-    void aValueWrittenByThisInstanceIsDecryptedWithoutCallingKms() {
+    void unwrap_keyGeneratedHere_doesNotCallKms() {
         EnvelopeCipher cipher = new EnvelopeCipher(provider);
 
         byte[] sealed = cipher.encrypt("ana@example.org".getBytes(StandardCharsets.UTF_8), CONTEXT);
@@ -75,7 +75,7 @@ class KmsDataKeyProviderTest {
     }
 
     @Test
-    void aValueWrittenByAnotherInstanceIsUnwrappedThroughKmsOnce() {
+    void unwrap_keyFromAnotherInstance_callsKmsOnce() {
         byte[] sealed = new EnvelopeCipher(provider).encrypt("ana@example.org".getBytes(StandardCharsets.UTF_8), CONTEXT);
         KmsDataKeyProvider otherInstance = new KmsDataKeyProvider(kms, "alias/issuance-portal", ROTATION, clock);
         byte[] key = new byte[32];
@@ -91,7 +91,7 @@ class KmsDataKeyProviderTest {
     }
 
     @Test
-    void aKmsFailureIsServiceUnavailable() {
+    void currentKey_kmsFails_throwsServiceUnavailable() {
         when(kms.generateDataKey(any(Consumer.class))).thenThrow(KmsException.builder().message("throttled").build());
 
         assertThatThrownBy(provider::currentKey)
@@ -101,7 +101,7 @@ class KmsDataKeyProviderTest {
     }
 
     @Test
-    void aKeyIdIsRequired() {
+    void constructor_blankKeyId_throws() {
         assertThatThrownBy(() -> new KmsDataKeyProvider(kms, " ", ROTATION, clock))
                 .isInstanceOf(IllegalArgumentException.class);
     }

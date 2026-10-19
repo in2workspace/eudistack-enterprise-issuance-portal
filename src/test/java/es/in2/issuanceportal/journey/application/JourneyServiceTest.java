@@ -40,7 +40,7 @@ class JourneyServiceTest {
             new JourneyService(journeys, sessions, trail, TransactionOperations.withoutTransaction(), clock);
 
     @Test
-    void startCreatesAJourneyInProgressWithItsSession() {
+    void start_noPreviousSession_createsJourneyInProgressWithSession() {
         JourneyService.Started started = service.start(SANDBOX, Optional.empty());
 
         assertThat(started.journey().state()).isEqualTo(JourneyState.IN_PROGRESS);
@@ -49,7 +49,7 @@ class JourneyServiceTest {
     }
 
     @Test
-    void startingAgainWithdrawsThePreviousJourneyOfTheBrowser() {
+    void start_previousJourneyInProgress_withdrawsItAsCancelled() {
         JourneyService.Started previous = service.start(SANDBOX, Optional.empty());
 
         JourneyService.Started next = service.start(SANDBOX, Optional.of(previous.session()));
@@ -62,7 +62,7 @@ class JourneyServiceTest {
     }
 
     @Test
-    void cancellingAtTheDataStepWithdrawsWithThatStepAndDeletesThePersonalData() {
+    void cancel_atDataStep_withdrawsWithStepAndDeletesPersonalData() {
         JourneyService.Started started = service.start(SANDBOX, Optional.empty());
         sessions.write(SANDBOX, started.session(), Section.IDENTITY, "{\"givenName\":\"Ana\"}");
         service.reach(SANDBOX, started.session(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
@@ -77,7 +77,7 @@ class JourneyServiceTest {
     }
 
     @Test
-    void cancellingACompletedJourneyOnlyClosesItsSession() {
+    void cancel_completedJourney_onlyClosesSession() {
         JourneyService.Started started = service.start(SANDBOX, Optional.empty());
         complete(started);
 
@@ -90,7 +90,7 @@ class JourneyServiceTest {
     }
 
     @Test
-    void anotherModuleWithdrawsAsNotEntitledKeepingTheStep() {
+    void withdraw_notEntitled_withdrawsKeepingStep() {
         JourneyService.Started started = service.start(SANDBOX, Optional.empty());
         service.reach(SANDBOX, started.session(), JourneyProgress.Step.IDENTIFIED);
 
@@ -104,7 +104,7 @@ class JourneyServiceTest {
     }
 
     @Test
-    void aStaleSessionIsClosedOnTheSpotEvenBeforeTheExpiryJob() {
+    void current_inactiveForFifteenMinutes_withdrawsAsExpiredAndThrowsJourneyClosed() {
         JourneyService.Started started = service.start(SANDBOX, Optional.empty());
         clock.advance(Duration.ofMinutes(16));
 
@@ -117,7 +117,7 @@ class JourneyServiceTest {
     }
 
     @Test
-    void activityPushesBackTheExpiry() {
+    void current_activityWithinLimit_pushesBackExpiry() {
         JourneyService.Started started = service.start(SANDBOX, Optional.empty());
         clock.advance(Duration.ofMinutes(14));
         service.current(SANDBOX, started.session());
@@ -127,7 +127,7 @@ class JourneyServiceTest {
     }
 
     @Test
-    void aClosedOrUnknownSessionIsAClosedJourney() {
+    void current_closedOrUnknownSession_throwsJourneyClosed() {
         JourneyService.Started started = service.start(SANDBOX, Optional.empty());
         service.cancel(SANDBOX, started.session());
 
@@ -137,7 +137,7 @@ class JourneyServiceTest {
     }
 
     @Test
-    void aCompletedJourneyCannotBeWithdrawnByAnotherModule() {
+    void withdraw_completedJourney_throwsJourneyClosed() {
         JourneyService.Started started = service.start(SANDBOX, Optional.empty());
         complete(started);
 
@@ -145,7 +145,7 @@ class JourneyServiceTest {
     }
 
     @Test
-    void theExpirySweepWithdrawsInactiveJourneysInProgressAndKeepsThem() {
+    void expireInactive_inactiveJourneyInProgress_withdrawsAsExpiredAndKeepsIt() {
         JourneyService.Started inactive = service.start(SANDBOX, Optional.empty());
         service.reach(SANDBOX, inactive.session(), JourneyProgress.Step.IDENTIFIED);
         clock.advance(Duration.ofMinutes(10));
@@ -164,7 +164,7 @@ class JourneyServiceTest {
     }
 
     @Test
-    void theExpirySweepOnlyClosesTheSessionOfAnInactiveCompletedJourney() {
+    void expireInactive_inactiveCompletedJourney_onlyClosesSession() {
         JourneyService.Started started = service.start(SANDBOX, Optional.empty());
         complete(started);
         clock.advance(Duration.ofMinutes(15));
@@ -176,7 +176,7 @@ class JourneyServiceTest {
     }
 
     @Test
-    void aSecondSweepFindsNothingLeft() {
+    void expireInactive_secondSweep_closesNothing() {
         service.start(SANDBOX, Optional.empty());
         clock.advance(Duration.ofMinutes(15));
         service.expireInactive(SANDBOX);
@@ -185,7 +185,7 @@ class JourneyServiceTest {
     }
 
     @Test
-    void everyStateChangeLeavesATraceWithTheStepReached() {
+    void stateChanges_fullJourney_recordEventWithStepReached() {
         JourneyService.Started started = service.start(SANDBOX, Optional.empty());
         service.reach(SANDBOX, started.session(), JourneyProgress.Step.IDENTIFIED);
         service.reach(SANDBOX, started.session(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
@@ -203,7 +203,7 @@ class JourneyServiceTest {
     }
 
     @Test
-    void readingOrReachingAPassedStepLeavesNoTrace() {
+    void currentAndReach_noStateChange_recordNoEvent() {
         JourneyService.Started started = service.start(SANDBOX, Optional.empty());
         service.reach(SANDBOX, started.session(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
         int before = trail.events().size();
@@ -215,7 +215,7 @@ class JourneyServiceTest {
     }
 
     @Test
-    void expiryLeavesAWithdrawnTraceWithTheExpiredReason() {
+    void expireInactive_inactiveJourney_recordsWithdrawnEventWithExpiredReason() {
         service.start(SANDBOX, Optional.empty());
         clock.advance(Duration.ofMinutes(15));
 
@@ -226,7 +226,7 @@ class JourneyServiceTest {
     }
 
     @Test
-    void anUnavailableTrailDoesNotChangeTheOutcome() {
+    void startAndCancel_auditTrailUnavailable_completeNormally() {
         trail.failFromNowOn();
 
         JourneyService.Started started = service.start(SANDBOX, Optional.empty());
@@ -237,7 +237,7 @@ class JourneyServiceTest {
     }
 
     @Test
-    void aJourneyThatCannotBeExpiredDoesNotStopTheOthers() {
+    void expireInactive_oneJourneyFails_expiresTheOthers() {
         UUID[] poisoned = new UUID[1];
         InMemoryJourneyRepository failingOnOne = new InMemoryJourneyRepository() {
             @Override
@@ -263,7 +263,7 @@ class JourneyServiceTest {
     }
 
     @Test
-    void startingAgainStillWorksWhenAParallelRequestClosedThePreviousJourneyFirst() {
+    void start_previousJourneyClosedByParallelRequest_startsNewJourney() {
         boolean[] parallelWins = {false};
         InMemoryJourneyRepository racing = new InMemoryJourneyRepository() {
             @Override

@@ -37,7 +37,7 @@ class ObservabilityIT {
     private ObjectMapper json;
 
     @Test
-    void anErrorLogLineIsJsonWithTheFieldsOfTheLogContract() throws Exception {
+    void jsonEncoder_errorEvent_writesLogContractFields() throws Exception {
         LoggerContext context = (LoggerContext) LoggerFactory.getILoggerFactory();
         @SuppressWarnings("unchecked")
         OutputStreamAppender<ILoggingEvent> appender = (OutputStreamAppender<ILoggingEvent>)
@@ -69,7 +69,7 @@ class ObservabilityIT {
     }
 
     @Test
-    void requestMetricsCarryTheTenant() throws Exception {
+    void httpServerRequests_apiRequest_carryTenantTag() throws Exception {
         mvc.perform(post("/issuance-portal/api/v1/journey")
                 .contextPath("/issuance-portal")
                 .header("X-Requested-With", "issuance-portal")

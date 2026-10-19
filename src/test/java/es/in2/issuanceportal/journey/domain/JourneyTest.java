@@ -17,7 +17,7 @@ class JourneyTest {
     private static final Instant T0 = Instant.parse("2026-10-19T10:00:00Z");
 
     @Test
-    void startsInProgressAtTheFirstStepWithoutEnd() {
+    void start_newJourney_isInProgressAtFirstStepWithoutEnd() {
         Journey journey = Journey.start(UUID.randomUUID(), T0);
 
         assertThat(journey.state()).isEqualTo(JourneyState.IN_PROGRESS);
@@ -29,7 +29,7 @@ class JourneyTest {
     }
 
     @Test
-    void withdrawingKeepsTheStepReachedAndRecordsReasonAndEnd() {
+    void withdraw_inProgress_keepsStepAndRecordsReasonAndEnd() {
         Journey journey = Journey.start(UUID.randomUUID(), T0);
         journey.reach(JourneyStep.ENTITLEMENT_CONFIRMED, T0.plusSeconds(60));
 
@@ -42,7 +42,7 @@ class JourneyTest {
     }
 
     @Test
-    void stepsOnlyMoveForward() {
+    void reach_earlierStep_keepsLaterStep() {
         Journey journey = Journey.start(UUID.randomUUID(), T0);
         journey.reach(JourneyStep.ENTITLEMENT_CONFIRMED, T0);
 
@@ -53,7 +53,7 @@ class JourneyTest {
     }
 
     @Test
-    void completingReachesTheOfferAndEndsTheJourney() {
+    void complete_inProgress_reachesOfferAndEnds() {
         Journey journey = Journey.start(UUID.randomUUID(), T0);
 
         journey.complete(T0.plusSeconds(120));
@@ -65,7 +65,7 @@ class JourneyTest {
     }
 
     @Test
-    void isInactiveAfterFifteenMinutesWithoutActivity() {
+    void isInactive_fifteenMinutesWithoutActivity_returnsTrue() {
         Journey journey = Journey.start(UUID.randomUUID(), T0);
 
         assertThat(journey.isInactive(T0.plus(Duration.ofMinutes(15)).minusMillis(1))).isFalse();
@@ -73,7 +73,7 @@ class JourneyTest {
     }
 
     @Test
-    void activityPushesBackTheExpiry() {
+    void touch_beforeLimit_pushesBackExpiry() {
         Journey journey = Journey.start(UUID.randomUUID(), T0);
 
         journey.touch(T0.plus(Duration.ofMinutes(14)));
@@ -83,7 +83,7 @@ class JourneyTest {
     }
 
     @Test
-    void aCompletedJourneyKeepsCountingActivityForItsSession() {
+    void touch_completedJourney_keepsCountingActivity() {
         Journey journey = Journey.start(UUID.randomUUID(), T0);
         journey.complete(T0);
 
@@ -94,7 +94,7 @@ class JourneyTest {
     }
 
     @Test
-    void aWithdrawnJourneyIsNeverInactive() {
+    void isInactive_withdrawnJourney_returnsFalse() {
         Journey journey = Journey.start(UUID.randomUUID(), T0);
         journey.withdraw(WithdrawalReason.CANCELLED, T0);
 
@@ -102,7 +102,7 @@ class JourneyTest {
     }
 
     @Test
-    void aWithdrawnJourneyCannotChangeAnymore() {
+    void transitions_withdrawnJourney_throwJourneyClosed() {
         Journey journey = Journey.start(UUID.randomUUID(), T0);
         journey.withdraw(WithdrawalReason.EXPIRED, T0);
 
@@ -113,7 +113,7 @@ class JourneyTest {
     }
 
     @Test
-    void aCompletedJourneyCannotBeWithdrawn() {
+    void withdraw_completedJourney_throwsJourneyClosed() {
         Journey journey = Journey.start(UUID.randomUUID(), T0);
         journey.complete(T0);
 
@@ -121,7 +121,7 @@ class JourneyTest {
     }
 
     @Test
-    void codesMatchTheContract() {
+    void fromCode_contractCodes_returnMatchingValues() {
         assertThat(JourneyState.fromCode("in_progress")).isEqualTo(JourneyState.IN_PROGRESS);
         assertThat(JourneyStep.fromCode("entitlement_confirmed")).isEqualTo(JourneyStep.ENTITLEMENT_CONFIRMED);
         assertThat(WithdrawalReason.fromCode("not_entitled")).isEqualTo(WithdrawalReason.NOT_ENTITLED);

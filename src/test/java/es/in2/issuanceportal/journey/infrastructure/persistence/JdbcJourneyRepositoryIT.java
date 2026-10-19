@@ -29,7 +29,7 @@ class JdbcJourneyRepositoryIT {
     private JourneyRepository repository;
 
     @Test
-    void readsBackAStartedJourney() {
+    void findById_insertedJourney_returnsIt() {
         Journey journey = Journey.start(UUID.randomUUID(), now());
 
         repository.insert(SANDBOX, journey);
@@ -42,7 +42,7 @@ class JdbcJourneyRepositoryIT {
     }
 
     @Test
-    void savesAWithdrawal() {
+    void update_withdrawnJourney_savesStateStepReasonAndEnd() {
         Journey journey = Journey.start(UUID.randomUUID(), now());
         repository.insert(SANDBOX, journey);
         journey.reach(JourneyStep.ENTITLEMENT_CONFIRMED, now());
@@ -58,7 +58,7 @@ class JdbcJourneyRepositoryIT {
     }
 
     @Test
-    void anUpdateLosesAgainstWhoeverChangedTheJourneyFirst() {
+    void update_journeyChangedSinceRead_returnsFalseAndKeepsFirstChange() {
         Journey journey = Journey.start(UUID.randomUUID(), now());
         repository.insert(SANDBOX, journey);
         Journey parallelCopy = repository.findById(SANDBOX, journey.id()).orElseThrow();
@@ -73,7 +73,7 @@ class JdbcJourneyRepositoryIT {
     }
 
     @Test
-    void aJourneyOfOneTenantDoesNotExistForAnother() {
+    void findById_journeyOfAnotherTenant_returnsEmpty() {
         Journey journey = Journey.start(UUID.randomUUID(), now());
         repository.insert(KPMG, journey);
 

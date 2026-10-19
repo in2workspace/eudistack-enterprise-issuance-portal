@@ -25,7 +25,7 @@ abstract class JourneySessionsContract {
     abstract UUID newJourney(TenantId tenant);
 
     @Test
-    void anOpenedSessionBelongsToItsJourney() {
+    void open_newSession_belongsToItsJourney() {
         SessionId session = SessionId.generate();
         UUID journey = newJourney(SANDBOX);
 
@@ -35,7 +35,7 @@ abstract class JourneySessionsContract {
     }
 
     @Test
-    void readsBackWhatWasWrittenInEachSection() {
+    void read_writtenSections_returnsContent() {
         SessionId session = openSession(SANDBOX);
 
         sessions().write(SANDBOX, session, Section.IDENTITY, "{\"givenName\":\"Ana\"}");
@@ -47,7 +47,7 @@ abstract class JourneySessionsContract {
     }
 
     @Test
-    void aSecondWriteReplacesTheSection() {
+    void write_sameSectionTwice_replacesContent() {
         SessionId session = openSession(SANDBOX);
 
         sessions().write(SANDBOX, session, Section.ISSUANCE, "{\"v\":1}");
@@ -57,7 +57,7 @@ abstract class JourneySessionsContract {
     }
 
     @Test
-    void closingDeletesTheSessionAndIsIdempotent() {
+    void close_openSession_deletesItIdempotently() {
         SessionId session = SessionId.generate();
         UUID journey = newJourney(SANDBOX);
         sessions().open(SANDBOX, session, journey);
@@ -71,7 +71,7 @@ abstract class JourneySessionsContract {
     }
 
     @Test
-    void anUnknownSessionIsAClosedJourney() {
+    void operations_unknownSession_throwJourneyClosed() {
         SessionId unknown = SessionId.generate();
 
         assertThat(sessions().journeyOf(SANDBOX, unknown)).isEmpty();
@@ -81,7 +81,7 @@ abstract class JourneySessionsContract {
     }
 
     @Test
-    void rotatingKeepsTheContentAndRetiresTheOldIdentifier() {
+    void rotate_openSession_keepsContentAndRetiresOldId() {
         SessionId session = openSession(SANDBOX);
         sessions().write(SANDBOX, session, Section.IDENTITY, "{\"givenName\":\"Ana\"}");
 
@@ -93,7 +93,7 @@ abstract class JourneySessionsContract {
     }
 
     @Test
-    void listsTheJourneysThatStillHaveASession() {
+    void openJourneys_mixedSessions_listsOnlyOpenOfTenant() {
         SessionId open = SessionId.generate();
         UUID openJourney = newJourney(SANDBOX);
         sessions().open(SANDBOX, open, openJourney);
@@ -108,7 +108,7 @@ abstract class JourneySessionsContract {
     }
 
     @Test
-    void aSessionOfOneTenantDoesNotExistForAnother() {
+    void journeyOf_sessionOfAnotherTenant_returnsEmpty() {
         SessionId session = openSession(KPMG);
 
         assertThat(sessions().journeyOf(SANDBOX, session)).isEmpty();

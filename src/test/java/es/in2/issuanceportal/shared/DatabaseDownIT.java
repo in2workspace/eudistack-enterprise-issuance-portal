@@ -1,6 +1,7 @@
 package es.in2.issuanceportal.shared;
 
 import jakarta.servlet.http.Cookie;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -51,7 +52,8 @@ class DatabaseDownIT {
     private MockMvc mvc;
 
     @Test
-    void es04EveryPathAnswersServiceUnavailableWithTheDatabaseDown() throws Exception {
+    @DisplayName("ES-04 — api_databaseDown_returns503ServiceUnavailable")
+    void api_databaseDown_returns503ServiceUnavailable() throws Exception {
         // sandbox is now in the tenant cache, kpmg is not.
         MvcResult started = mvc.perform(post("sandbox")).andExpect(status().isCreated()).andReturn();
         Cookie session = started.getResponse().getCookie("journey_session");

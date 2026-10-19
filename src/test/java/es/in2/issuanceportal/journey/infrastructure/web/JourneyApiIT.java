@@ -8,6 +8,7 @@ import es.in2.issuanceportal.session.api.Section;
 import es.in2.issuanceportal.session.api.SessionId;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import jakarta.servlet.http.Cookie;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -49,7 +50,8 @@ class JourneyApiIT {
     private JourneyWithdrawal withdrawal;
 
     @Test
-    void ac01StartingCreatesAJourneyInProgressWithItsSessionAndCookie() throws Exception {
+    @DisplayName("AC-01 — postJourney_noCookie_createsJourneyWithSessionAndCookie")
+    void postJourney_noCookie_createsJourneyWithSessionAndCookie() throws Exception {
         MvcResult result = mvc.perform(post(JOURNEY, SANDBOX_HOST))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.state").value("in_progress"))
@@ -69,7 +71,8 @@ class JourneyApiIT {
     }
 
     @Test
-    void ac02ReadingTheJourneyInProgress() throws Exception {
+    @DisplayName("AC-02 — getJourney_journeyInProgress_returnsStateAndStep")
+    void getJourney_journeyInProgress_returnsStateAndStep() throws Exception {
         SessionId session = start();
 
         mvc.perform(withSession(get(JOURNEY, SANDBOX_HOST), session))
@@ -79,7 +82,8 @@ class JourneyApiIT {
     }
 
     @Test
-    void ac03CancellingAtTheDataStepWithdrawsWithThatStepAndDeletesThePersonalData() throws Exception {
+    @DisplayName("AC-03 — postWithdrawal_atDataStep_withdrawsWithStepAndDeletesPersonalData")
+    void postWithdrawal_atDataStep_withdrawsWithStepAndDeletesPersonalData() throws Exception {
         SessionId session = start();
         UUID journeyId = sessions.journeyOf(SANDBOX, session).orElseThrow();
         sessions.write(SANDBOX, session, Section.IDENTITY, "{\"givenName\":\"Ana\"}");
@@ -99,7 +103,8 @@ class JourneyApiIT {
     }
 
     @Test
-    void ac06AnotherModuleWithdrawsAsNotEntitled() throws Exception {
+    @DisplayName("AC-06 — withdrawalPort_notEntitled_withdrawsKeepingStep")
+    void withdrawalPort_notEntitled_withdrawsKeepingStep() throws Exception {
         SessionId session = start();
         UUID journeyId = sessions.journeyOf(SANDBOX, session).orElseThrow();
         progress.reach(SANDBOX, session, JourneyProgress.Step.IDENTIFIED);
@@ -114,7 +119,8 @@ class JourneyApiIT {
     }
 
     @Test
-    void ec01StartingAgainWithdrawsThePreviousJourneyOfTheBrowser() throws Exception {
+    @DisplayName("EC-01 — postJourney_previousJourneyInBrowser_withdrawsItAsCancelled")
+    void postJourney_previousJourneyInBrowser_withdrawsItAsCancelled() throws Exception {
         SessionId previous = start();
         UUID previousJourney = sessions.journeyOf(SANDBOX, previous).orElseThrow();
 
@@ -130,7 +136,8 @@ class JourneyApiIT {
     }
 
     @Test
-    void ec02CancellingACompletedJourneyOnlyClosesItsSession() throws Exception {
+    @DisplayName("EC-02 — postWithdrawal_completedJourney_onlyClosesSession")
+    void postWithdrawal_completedJourney_onlyClosesSession() throws Exception {
         SessionId session = start();
         UUID journeyId = sessions.journeyOf(SANDBOX, session).orElseThrow();
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET state = 'completed', step = 'offer_obtained', "
@@ -146,7 +153,8 @@ class JourneyApiIT {
     }
 
     @Test
-    void ec03AStaleSessionIsClosedBeforeTheExpiryJobRuns() throws Exception {
+    @DisplayName("EC-03 — getJourney_staleSessionBeforeExpiryJob_returns410AndWithdrawsAsExpired")
+    void getJourney_staleSessionBeforeExpiryJob_returns410AndWithdrawsAsExpired() throws Exception {
         SessionId session = start();
         UUID journeyId = sessions.journeyOf(SANDBOX, session).orElseThrow();
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET last_activity = now() - interval '16 minutes' "
@@ -163,7 +171,8 @@ class JourneyApiIT {
     }
 
     @Test
-    void ec06ACookieOfAnotherTenantIsAClosedJourney() throws Exception {
+    @DisplayName("EC-06 — getJourney_cookieOfAnotherTenant_returns410")
+    void getJourney_cookieOfAnotherTenant_returns410() throws Exception {
         MvcResult kpmg = mvc.perform(post(JOURNEY, "kpmg.127.0.0.1.nip.io")).andReturn();
         SessionId session = sessionOf(kpmg);
 
@@ -174,7 +183,8 @@ class JourneyApiIT {
     }
 
     @Test
-    void es01AWithdrawnJourneyIsClosed() throws Exception {
+    @DisplayName("ES-01 — getAndWithdraw_withdrawnJourney_return410")
+    void getAndWithdraw_withdrawnJourney_return410() throws Exception {
         SessionId session = start();
         mvc.perform(withSession(post(JOURNEY + "/withdrawal", SANDBOX_HOST), session)).andExpect(status().isOk());
 
@@ -186,7 +196,8 @@ class JourneyApiIT {
     }
 
     @Test
-    void es02NoCookieOrAnUnknownOneIsAClosedJourney() throws Exception {
+    @DisplayName("ES-02 — getAndWithdraw_noOrUnknownCookie_return410")
+    void getAndWithdraw_noOrUnknownCookie_return410() throws Exception {
         mvc.perform(get(JOURNEY, SANDBOX_HOST)).andExpect(status().isGone());
         mvc.perform(withSession(get(JOURNEY, SANDBOX_HOST), SessionId.generate())).andExpect(status().isGone());
         mvc.perform(post(JOURNEY + "/withdrawal", SANDBOX_HOST)
@@ -195,7 +206,8 @@ class JourneyApiIT {
     }
 
     @Test
-    void es03AStateChangeWithoutTheHeaderIsRejectedAndChangesNothing() throws Exception {
+    @DisplayName("ES-03 — postJourney_withoutRequestedWithHeader_returns403AndChangesNothing")
+    void postJourney_withoutRequestedWithHeader_returns403AndChangesNothing() throws Exception {
         long before = journeyCount();
 
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post(JOURNEY)
@@ -207,7 +219,8 @@ class JourneyApiIT {
     }
 
     @Test
-    void es03AnEncodedPathCannotSkipTheHeaderCheck() throws Exception {
+    @DisplayName("ES-03 — postJourney_encodedPathWithoutHeader_returns403")
+    void postJourney_encodedPathWithoutHeader_returns403() throws Exception {
         long before = journeyCount();
 
         mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
@@ -224,7 +237,7 @@ class JourneyApiIT {
     }
 
     @Test
-    void anUnknownTenantIsNotFound() throws Exception {
+    void postJourney_unknownTenant_returns404() throws Exception {
         mvc.perform(post(JOURNEY, "altia.127.0.0.1.nip.io"))
                 .andExpect(status().isNotFound())
                 .andExpect(jsonPath("$.type").value("tenant_not_found"));

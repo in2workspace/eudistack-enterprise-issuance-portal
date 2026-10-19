@@ -42,7 +42,7 @@ class JdbcJourneySessionsIT extends JourneySessionsContract {
     }
 
     @Test
-    void theDatabaseHoldsNeitherTheIdentifierNorThePersonalDataInClear() {
+    void write_personalData_storesNeitherIdentifierNorDataInClear() {
         SessionId session = SessionId.generate();
         UUID journey = newJourney(SANDBOX);
         sessions.open(SANDBOX, session, journey);
@@ -58,7 +58,7 @@ class JdbcJourneySessionsIT extends JourneySessionsContract {
     }
 
     @Test
-    void aValueCopiedToAnotherJourneyCannotBeRead() {
+    void read_valueCopiedFromAnotherJourney_throws() {
         SessionId victim = SessionId.generate();
         UUID victimJourney = newJourney(SANDBOX);
         sessions.open(SANDBOX, victim, victimJourney);

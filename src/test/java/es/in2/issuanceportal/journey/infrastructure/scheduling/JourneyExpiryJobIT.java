@@ -5,6 +5,8 @@ import es.in2.issuanceportal.journey.application.JourneyService;
 import es.in2.issuanceportal.session.api.JourneySessions;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import es.in2.issuanceportal.shared.tenant.TenantRegistry;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -38,8 +40,15 @@ class JourneyExpiryJobIT {
     @Autowired
     private Clock clock;
 
+    /** Each sweep holds the tenant's lock for 30 s: free it so no test depends on the order they run in. */
+    @BeforeEach
+    void releaseLock() {
+        jdbc.sql("DELETE FROM \"kpmg_issuance_portal\".shedlock").update();
+    }
+
     @Test
-    void ac04AJourneyInactiveForFifteenMinutesIsWithdrawnAsExpiredAndKept() {
+    @DisplayName("AC-04 — sweep_journeyInactiveForFifteenMinutes_withdrawsAsExpiredAndKeepsIt")
+    void sweep_journeyInactiveForFifteenMinutes_withdrawsAsExpiredAndKeepsIt() {
         UUID journey = inactiveJourney();
 
         assertThat(job().sweep(KPMG)).isTrue();
@@ -51,11 +60,10 @@ class JourneyExpiryJobIT {
     }
 
     @Test
-    void ec05OnlyOneInstanceSweepsATenantAtATime() {
+    @DisplayName("EC-05 — sweep_lockHeldByAnotherInstance_skipsTenant")
+    void sweep_lockHeldByAnotherInstance_skipsTenant() {
         JourneyExpiryJob first = job();
         JourneyExpiryJob second = job();
-        // Free the lock left by any earlier sweep of this tenant in the suite.
-        jdbc.sql("DELETE FROM \"kpmg_issuance_portal\".shedlock").update();
         UUID journey = inactiveJourney();
 
         boolean firstSwept = first.sweep(KPMG);

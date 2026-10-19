@@ -16,7 +16,7 @@ class RequestedWithFilterTest {
     @ParameterizedTest
     @NullSource
     @ValueSource(strings = {"XMLHttpRequest", "", "Issuance-Portal"})
-    void aStateChangingRequestWithoutTheExpectedHeaderIsRejected(String header) throws Exception {
+    void doFilter_stateChangeWithoutExpectedHeader_returns403(String header) throws Exception {
         MockHttpServletRequest request = request("POST", "/issuance-portal/api/v1/journey");
         if (header != null) {
             request.addHeader(RequestedWithFilter.HEADER, header);
@@ -34,7 +34,7 @@ class RequestedWithFilterTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"POST", "PUT", "PATCH", "DELETE"})
-    void aStateChangingRequestWithTheHeaderGoesThrough(String method) throws Exception {
+    void doFilter_stateChangeWithHeader_passesThrough(String method) throws Exception {
         MockHttpServletRequest request = request(method, "/issuance-portal/api/v1/journey");
         request.addHeader(RequestedWithFilter.HEADER, RequestedWithFilter.EXPECTED);
         MockFilterChain chain = new MockFilterChain();
@@ -46,7 +46,7 @@ class RequestedWithFilterTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"GET", "HEAD", "OPTIONS"})
-    void aReadDoesNotNeedTheHeader(String method) throws Exception {
+    void doFilter_readWithoutHeader_passesThrough(String method) throws Exception {
         MockFilterChain chain = new MockFilterChain();
 
         filter.doFilter(request(method, "/issuance-portal/api/v1/journey"), new MockHttpServletResponse(), chain);
@@ -59,7 +59,7 @@ class RequestedWithFilterTest {
             "/issuance-portal/api/v1/journey;jsessionid=1", "/issuance-portal/new-endpoint",
             "/issuance-portal/actuator/../api/v1/journey", "/issuance-portal/actuator/%2e%2e/api/v1/journey",
             "/issuance-portal/actuator/./health"})
-    void encodedPathsAndNewEndpointsAreProtectedToo(String path) throws Exception {
+    void doFilter_encodedPathOrNewEndpoint_returns403(String path) throws Exception {
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
@@ -71,7 +71,7 @@ class RequestedWithFilterTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"/issuance-portal/actuator/health", "/issuance-portal/actuator"})
-    void requestsOutsideTheApiAreLeftAlone(String path) throws Exception {
+    void doFilter_actuatorPath_passesThrough(String path) throws Exception {
         MockFilterChain chain = new MockFilterChain();
 
         filter.doFilter(request("POST", path), new MockHttpServletResponse(), chain);

@@ -16,18 +16,18 @@ class JdbcTenantRegistryIT {
     private TenantRegistry registry;
 
     @Test
-    void anActiveTenantIsActive() {
+    void isActive_activeTenant_returnsTrue() {
         assertThat(registry.isActive(new TenantId("sandbox"))).isTrue();
     }
 
     @Test
-    void anInactiveOrUnknownTenantIsNotActive() {
+    void isActive_inactiveOrUnknownTenant_returnsFalse() {
         assertThat(registry.isActive(new TenantId("retired"))).isFalse();
         assertThat(registry.isActive(new TenantId("altia"))).isFalse();
     }
 
     @Test
-    void listsOnlyTheActiveTenants() {
+    void activeTenants_mixedRegistry_listsOnlyActive() {
         assertThat(registry.activeTenants()).containsExactly(new TenantId("kpmg"), new TenantId("sandbox"));
     }
 }

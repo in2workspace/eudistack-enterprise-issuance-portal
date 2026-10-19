@@ -17,24 +17,24 @@ class EnvelopeCipherTest {
     private final EnvelopeCipher cipher = new EnvelopeCipher(new LocalDataKeyProvider(randomKey()));
 
     @Test
-    void decryptsWhatItEncrypted() {
+    void decrypt_sealedValue_returnsPlaintext() {
         assertThat(cipher.decrypt(cipher.encrypt(PLAINTEXT, CONTEXT), CONTEXT)).isEqualTo(PLAINTEXT);
     }
 
     @Test
-    void theSealedValueDoesNotContainThePlaintext() {
+    void encrypt_personalData_doesNotContainPlaintext() {
         String sealed = new String(cipher.encrypt(PLAINTEXT, CONTEXT), StandardCharsets.ISO_8859_1);
 
         assertThat(sealed).doesNotContain("12345678Z").doesNotContain("Ana");
     }
 
     @Test
-    void encryptingTheSameValueTwiceGivesDifferentResults() {
+    void encrypt_sameValueTwice_givesDifferentResults() {
         assertThat(cipher.encrypt(PLAINTEXT, CONTEXT)).isNotEqualTo(cipher.encrypt(PLAINTEXT, CONTEXT));
     }
 
     @Test
-    void aTamperedValueIsRejected() {
+    void decrypt_tamperedValue_throws() {
         byte[] sealed = cipher.encrypt(PLAINTEXT, CONTEXT);
         sealed[sealed.length - 1] ^= 1;
 
@@ -42,7 +42,7 @@ class EnvelopeCipherTest {
     }
 
     @Test
-    void aValueMovedToAnotherJourneyOrColumnIsRejected() {
+    void decrypt_otherContext_throws() {
         byte[] sealed = cipher.encrypt(PLAINTEXT, CONTEXT);
 
         assertThatIllegalArgumentException().isThrownBy(() ->
@@ -52,19 +52,19 @@ class EnvelopeCipherTest {
     }
 
     @Test
-    void aValueEncryptedWithAnotherKeyIsRejected() {
+    void decrypt_otherKey_throws() {
         byte[] sealed = new EnvelopeCipher(new LocalDataKeyProvider(randomKey())).encrypt(PLAINTEXT, CONTEXT);
 
         assertThatIllegalArgumentException().isThrownBy(() -> cipher.decrypt(sealed, CONTEXT));
     }
 
     @Test
-    void aTruncatedValueIsRejected() {
+    void decrypt_truncatedValue_throws() {
         assertThatIllegalArgumentException().isThrownBy(() -> cipher.decrypt(new byte[]{1, 0}, CONTEXT));
     }
 
     @Test
-    void theLocalKeyMustBe32Bytes() {
+    void localDataKeyProvider_keyNot32Bytes_throws() {
         assertThatIllegalArgumentException().isThrownBy(() ->
                 new LocalDataKeyProvider(Base64.getEncoder().encodeToString(new byte[16])));
         assertThatIllegalArgumentException().isThrownBy(() -> new LocalDataKeyProvider(null));

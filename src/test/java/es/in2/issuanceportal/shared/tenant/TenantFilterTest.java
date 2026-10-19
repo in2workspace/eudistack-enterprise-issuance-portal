@@ -15,7 +15,7 @@ class TenantFilterTest {
     private final TenantFilter filter = new TenantFilter(new FixedRegistry(Set.of("sandbox", "cgcom")));
 
     @Test
-    void resolvesTheTenantFromTheFirstSegmentOfTheHost() throws Exception {
+    void doFilter_canonicalHost_resolvesTenantFromFirstSegment() throws Exception {
         MockHttpServletRequest request = apiRequest("sandbox.127.0.0.1.nip.io");
         MockFilterChain chain = new MockFilterChain();
 
@@ -26,7 +26,7 @@ class TenantFilterTest {
     }
 
     @Test
-    void prefersTheTenantHeaderNginxSendsForCustomDomains() throws Exception {
+    void doFilter_tenantHeader_prefersHeaderOverHost() throws Exception {
         MockHttpServletRequest request = apiRequest("portal.colegiomedico.es");
         request.addHeader(TenantFilter.TENANT_HEADER, "cgcom");
         MockFilterChain chain = new MockFilterChain();
@@ -38,7 +38,7 @@ class TenantFilterTest {
     }
 
     @Test
-    void rejectsAnUnknownTenantWithTenantNotFound() throws Exception {
+    void doFilter_unknownTenant_returns404TenantNotFound() throws Exception {
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
 
@@ -51,7 +51,7 @@ class TenantFilterTest {
     }
 
     @Test
-    void rejectsAHostWithoutATenantSegment() throws Exception {
+    void doFilter_hostWithoutTenantSegment_returns404() throws Exception {
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         filter.doFilter(apiRequest("localhost"), response, new MockFilterChain());
@@ -60,7 +60,7 @@ class TenantFilterTest {
     }
 
     @Test
-    void anEncodedApiPathStillNeedsATenant() throws Exception {
+    void doFilter_encodedApiPath_stillRequiresTenant() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/issuance-portal/%61pi/v1/journey");
         request.setContextPath("/issuance-portal");
         request.setServerName("unknown.eudistack.net");
@@ -72,7 +72,7 @@ class TenantFilterTest {
     }
 
     @Test
-    void leavesRequestsOutsideTheApiAlone() throws Exception {
+    void doFilter_actuatorPath_passesThrough() throws Exception {
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/issuance-portal/actuator/health");
         request.setContextPath("/issuance-portal");
         request.setServerName("localhost");

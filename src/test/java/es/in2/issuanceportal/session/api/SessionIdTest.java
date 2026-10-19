@@ -14,14 +14,14 @@ import static org.assertj.core.api.Assertions.assertThat;
 class SessionIdTest {
 
     @Test
-    void hasTwoHundredFiftySixRandomBits() {
+    void generate_always_hasTwoHundredFiftySixBits() {
         SessionId id = SessionId.generate();
 
         assertThat(Base64.getUrlDecoder().decode(id.value())).hasSize(32);
     }
 
     @Test
-    void neverRepeats() {
+    void generate_tenThousandTimes_neverRepeats() {
         Set<String> values = new HashSet<>();
         for (int i = 0; i < 10_000; i++) {
             values.add(SessionId.generate().value());
@@ -31,7 +31,7 @@ class SessionIdTest {
     }
 
     @Test
-    void parsesWhatItGenerated() {
+    void parse_generatedValue_returnsSameId() {
         SessionId id = SessionId.generate();
 
         assertThat(SessionId.parse(id.value())).contains(id);
@@ -41,19 +41,19 @@ class SessionIdTest {
     @NullAndEmptySource
     @ValueSource(strings = {"short", "with spaces in it and long enough to pass the length check..",
             "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=", "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA+"})
-    void rejectsAnythingThisServiceDidNotIssue(String raw) {
+    void parse_foreignValue_returnsEmpty(String raw) {
         assertThat(SessionId.parse(raw)).isEmpty();
     }
 
     @Test
-    void theHashIsSha256InHexAndDiffersFromTheValue() {
+    void hash_anyId_isSha256HexDifferentFromValue() {
         SessionId id = SessionId.generate();
 
         assertThat(id.hash()).hasSize(64).matches("[0-9a-f]{64}").isNotEqualTo(id.value());
     }
 
     @Test
-    void neverPrintsItsValue() {
+    void toString_anyId_doesNotRevealValue() {
         SessionId id = SessionId.generate();
 
         assertThat(id.toString()).doesNotContain(id.value());
