@@ -21,6 +21,9 @@ server:
     context-path: /issuance-portal
 
 issuance-portal:
+  # Filled in from build.gradle when the resources are processed.
+  version: "@version@"
+  env: ${PORTAL_ENV:local}
   crypto:
     # kms in AWS environments, local in Docker Compose. Empty: the service does not start.
     provider: ${PORTAL_CRYPTO_PROVIDER:}
@@ -37,6 +40,23 @@ management:
       probes:
         enabled: true
       show-details: when-authorized
+  # Trace and span ids are always created, so every log line and error carries them.
+  # Export is opt-in: in AWS the ADOT sidecar sends spans to X-Ray (conv-observability §4).
+  tracing:
+    sampling:
+      probability: ${OTEL_TRACES_SAMPLER_ARG:1.0}
+    propagation:
+      type: w3c
+  otlp:
+    tracing:
+      export:
+        enabled: ${OTEL_TRACES_EXPORT_ENABLED:false}
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+  metrics:
+    distribution:
+      # p95 of each journey step is an NFR (< 300 ms).
+      percentiles-histogram:
+        http.server.requests: true
 
 logging:
   level:

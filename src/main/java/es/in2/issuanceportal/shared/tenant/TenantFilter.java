@@ -28,7 +28,8 @@ public class TenantFilter extends OncePerRequestFilter {
 
     static final String TENANT_HEADER = "X-Tenant";
     static final String ATTRIBUTE = TenantFilter.class.getName() + ".tenant";
-    private static final String MDC_KEY = "tenant";
+    /** OTel semantic name, as conv-observability §2 expects it in every log line. */
+    private static final String MDC_KEY = "tenant.id";
     private static final String API_PATH = "/api/";
 
     private final TenantRegistry registry;

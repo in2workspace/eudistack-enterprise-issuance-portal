@@ -126,6 +126,14 @@ checkstyleTest {
 
 // --- Tasks ---
 
+// The version travels to the logs as service.version (conv-observability §2).
+tasks.named('processResources') {
+    inputs.property('version', version)
+    filesMatching('application.yaml') {
+        filter(org.apache.tools.ant.filters.ReplaceTokens, tokens: [version: version.toString()])
+    }
+}
+
 // Spring Boot builds both the executable jar and a "-plain" one. The image copies
 // build/libs/*.jar, so the plain jar would make that COPY ambiguous.
 tasks.named('jar') {
