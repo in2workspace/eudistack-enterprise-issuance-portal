@@ -10,7 +10,9 @@ import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Component;
+import org.springframework.transaction.TransactionException;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -46,7 +48,15 @@ public class TenantFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        Optional<TenantId> tenant = resolve(request).filter(registry::isActive);
+        Optional<TenantId> tenant;
+        try {
+            tenant = resolve(request).filter(registry::isActive);
+        } catch (DataAccessException | TransactionException e) {
+            // Outside Spring MVC: the exception handler never sees what fails here.
+            log.error("Tenant registry unavailable", e);
+            Problems.write(response, ProblemCode.SERVICE_UNAVAILABLE);
+            return;
+        }
         if (tenant.isEmpty()) {
             log.warn("Rejected request for an unknown or inactive tenant");
             Problems.write(response, ProblemCode.TENANT_NOT_FOUND);

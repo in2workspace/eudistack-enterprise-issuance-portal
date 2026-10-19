@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.CannotGetJdbcConnectionException;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -37,6 +38,13 @@ class ProblemExceptionHandlerTest {
     }
 
     @Test
+    void aTransactionThatCannotOpenIsServiceUnavailable() throws Exception {
+        mvc.perform(get("/transaction-cannot-open"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.type").value("service_unavailable"));
+    }
+
+    @Test
     void anUnexpectedErrorIsA500WithoutInternalDetail() throws Exception {
         mvc.perform(get("/bug"))
                 .andExpect(status().isInternalServerError())
@@ -55,6 +63,11 @@ class ProblemExceptionHandlerTest {
         @GetMapping("/database-down")
         void databaseDown() {
             throw new CannotGetJdbcConnectionException("connection refused");
+        }
+
+        @GetMapping("/transaction-cannot-open")
+        void transactionCannotOpen() {
+            throw new CannotCreateTransactionException("Could not open JDBC Connection for transaction");
         }
 
         @GetMapping("/bug")
