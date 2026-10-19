@@ -21,7 +21,17 @@ import static net.logstash.logback.argument.StructuredArguments.kv;
 @Component
 class LogJourneyAuditTrail implements JourneyAuditTrail {
 
-    private static final Logger AUDIT = LoggerFactory.getLogger("audit.journey");
+    private static final Logger FAILURES = LoggerFactory.getLogger(LogJourneyAuditTrail.class);
+
+    private final Logger audit;
+
+    LogJourneyAuditTrail() {
+        this(LoggerFactory.getLogger("audit.journey"));
+    }
+
+    LogJourneyAuditTrail(Logger audit) {
+        this.audit = audit;
+    }
 
     @Override
     public void record(TenantId tenant, Event event) {
@@ -37,15 +47,24 @@ class LogJourneyAuditTrail implements JourneyAuditTrail {
         }
     }
 
-    private static void write(TenantId tenant, Event event) {
-        AUDIT.info("journey {} {}",
-                kv("event", event.kind().name()),
-                kv("journey_id", event.journeyId()),
-                kv("event_id", event.eventId()),
-                kv("tenant", tenant.value()),
-                kv("state", event.state().code()),
-                kv("step", event.step().code()),
-                kv("withdrawal_reason", event.withdrawalReason().map(WithdrawalReason::code).orElse(null)),
-                kv("occurred_at", event.occurredAt()));
+    /**
+     * After commit the journey has already changed: a failure here must never reach the caller
+     * (ES-06), so it is only logged, without personal data.
+     */
+    private void write(TenantId tenant, Event event) {
+        try {
+            audit.info("journey {} {}",
+                    kv("event", event.kind().name()),
+                    kv("journey_id", event.journeyId()),
+                    kv("event_id", event.eventId()),
+                    kv("tenant", tenant.value()),
+                    kv("state", event.state().code()),
+                    kv("step", event.step().code()),
+                    kv("withdrawal_reason", event.withdrawalReason().map(WithdrawalReason::code).orElse(null)),
+                    kv("occurred_at", event.occurredAt()));
+        } catch (RuntimeException e) {
+            FAILURES.error("Could not record the {} event {} of journey {}",
+                    event.kind(), event.eventId(), event.journeyId(), e);
+        }
     }
 }
