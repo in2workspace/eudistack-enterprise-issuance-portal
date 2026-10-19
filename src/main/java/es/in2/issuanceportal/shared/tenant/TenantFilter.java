@@ -1,5 +1,7 @@
 package es.in2.issuanceportal.shared.tenant;
 
+import es.in2.issuanceportal.shared.error.ProblemCode;
+import es.in2.issuanceportal.shared.error.Problems;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -8,8 +10,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
@@ -48,7 +48,7 @@ public class TenantFilter extends OncePerRequestFilter {
         Optional<TenantId> tenant = resolve(request).filter(registry::isActive);
         if (tenant.isEmpty()) {
             log.warn("Rejected request for an unknown or inactive tenant");
-            writeTenantNotFound(response);
+            Problems.write(response, ProblemCode.TENANT_NOT_FOUND);
             return;
         }
         request.setAttribute(ATTRIBUTE, tenant.get());
@@ -71,12 +71,5 @@ public class TenantFilter extends OncePerRequestFilter {
         }
         int dot = host.indexOf('.');
         return dot > 0 ? TenantId.parse(host.substring(0, dot)) : Optional.empty();
-    }
-
-    private static void writeTenantNotFound(HttpServletResponse response) throws IOException {
-        response.setStatus(HttpStatus.NOT_FOUND.value());
-        response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
-        response.getWriter().write("""
-                {"type":"tenant_not_found","title":"Tenant not found","status":404}""");
     }
 }
