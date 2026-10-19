@@ -16,4 +16,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Sesión del recorrido con una sección por módulo, datos personales cifrados por sobre con AES-256-GCM (clave de datos de KMS o clave local) y solo el hash del identificador de sesión en la base de datos. Puertos publicados para los otros módulos: `JourneyAccess`, `JourneyProgress` y `JourneyWithdrawal`.
 - Caducidad por inactividad (15 minutos) en cada petición y en un barrido cada minuto con bloqueo ShedLock por tenant.
 - Traza de cada cambio del recorrido sin datos personales, de momento como log estructurado (el envío a la API de auditoría está pendiente).
+- Con PostgreSQL caído, todas las rutas responden 503 `service_unavailable` (también desde el filtro de tenant y al abrir la transacción), con un timeout de conexión de 3 s.
+- Los filtros de la cabecera `X-Requested-With` y del tenant se aplican a todo salvo `/actuator`, sobre la ruta normalizada.
 - Errores como Problem (RFC 9457), cabecera `X-Requested-With: issuance-portal` obligatoria en las peticiones que cambian estado, logs JSON con el contrato de observabilidad, métricas por tenant e imagen Docker con sus pipelines de CI.
