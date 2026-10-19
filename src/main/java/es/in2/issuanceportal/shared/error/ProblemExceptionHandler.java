@@ -7,6 +7,7 @@ import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.CannotGetJdbcConnectionException;
 import org.springframework.transaction.CannotCreateTransactionException;
+import org.springframework.transaction.TransactionSystemException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
@@ -29,10 +30,12 @@ public class ProblemExceptionHandler extends ResponseEntityExceptionHandler {
 
     /**
      * With the database down, a transactional service fails when its transaction opens
-     * ({@link CannotCreateTransactionException}), before any repository call.
+     * ({@link CannotCreateTransactionException}), or, if the database goes away mid-transaction, when
+     * the rollback itself cannot reach it ({@link TransactionSystemException}).
      */
     @ExceptionHandler({CannotGetJdbcConnectionException.class, DataAccessResourceFailureException.class,
-            TransientDataAccessException.class, CannotCreateTransactionException.class})
+            TransientDataAccessException.class, CannotCreateTransactionException.class,
+            TransactionSystemException.class})
     ResponseEntity<ProblemDetail> handleDatabaseUnavailable(Exception exception) {
         log.error("Database unavailable", exception);
         return respond(Problems.of(ProblemCode.SERVICE_UNAVAILABLE));
