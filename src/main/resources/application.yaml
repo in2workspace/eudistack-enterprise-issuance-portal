@@ -1,0 +1,27 @@
+spring:
+  application:
+    name: eudistack-enterprise-issuance-portal
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: ${SERVER_PORT:8080}
+  servlet:
+    # The API lives under /issuance-portal/api/v1; health and metrics under /issuance-portal/actuator.
+    context-path: /issuance-portal
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+
+logging:
+  level:
+    es.in2.issuanceportal: ${LOG_LEVEL:INFO}
