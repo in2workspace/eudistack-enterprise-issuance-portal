@@ -4,9 +4,15 @@ spring:
   threads:
     virtual:
       enabled: true
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/eudistack}
+    username: ${DB_USERNAME:admin}
+    password: ${DB_PASSWORD:}
 
 server:
   port: ${SERVER_PORT:8080}
+  # The tenant comes from the public host, which nginx and the ALB pass in X-Forwarded-Host.
+  forward-headers-strategy: framework
   servlet:
     # The API lives under /issuance-portal/api/v1; health and metrics under /issuance-portal/actuator.
     context-path: /issuance-portal

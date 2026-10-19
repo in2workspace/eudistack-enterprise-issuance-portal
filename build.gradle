@@ -42,6 +42,14 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
 
+    // --- Persistence ---
+    // Journey, session and configuration live in the tenant's schema (design.md AD-2).
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    runtimeOnly 'org.postgresql:postgresql'
+
+    // --- Caching ---
+    implementation 'com.github.ben-manes.caffeine:caffeine'
+
     // --- Observability ---
     implementation 'io.micrometer:micrometer-tracing-bridge-otel'
     implementation 'io.opentelemetry:opentelemetry-exporter-otlp'
@@ -55,6 +63,12 @@ dependencies {
     // --- Testing ---
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'com.tngtech.archunit:archunit-junit5:1.5.0'
+
+    // --- Integration Testing ---
+    // A real PostgreSQL: schema-per-tenant SQL is exactly what an in-memory database would get wrong.
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:postgresql'
 }
 
 configurations.configureEach {
