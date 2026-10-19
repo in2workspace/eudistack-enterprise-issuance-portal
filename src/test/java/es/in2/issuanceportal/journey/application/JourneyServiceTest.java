@@ -2,6 +2,8 @@ package es.in2.issuanceportal.journey.application;
 
 import es.in2.issuanceportal.MutableClock;
 import es.in2.issuanceportal.journey.InMemoryJourneyRepository;
+import es.in2.issuanceportal.journey.RecordingJourneyAuditTrail;
+import es.in2.issuanceportal.journey.application.port.JourneyAuditTrail;
 import es.in2.issuanceportal.journey.api.JourneyProgress;
 import es.in2.issuanceportal.journey.api.JourneyWithdrawal;
 import es.in2.issuanceportal.journey.domain.Journey;
@@ -31,7 +33,8 @@ class JourneyServiceTest {
     private final InMemoryJourneyRepository journeys = new InMemoryJourneyRepository();
     private final InMemoryJourneySessions sessions = new InMemoryJourneySessions();
     private final MutableClock clock = new MutableClock(Instant.parse("2026-10-19T10:00:00Z"));
-    private final JourneyService service = new JourneyService(journeys, sessions, clock);
+    private final RecordingJourneyAuditTrail trail = new RecordingJourneyAuditTrail();
+    private final JourneyService service = new JourneyService(journeys, sessions, trail, clock);
 
     @Test
     void startCreatesAJourneyInProgressWithItsSession() {
@@ -176,6 +179,58 @@ class JourneyServiceTest {
         service.expireInactive(SANDBOX);
 
         assertThat(service.expireInactive(SANDBOX)).isZero();
+    }
+
+    @Test
+    void everyStateChangeLeavesATraceWithTheStepReached() {
+        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
+        service.reach(SANDBOX, started.session(), JourneyProgress.Step.IDENTIFIED);
+        service.reach(SANDBOX, started.session(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
+        service.cancel(SANDBOX, started.session());
+
+        assertThat(trail.events())
+                .extracting(JourneyAuditTrail.Event::kind, JourneyAuditTrail.Event::state, JourneyAuditTrail.Event::step)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple(JourneyAuditTrail.Kind.STARTED, JourneyState.IN_PROGRESS, JourneyStep.STARTED),
+                        org.assertj.core.groups.Tuple.tuple(JourneyAuditTrail.Kind.STEP_REACHED, JourneyState.IN_PROGRESS, JourneyStep.IDENTIFIED),
+                        org.assertj.core.groups.Tuple.tuple(JourneyAuditTrail.Kind.STEP_REACHED, JourneyState.IN_PROGRESS, JourneyStep.ENTITLEMENT_CONFIRMED),
+                        org.assertj.core.groups.Tuple.tuple(JourneyAuditTrail.Kind.WITHDRAWN, JourneyState.WITHDRAWN, JourneyStep.ENTITLEMENT_CONFIRMED));
+        assertThat(trail.events().getLast().withdrawalReason()).contains(WithdrawalReason.CANCELLED);
+        assertThat(trail.events()).allSatisfy(event -> assertThat(event.journeyId()).isEqualTo(started.journey().id()));
+    }
+
+    @Test
+    void readingOrReachingAPassedStepLeavesNoTrace() {
+        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
+        service.reach(SANDBOX, started.session(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
+        int before = trail.events().size();
+
+        service.current(SANDBOX, started.session());
+        service.reach(SANDBOX, started.session(), JourneyProgress.Step.IDENTIFIED);
+
+        assertThat(trail.events()).hasSize(before);
+    }
+
+    @Test
+    void expiryLeavesAWithdrawnTraceWithTheExpiredReason() {
+        service.start(SANDBOX, Optional.empty());
+        clock.advance(Duration.ofMinutes(15));
+
+        service.expireInactive(SANDBOX);
+
+        assertThat(trail.events().getLast().kind()).isEqualTo(JourneyAuditTrail.Kind.WITHDRAWN);
+        assertThat(trail.events().getLast().withdrawalReason()).contains(WithdrawalReason.EXPIRED);
+    }
+
+    @Test
+    void anUnavailableTrailDoesNotChangeTheOutcome() {
+        trail.failFromNowOn();
+
+        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
+        Journey journey = service.cancel(SANDBOX, started.session());
+
+        assertThat(journey.state()).isEqualTo(JourneyState.WITHDRAWN);
+        assertThat(sessions.journeyOf(SANDBOX, started.session())).isEmpty();
     }
 
     private void complete(JourneyService.Started started) {

@@ -3,6 +3,7 @@ package es.in2.issuanceportal.journey.application;
 import es.in2.issuanceportal.journey.api.JourneyAccess;
 import es.in2.issuanceportal.journey.api.JourneyProgress;
 import es.in2.issuanceportal.journey.api.JourneyWithdrawal;
+import es.in2.issuanceportal.journey.application.port.JourneyAuditTrail;
 import es.in2.issuanceportal.journey.application.port.JourneyRepository;
 import es.in2.issuanceportal.journey.domain.Journey;
 import es.in2.issuanceportal.journey.domain.JourneyState;
@@ -13,6 +14,7 @@ import es.in2.issuanceportal.session.api.SessionId;
 import es.in2.issuanceportal.shared.error.ProblemCode;
 import es.in2.issuanceportal.shared.error.ProblemException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,17 +30,20 @@ import java.util.UUID;
  * <p>Transactions do not roll back on {@link ProblemException}: when an inactive journey is found,
  * its expiry is saved and then the request is answered {@code journey_closed}.
  */
+@Slf4j
 @Service
 @Transactional(noRollbackFor = ProblemException.class)
 public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWithdrawal {
 
     private final JourneyRepository journeys;
     private final JourneySessions sessions;
+    private final JourneyAuditTrail trail;
     private final Clock clock;
 
-    public JourneyService(JourneyRepository journeys, JourneySessions sessions, Clock clock) {
+    public JourneyService(JourneyRepository journeys, JourneySessions sessions, JourneyAuditTrail trail, Clock clock) {
         this.journeys = journeys;
         this.sessions = sessions;
+        this.trail = trail;
         this.clock = clock;
     }
 
@@ -53,6 +58,7 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
         SessionId session = SessionId.generate();
         journeys.insert(tenant, journey);
         sessions.open(tenant, session, journey.id());
+        audit(tenant, JourneyAuditTrail.Kind.STARTED, journey);
         return new Started(journey, session);
     }
 
@@ -82,11 +88,15 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
     @Override
     public void reach(TenantId tenant, SessionId session, JourneyProgress.Step step) {
         Journey journey = activeInProgress(tenant, session);
+        JourneyStep before = journey.step();
         journey.reach(switch (step) {
             case IDENTIFIED -> JourneyStep.IDENTIFIED;
             case ENTITLEMENT_CONFIRMED -> JourneyStep.ENTITLEMENT_CONFIRMED;
         }, clock.instant());
         save(tenant, journey, JourneyState.IN_PROGRESS);
+        if (journey.step() != before) {
+            audit(tenant, JourneyAuditTrail.Kind.STEP_REACHED, journey);
+        }
     }
 
     @Override
@@ -124,7 +134,10 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
         }
         if (journey.isInProgress()) {
             journey.withdraw(WithdrawalReason.EXPIRED, now);
-            return journeys.update(tenant, journey, JourneyState.IN_PROGRESS);
+            if (!journeys.update(tenant, journey, JourneyState.IN_PROGRESS)) {
+                return false;
+            }
+            audit(tenant, JourneyAuditTrail.Kind.WITHDRAWN, journey);
         }
         return true;
     }
@@ -145,6 +158,7 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
             if (journey.isInProgress()) {
                 journey.withdraw(WithdrawalReason.EXPIRED, now);
                 save(tenant, journey, readIn);
+                audit(tenant, JourneyAuditTrail.Kind.WITHDRAWN, journey);
             }
             sessions.close(tenant, journey.id());
             throw closed();
@@ -178,6 +192,17 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
         journey.withdraw(reason, clock.instant());
         save(tenant, journey, JourneyState.IN_PROGRESS);
         sessions.close(tenant, journey.id());
+        audit(tenant, JourneyAuditTrail.Kind.WITHDRAWN, journey);
+    }
+
+    /** The trail never decides the outcome of a request: a failure is logged and the journey goes on. */
+    private void audit(TenantId tenant, JourneyAuditTrail.Kind kind, Journey journey) {
+        try {
+            trail.record(tenant, new JourneyAuditTrail.Event(UUID.randomUUID(), kind, journey.id(), journey.state(),
+                    journey.step(), journey.withdrawalReason(), clock.instant()));
+        } catch (RuntimeException e) {
+            log.error("Could not record the {} event of journey {}", kind, journey.id(), e);
+        }
     }
 
     /** Someone else changed the journey first (another request or the expiry job): it is closed now. */
