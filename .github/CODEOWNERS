@@ -1,0 +1,13 @@
+* @in2workspace/kizunareviewers
+
+# License gate — append these lines at the END of .github/CODEOWNERS.
+#
+# Order matters: GitHub applies the LAST matching pattern, so a catch-all such
+# as `* @in2workspace/kizunareviewers` placed after these lines would silently cancel
+# them. Since ES-06 was dropped along with the shared evaluator, CODEOWNERS is
+# the only control preventing a pull request from widening the policy at the
+# same time as it introduces the dependency the policy would have blocked.
+/.github/license-policy.json        @in2workspace/devops-lead
+/.github/license-exceptions.json    @in2workspace/devops-lead
+/.github/scripts/license-gate.mjs   @in2workspace/devops-lead
+/.github/workflows/license-gate.yml @in2workspace/devops-lead
