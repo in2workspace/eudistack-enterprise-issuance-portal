@@ -27,5 +27,5 @@ public interface JourneyAuditTrail {
             Instant occurredAt) {
     }
 
-    void record(TenantId tenant, Event event);
+    void append(TenantId tenant, Event event);
 }

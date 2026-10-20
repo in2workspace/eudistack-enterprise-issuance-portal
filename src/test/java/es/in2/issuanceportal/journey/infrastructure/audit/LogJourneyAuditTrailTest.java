@@ -37,10 +37,10 @@ class LogJourneyAuditTrailTest {
     }
 
     @Test
-    void record_insideTransaction_writesOnlyAfterCommit() {
+    void append_insideTransaction_writesOnlyAfterCommit() {
         TransactionSynchronizationManager.initSynchronization();
 
-        trail.record(SANDBOX, event());
+        trail.append(SANDBOX, event());
         verify(audit, never()).info(anyString(), any(Object[].class));
 
         TransactionSynchronizationUtils.triggerAfterCommit();
@@ -48,19 +48,19 @@ class LogJourneyAuditTrailTest {
     }
 
     @Test
-    void record_writeFailsAfterCommit_doesNotThrow() {
+    void append_writeFailsAfterCommit_doesNotThrow() {
         doThrow(new IllegalStateException("log sink down")).when(audit).info(anyString(), any(Object[].class));
         TransactionSynchronizationManager.initSynchronization();
-        trail.record(SANDBOX, event());
+        trail.append(SANDBOX, event());
 
         assertThatNoException().isThrownBy(TransactionSynchronizationUtils::triggerAfterCommit);
     }
 
     @Test
-    void record_writeFailsOutsideTransaction_doesNotThrow() {
+    void append_writeFailsOutsideTransaction_doesNotThrow() {
         doThrow(new IllegalStateException("log sink down")).when(audit).info(anyString(), any(Object[].class));
 
-        assertThatNoException().isThrownBy(() -> trail.record(SANDBOX, event()));
+        assertThatNoException().isThrownBy(() -> trail.append(SANDBOX, event()));
     }
 
     private static JourneyAuditTrail.Event event() {

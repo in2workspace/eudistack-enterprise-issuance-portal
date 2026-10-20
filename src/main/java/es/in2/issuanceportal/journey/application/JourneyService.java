@@ -225,7 +225,7 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
     /** The trail never decides the outcome of a request: a failure is logged and the journey goes on. */
     private void audit(TenantId tenant, JourneyAuditTrail.Kind kind, Journey journey) {
         try {
-            trail.record(tenant, new JourneyAuditTrail.Event(UUID.randomUUID(), kind, journey.id(), journey.state(),
+            trail.append(tenant, new JourneyAuditTrail.Event(UUID.randomUUID(), kind, journey.id(), journey.state(),
                     journey.step(), journey.withdrawalReason(), clock.instant()));
         } catch (RuntimeException e) {
             log.error("Could not record the {} event of journey {}", kind, journey.id(), e);

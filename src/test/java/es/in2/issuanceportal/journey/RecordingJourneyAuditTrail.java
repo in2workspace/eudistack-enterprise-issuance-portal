@@ -13,7 +13,7 @@ public class RecordingJourneyAuditTrail implements JourneyAuditTrail {
     private volatile boolean failing;
 
     @Override
-    public void record(TenantId tenant, Event event) {
+    public void append(TenantId tenant, Event event) {
         if (failing) {
             throw new IllegalStateException("audit unavailable");
         }

@@ -10,9 +10,9 @@ public record DataKey(byte[] plaintext, byte[] wrapped) {
 
     @Override
     public boolean equals(Object other) {
-        return other instanceof DataKey that
-                && Arrays.equals(plaintext, that.plaintext)
-                && Arrays.equals(wrapped, that.wrapped);
+        return other instanceof DataKey(byte[] otherPlaintext, byte[] otherWrapped)
+                && Arrays.equals(plaintext, otherPlaintext)
+                && Arrays.equals(wrapped, otherWrapped);
     }
 
     @Override

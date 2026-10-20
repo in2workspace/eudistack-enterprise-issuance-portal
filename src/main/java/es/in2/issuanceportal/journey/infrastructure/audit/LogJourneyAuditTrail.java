@@ -5,6 +5,7 @@ import es.in2.issuanceportal.journey.domain.WithdrawalReason;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -25,6 +26,7 @@ class LogJourneyAuditTrail implements JourneyAuditTrail {
 
     private final Logger audit;
 
+    @Autowired
     LogJourneyAuditTrail() {
         this(LoggerFactory.getLogger("audit.journey"));
     }
@@ -34,7 +36,7 @@ class LogJourneyAuditTrail implements JourneyAuditTrail {
     }
 
     @Override
-    public void record(TenantId tenant, Event event) {
+    public void append(TenantId tenant, Event event) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
@@ -53,7 +55,7 @@ class LogJourneyAuditTrail implements JourneyAuditTrail {
      */
     private void write(TenantId tenant, Event event) {
         try {
-            audit.info("journey {} {}",
+            audit.info("journey {} {} {} {} {} {} {} {}",
                     kv("event", event.kind().name()),
                     kv("journey_id", event.journeyId()),
                     kv("event_id", event.eventId()),

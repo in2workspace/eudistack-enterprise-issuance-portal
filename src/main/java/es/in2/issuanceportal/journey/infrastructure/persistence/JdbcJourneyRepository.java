@@ -8,7 +8,7 @@ import es.in2.issuanceportal.journey.domain.WithdrawalReason;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
-import org.springframework.stereotype.Component;
+import org.springframework.stereotype.Repository;
 
 import java.sql.Array;
 import java.sql.Timestamp;
@@ -18,8 +18,12 @@ import java.util.Optional;
 import java.util.UUID;
 
 /** {@code journey} in the tenant's schema. */
-@Component
+@Repository
 class JdbcJourneyRepository implements JourneyRepository {
+
+    /** Column and parameter names, used by the row mapper and both writes. */
+    private static final String STATE = "state";
+    private static final String STEP = "step";
 
     private static final String COLUMNS =
             "id, state, step, withdrawal_reason, identification_method, issuance_process_ids, created_at, last_activity, ended_at";
@@ -30,8 +34,8 @@ class JdbcJourneyRepository implements JourneyRepository {
         Array processIds = rs.getArray("issuance_process_ids");
         return Journey.restore(
                 rs.getObject("id", UUID.class),
-                JourneyState.fromCode(rs.getString("state")),
-                JourneyStep.fromCode(rs.getString("step")),
+                JourneyState.fromCode(rs.getString(STATE)),
+                JourneyStep.fromCode(rs.getString(STEP)),
                 reason == null ? null : WithdrawalReason.fromCode(reason),
                 rs.getString("identification_method"),
                 processIds == null ? List.of() : Arrays.asList((String[]) processIds.getArray()),
@@ -51,8 +55,8 @@ class JdbcJourneyRepository implements JourneyRepository {
         jdbc.sql("INSERT INTO " + table(tenant) + " (id, state, step, created_at, last_activity) "
                         + "VALUES (:id, :state, :step, :createdAt, :lastActivity)")
                 .param("id", journey.id())
-                .param("state", journey.state().code())
-                .param("step", journey.step().code())
+                .param(STATE, journey.state().code())
+                .param(STEP, journey.step().code())
                 .param("createdAt", Timestamp.from(journey.createdAt()))
                 .param("lastActivity", Timestamp.from(journey.lastActivity()))
                 .update();
@@ -62,8 +66,8 @@ class JdbcJourneyRepository implements JourneyRepository {
     public boolean update(TenantId tenant, Journey journey, JourneyState readInState) {
         return jdbc.sql("UPDATE " + table(tenant) + " SET state = :state, step = :step, withdrawal_reason = :reason, "
                         + "last_activity = :lastActivity, ended_at = :endedAt WHERE id = :id AND state = :readInState")
-                .param("state", journey.state().code())
-                .param("step", journey.step().code())
+                .param(STATE, journey.state().code())
+                .param(STEP, journey.step().code())
                 .param("reason", journey.withdrawalReason().map(WithdrawalReason::code).orElse(null))
                 .param("lastActivity", Timestamp.from(journey.lastActivity()))
                 .param("endedAt", journey.endedAt().map(Timestamp::from).orElse(null))
