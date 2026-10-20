@@ -1,0 +1,177 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.5.16'
+    id 'io.spring.dependency-management' version '1.1.7'
+    id 'jacoco'
+    id 'checkstyle'
+    id 'org.sonarqube' version '7.4.0.8496'
+    id 'com.github.ben-manes.versions' version '0.61.0'
+    id 'org.cyclonedx.bom' version '2.2.0'
+}
+
+group = 'com.eudistack'
+// Plain version, no SNAPSHOT: the ci job tags the release v${version}
+// and refuses to run if that tag already exists.
+version = '0.1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+}
+
+jacoco {
+    toolVersion = "0.8.14"
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    // --- Spring Boot Starters ---
+    // WebMvc on virtual threads, not WebFlux: every step of the journey is a chain
+    // of blocking calls (PostgreSQL, Verifier, Issuer) — design.md AD-1.
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+
+    // --- Persistence ---
+    // Journey, session and configuration live in the tenant's schema (design.md AD-2).
+    implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'org.flywaydb:flyway-core'
+    implementation 'org.flywaydb:flyway-database-postgresql'
+    runtimeOnly 'org.postgresql:postgresql'
+
+    // --- Cryptography ---
+    // Envelope encryption of the personal data in the journey session (design.md §5).
+    implementation 'software.amazon.awssdk:kms:2.31.78'
+
+    // --- Scheduling ---
+    // The expiry job runs on one instance per tenant at a time (design.md AD-4).
+    implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:6.0.2'
+
+    // --- Caching ---
+    implementation 'com.github.ben-manes.caffeine:caffeine'
+
+    // --- Observability ---
+    implementation 'io.micrometer:micrometer-tracing-bridge-otel'
+    implementation 'io.opentelemetry:opentelemetry-exporter-otlp'
+    runtimeOnly 'io.micrometer:micrometer-registry-prometheus'
+    implementation 'net.logstash.logback:logstash-logback-encoder:9.0'
+
+    // --- DevTools ---
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    // --- Testing ---
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'com.tngtech.archunit:archunit-junit5:1.5.0'
+
+    // --- Integration Testing ---
+    // A real PostgreSQL: schema-per-tenant SQL is exactly what an in-memory database would get wrong.
+    testImplementation 'org.springframework.boot:spring-boot-testcontainers'
+    testImplementation 'org.testcontainers:junit-jupiter'
+    testImplementation 'org.testcontainers:postgresql'
+}
+
+configurations.configureEach {
+    exclude module: 'slf4j-simple'
+}
+
+// --- Quality & CI ---
+
+// CycloneDX inventory (EUD-220): runtime classpath only — what ships in the
+// artifact — spec 1.6 JSON, serial number off so two runs of the same tree
+// produce byte-identical output.
+cyclonedxBom {
+    includeConfigs = ['runtimeClasspath']
+    schemaVersion = '1.6'
+    destination = project.file('build/reports/sbom')
+    outputName = 'sbom'
+    outputFormat = 'json'
+    includeBomSerialNumber = false
+    includeLicenseText = false
+}
+
+sonar {
+    properties {
+        property 'sonar.projectKey', 'in2workspace_eudistack-enterprise-issuance-portal'
+        property 'sonar.organization', 'in2workspace'
+        property 'sonar.host.url', 'https://sonarcloud.io'
+        property 'sonar.sources', 'src/main/java,src/main/resources'
+        property 'sonar.coverage.jacoco.xmlReportPaths', 'build/reports/jacoco/test/jacocoTestReport.xml'
+        property 'sonar.coverage.exclusions',
+                'src/main/java/**/IssuancePortalApplication.java'
+        // The Flyway migrations are PostgreSQL. Sonar reads .sql files with its PL/SQL (Oracle) analyser,
+        // whose rules ask for Oracle-only types such as VARCHAR2; none of them applies to these files.
+        property 'sonar.issue.ignore.multicriteria', 'plsqlOnMigrations'
+        property 'sonar.issue.ignore.multicriteria.plsqlOnMigrations.ruleKey', 'plsql:*'
+        property 'sonar.issue.ignore.multicriteria.plsqlOnMigrations.resourceKey', 'src/main/resources/db/**/*.sql'
+    }
+}
+
+checkstyle {
+    configFile = file("${rootDir}/config/checkstyle/checkstyle.xml")
+}
+
+checkstyleMain {
+    source = 'src/main/java'
+}
+
+checkstyleTest {
+    source = 'src/test/java'
+}
+
+// --- Tasks ---
+
+// The version travels to the logs as service.version (conv-observability §2).
+tasks.named('processResources') {
+    inputs.property('version', version)
+    filesMatching('application.yaml') {
+        filter(org.apache.tools.ant.filters.ReplaceTokens, tokens: [version: version.toString()])
+    }
+}
+
+// Spring Boot builds both the executable jar and a "-plain" one. The image copies
+// build/libs/*.jar, so the plain jar would make that COPY ambiguous.
+tasks.named('jar') {
+    enabled = false
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    finalizedBy(tasks.jacocoTestReport)
+}
+
+tasks.jacocoTestReport {
+    dependsOn(tasks.test)
+    reports {
+        xml.required.set(true)
+        csv.required.set(false)
+        html.outputLocation.set(layout.buildDirectory.dir('jacocoHtml'))
+    }
+    classDirectories.setFrom(files(classDirectories.files.collect {
+        fileTree(dir: it, exclude: [
+                "**/IssuancePortalApplication.class"
+        ])
+    }))
+}
+
+def isNonStable = { String version ->
+    def stableKeyword = ['RELEASE', 'FINAL', 'GA'].any { it -> version.toUpperCase().contains(it) }
+    def regex = /^[0-9,.v-]+(-r)?$/
+    return !stableKeyword && !(version ==~ regex)
+}
+
+tasks.named("dependencyUpdates").configure {
+    rejectVersionIf {
+        isNonStable(it.candidate.version)
+    }
+}

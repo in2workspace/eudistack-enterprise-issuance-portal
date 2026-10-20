@@ -1,0 +1,46 @@
+name: License Gate
+
+# Gradle variant. No `paths-ignore`: a required check that does not run on a
+# documentation-only pull request stays pending forever and blocks the merge
+# (EC-07).
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  license-gate:
+    name: License Compliance Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v6
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+          cache: 'gradle'
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      # Node is preinstalled on ubuntu-latest; the gate needs no toolchain of
+      # its own and pulls no third-party dependency.
+      - name: Verify the license gate itself
+        run: node --test .github/scripts/license-gate.test.mjs
+
+      - name: Generate CycloneDX SBOM
+        run: ./gradlew cyclonedxBom
+
+      - name: Evaluate licenses
+        run: node .github/scripts/license-gate.mjs --sbom-path build/reports/sbom/sbom.json

@@ -1,0 +1,9 @@
+# Test overrides, layered on top of src/main/resources/application.yaml.
+issuance-portal:
+  crypto:
+    provider: local
+    # Test-only key, never used outside the test suite.
+    local-key: VV4OSyWM8BydULUYWMb92hUKKZZWmlYXo3TTa/7BDhI=
+  # Tests run the expiry sweep explicitly, never on the minute.
+  expiry:
+    enabled: false
