@@ -110,10 +110,10 @@ sonar {
         property 'sonar.coverage.exclusions',
                 'src/main/java/**/IssuancePortalApplication.java'
         // The Flyway migrations are PostgreSQL. Sonar reads .sql files with its PL/SQL (Oracle) analyser,
-        // whose CharVarchar rule asks for VARCHAR2, a type PostgreSQL does not have.
-        property 'sonar.issue.ignore.multicriteria', 'plsqlChar'
-        property 'sonar.issue.ignore.multicriteria.plsqlChar.ruleKey', 'plsql:CharVarchar'
-        property 'sonar.issue.ignore.multicriteria.plsqlChar.resourceKey', 'src/main/resources/db/**/*.sql'
+        // whose rules ask for Oracle-only types such as VARCHAR2; none of them applies to these files.
+        property 'sonar.issue.ignore.multicriteria', 'plsqlOnMigrations'
+        property 'sonar.issue.ignore.multicriteria.plsqlOnMigrations.ruleKey', 'plsql:*'
+        property 'sonar.issue.ignore.multicriteria.plsqlOnMigrations.resourceKey', 'src/main/resources/db/**/*.sql'
     }
 }
 
