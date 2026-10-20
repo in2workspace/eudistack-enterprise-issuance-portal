@@ -2,7 +2,6 @@ package es.in2.issuanceportal.journey.infrastructure.scheduling;
 
 import es.in2.issuanceportal.TestcontainersConfiguration;
 import es.in2.issuanceportal.journey.application.JourneyService;
-import es.in2.issuanceportal.session.api.JourneySessions;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import es.in2.issuanceportal.shared.tenant.TenantRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -30,8 +29,6 @@ class JourneyExpiryJobIT {
     @Autowired
     private JourneyService service;
     @Autowired
-    private JourneySessions sessions;
-    @Autowired
     private TenantRegistry tenants;
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -56,7 +53,7 @@ class JourneyExpiryJobIT {
         assertThat(journeyRow(journey))
                 .containsEntry("state", "withdrawn")
                 .containsEntry("withdrawal_reason", "expired");
-        assertThat(sessions.openJourneys(KPMG)).doesNotContain(journey);
+        assertThat(sessionRows(journey)).isZero();
     }
 
     @Test
@@ -84,6 +81,11 @@ class JourneyExpiryJobIT {
         jdbc.sql("UPDATE \"kpmg_issuance_portal\".journey SET last_activity = now() - interval '16 minutes' WHERE id = :id")
                 .param("id", id).update();
         return id;
+    }
+
+    private long sessionRows(UUID journeyId) {
+        return jdbc.sql("SELECT count(*) FROM \"kpmg_issuance_portal\".journey_session WHERE journey_id = :j")
+                .param("j", journeyId).query(Long.class).single();
     }
 
     private Map<String, Object> journeyRow(UUID id) {
