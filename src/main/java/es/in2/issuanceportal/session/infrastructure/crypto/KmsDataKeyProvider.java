@@ -14,6 +14,7 @@ import java.nio.ByteBuffer;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
@@ -29,8 +30,11 @@ public class KmsDataKeyProvider implements DataKeyProvider {
     private final Clock clock;
     private final Cache<ByteBuffer, byte[]> unwrapped;
 
-    private volatile DataKey current;
-    private volatile Instant currentCreatedAt = Instant.MIN;
+    /** The key and when it was created, swapped together so no thread reads one without the other. */
+    private record Generation(DataKey key, Instant createdAt) {
+    }
+
+    private final AtomicReference<Generation> current = new AtomicReference<>();
 
     public KmsDataKeyProvider(KmsClient kms, String keyId, Duration rotation, Clock clock) {
         if (keyId == null || keyId.isBlank()) {
@@ -51,15 +55,22 @@ public class KmsDataKeyProvider implements DataKeyProvider {
     @Override
     public DataKey currentKey() {
         Instant now = clock.instant();
-        if (current == null || !now.isBefore(currentCreatedAt.plus(rotation))) {
+        Generation generation = current.get();
+        if (isStale(generation, now)) {
+            // One KMS call per rotation, however many requests arrive at once.
             synchronized (this) {
-                if (current == null || !now.isBefore(currentCreatedAt.plus(rotation))) {
-                    current = generate();
-                    currentCreatedAt = now;
+                generation = current.get();
+                if (isStale(generation, now)) {
+                    generation = new Generation(generate(), now);
+                    current.set(generation);
                 }
             }
         }
-        return current;
+        return generation.key();
+    }
+
+    private boolean isStale(Generation generation, Instant now) {
+        return generation == null || !now.isBefore(generation.createdAt().plus(rotation));
     }
 
     @Override
