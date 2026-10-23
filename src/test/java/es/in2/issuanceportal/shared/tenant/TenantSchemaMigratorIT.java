@@ -38,6 +38,12 @@ class TenantSchemaMigratorIT {
     }
 
     @Test
+    void migrate_tenantSchema_hasEmptyPortalConfigTable() {
+        assertThat(jdbc.sql("SELECT count(*) FROM \"kpmg_issuance_portal\".portal_config").query(Long.class).single())
+                .isZero();
+    }
+
+    @Test
     void migrate_alreadyMigrated_changesNothing() {
         assertThatNoException().isThrownBy(() -> migrator.migrate(new TenantId("sandbox")));
     }
