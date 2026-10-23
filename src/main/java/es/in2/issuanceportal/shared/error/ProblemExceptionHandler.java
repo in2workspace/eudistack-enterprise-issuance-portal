@@ -3,18 +3,26 @@ package es.in2.issuanceportal.shared.error;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.dao.TransientDataAccessException;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.jdbc.CannotGetJdbcConnectionException;
 import org.springframework.transaction.CannotCreateTransactionException;
 import org.springframework.transaction.TransactionSystemException;
+import org.springframework.validation.FieldError;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+import java.util.stream.Collectors;
+
 /**
- * Turns every failure into a Problem (RFC 9457). Framework errors keep Spring's own Problems; anything
- * unexpected is a 500 without internal detail.
+ * Turns every failure into a Problem (RFC 9457). An invalid request body is {@code bad_request}; other
+ * framework errors keep Spring's own Problems; anything unexpected is a 500 without internal detail.
  */
 @Slf4j
 @RestControllerAdvice
@@ -39,6 +47,28 @@ public class ProblemExceptionHandler extends ResponseEntityExceptionHandler {
     ResponseEntity<ProblemDetail> handleDatabaseUnavailable(Exception exception) {
         log.error("Database unavailable", exception);
         return respond(Problems.of(ProblemCode.SERVICE_UNAVAILABLE));
+    }
+
+    /** Names the invalid fields, never their values: a request body may carry personal data. */
+    @Override
+    protected ResponseEntity<Object> handleMethodArgumentNotValid(MethodArgumentNotValidException exception,
+                                                                  HttpHeaders headers, HttpStatusCode status,
+                                                                  WebRequest request) {
+        ProblemDetail detail = Problems.of(ProblemCode.BAD_REQUEST);
+        detail.setDetail("Invalid fields: " + exception.getBindingResult().getFieldErrors().stream()
+                .map(FieldError::getField)
+                .distinct()
+                .sorted()
+                .collect(Collectors.joining(", ")));
+        return ResponseEntity.status(detail.getStatus()).body(detail);
+    }
+
+    @Override
+    protected ResponseEntity<Object> handleHttpMessageNotReadable(HttpMessageNotReadableException exception,
+                                                                  HttpHeaders headers, HttpStatusCode status,
+                                                                  WebRequest request) {
+        ProblemDetail detail = Problems.of(ProblemCode.BAD_REQUEST);
+        return ResponseEntity.status(detail.getStatus()).body(detail);
     }
 
     @ExceptionHandler(Exception.class)
