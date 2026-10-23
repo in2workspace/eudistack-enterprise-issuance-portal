@@ -52,7 +52,7 @@ class JdbcPortalConfigRepositoryIT {
     void setUp() {
         clearRows();
         clock = new MutableClock(Instant.parse("2026-10-23T10:00:00Z"));
-        repository = new JdbcPortalConfigRepository(jdbc, json, clock);
+        repository = new JdbcPortalConfigRepository(jdbc, json, clock, JdbcPortalConfigRepository.CACHE_TTL);
     }
 
     /** The container is shared with the other integration tests, which expect no configuration. */

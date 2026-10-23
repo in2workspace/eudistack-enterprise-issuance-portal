@@ -10,6 +10,7 @@ import es.in2.issuanceportal.journey.domain.config.InvalidPortalConfigException;
 import es.in2.issuanceportal.journey.domain.config.PortalConfig;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -20,7 +21,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
- * {@code portal_config} in the tenant's schema. A valid configuration is cached for 5 minutes (design.md
+ * {@code portal_config} in the tenant's schema. A valid configuration is cached, 5 minutes by default (design.md
  * AD-7), so an operator's change shows within that time without a deployment. A missing or invalid one is
  * never cached: once the tenant's row is loaded or fixed, the next request sees it.
  */
@@ -34,11 +35,12 @@ class JdbcPortalConfigRepository implements PortalConfigRepository {
     private final ObjectMapper json;
     private final Cache<TenantId, PortalConfig> byTenant;
 
-    JdbcPortalConfigRepository(JdbcClient jdbc, ObjectMapper json, Clock clock) {
+    JdbcPortalConfigRepository(JdbcClient jdbc, ObjectMapper json, Clock clock,
+                               @Value("${issuance-portal.portal-config.cache-ttl:5m}") Duration cacheTtl) {
         this.jdbc = jdbc;
         this.json = json;
         this.byTenant = Caffeine.newBuilder()
-                .expireAfterWrite(CACHE_TTL)
+                .expireAfterWrite(cacheTtl)
                 .maximumSize(1_000)
                 .ticker(() -> TimeUnit.MILLISECONDS.toNanos(clock.millis()))
                 .build();

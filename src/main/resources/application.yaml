@@ -33,6 +33,9 @@ issuance-portal:
     provider: ${PORTAL_CRYPTO_PROVIDER:}
     kms-key-id: ${PORTAL_KMS_KEY_ID:}
     local-key: ${PORTAL_LOCAL_DATA_KEY:}
+  portal-config:
+    # How long a valid portal configuration is cached (design.md AD-7).
+    cache-ttl: 5m
 
 management:
   endpoints:

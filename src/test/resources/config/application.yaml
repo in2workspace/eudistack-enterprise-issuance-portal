@@ -8,3 +8,7 @@ issuance-portal:
   # Tests run the expiry sweep explicitly, never on the minute.
   expiry:
     enabled: false
+  # Tests share one context: no cached configuration from one test may answer for another.
+  # JdbcPortalConfigRepositoryIT checks the five-minute cache on its own instance.
+  portal-config:
+    cache-ttl: 0s
