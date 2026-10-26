@@ -6,6 +6,8 @@ import es.in2.issuanceportal.session.api.Section;
 import es.in2.issuanceportal.session.api.SessionId;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -41,16 +43,19 @@ class JdbcJourneySessionsIT extends JourneySessionsContract {
         return id;
     }
 
-    @Test
-    void write_personalData_storesNeitherIdentifierNorDataInClear() {
+    @ParameterizedTest
+    @EnumSource(Section.class)
+    void write_personalData_storesNeitherIdentifierNorDataInClear(Section section) {
         SessionId session = SessionId.generate();
         UUID journey = newJourney(SANDBOX);
         sessions.open(SANDBOX, session, journey);
-        sessions.write(SANDBOX, session, Section.IDENTITY, "{\"givenName\":\"Ana\",\"dni\":\"12345678Z\"}");
+        sessions.write(SANDBOX, session, section, "{\"givenName\":\"Ana\",\"dni\":\"12345678Z\"}");
 
         String hash = jdbc.sql("SELECT session_id_hash FROM \"sandbox_issuance_portal\".journey_session WHERE journey_id = :j")
                 .param("j", journey).query(String.class).single();
-        byte[] stored = jdbc.sql("SELECT identity FROM \"sandbox_issuance_portal\".journey_session WHERE journey_id = :j")
+        // Column names come from a fixed switch in the adapter, mirrored here.
+        String column = section.name().toLowerCase(java.util.Locale.ROOT);
+        byte[] stored = jdbc.sql("SELECT " + column + " FROM \"sandbox_issuance_portal\".journey_session WHERE journey_id = :j")
                 .param("j", journey).query(byte[].class).single();
 
         assertThat(hash).isEqualTo(session.hash()).isNotEqualTo(session.value());
