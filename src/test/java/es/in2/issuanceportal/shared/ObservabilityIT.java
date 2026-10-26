@@ -60,7 +60,7 @@ class ObservabilityIT {
         assertThat(line.path("level").asText()).isEqualTo("ERROR");
         assertThat(line.path("service.name").asText()).isEqualTo("eudistack-enterprise-issuance-portal");
         assertThat(line.path("service.version").asText()).isNotBlank().doesNotContain("@");
-        assertThat(line.path("env").asText()).isEqualTo("local");
+        assertThat(line.path("env").asText()).isEqualTo("test");
         assertThat(line.path("tenant.id").asText()).isEqualTo("sandbox");
         assertThat(line.path("trace_id").asText()).isEqualTo("4bf92f3577b34da6a3ce929d0e0e4736");
         assertThat(line.path("span_id").asText()).isEqualTo("00f067aa0ba902b7");

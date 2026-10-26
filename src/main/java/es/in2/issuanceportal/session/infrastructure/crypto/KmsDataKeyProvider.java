@@ -44,10 +44,10 @@ public class KmsDataKeyProvider implements DataKeyProvider {
         this.keyId = keyId;
         this.rotation = rotation;
         this.clock = clock;
-        // A key unwrapped once stays valid for the sessions it encrypted, which live at most 15 minutes
-        // past the rotation that retired it.
+        // Plaintext keys leave the heap a fixed time after they were cached, however much they are used
+        // (conv-quality-security-gates §15); a key still needed afterwards is unwrapped again with KMS.
         this.unwrapped = Caffeine.newBuilder()
-                .expireAfterAccess(rotation.plusHours(1))
+                .expireAfterWrite(rotation.plusHours(1))
                 .maximumSize(100)
                 .build();
     }

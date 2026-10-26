@@ -8,7 +8,7 @@
 
     <springProperty name="serviceName" source="spring.application.name"/>
     <springProperty name="serviceVersion" source="issuance-portal.version" defaultValue="unknown"/>
-    <springProperty name="env" source="issuance-portal.env" defaultValue="local"/>
+    <springProperty name="env" source="issuance-portal.env"/>
 
     <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
         <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
