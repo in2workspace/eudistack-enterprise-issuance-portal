@@ -10,7 +10,8 @@ import java.util.regex.Pattern;
 public record TenantId(String value) {
 
     private static final Pattern VALID = Pattern.compile("^[a-z0-9_-]+$");
-    private static final String SCHEMA_SUFFIX = "_issuance_portal";
+    /** Suffix of every tenant schema of this service: {@code <tenant>_issuance_portal}. */
+    public static final String SCHEMA_SUFFIX = "_issuance_portal";
 
     public TenantId {
         if (value == null || !VALID.matcher(value).matches()) {

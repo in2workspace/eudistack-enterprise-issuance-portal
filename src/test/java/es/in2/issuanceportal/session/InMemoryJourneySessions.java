@@ -59,7 +59,7 @@ public class InMemoryJourneySessions implements JourneySessions {
         return rotated;
     }
 
-    @Override
+    /** For the in-memory journey repository: the journeys that still have a session. */
     public List<UUID> openJourneys(TenantId tenant) {
         return sessions.entrySet().stream()
                 .filter(e -> e.getKey().startsWith(tenant.value() + "/"))

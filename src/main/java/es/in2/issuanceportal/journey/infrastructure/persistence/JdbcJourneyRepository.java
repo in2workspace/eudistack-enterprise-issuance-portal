@@ -12,6 +12,7 @@ import org.springframework.stereotype.Repository;
 
 import java.sql.Array;
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -84,7 +85,51 @@ class JdbcJourneyRepository implements JourneyRepository {
                 .optional();
     }
 
+    @Override
+    public List<UUID> findExpiryCandidates(TenantId tenant, Instant cutoff, UUID afterId, int limit) {
+        // Starts from journey_session, which only holds open journeys, and looks each one up by key.
+        // <= matches Journey.isInactive: a journey exactly at the limit is already inactive.
+        return jdbc.sql("SELECT s.journey_id FROM " + sessionTable(tenant) + " s JOIN " + table(tenant)
+                        + " j ON j.id = s.journey_id WHERE (j.state = :withdrawn OR j.last_activity <= :cutoff)"
+                        + " AND s.journey_id > :afterId ORDER BY s.journey_id LIMIT :limit")
+                .param("withdrawn", JourneyState.WITHDRAWN.code())
+                .param("cutoff", Timestamp.from(cutoff))
+                .param("afterId", afterId)
+                .param("limit", limit)
+                .query(UUID.class)
+                .list();
+    }
+
+    @Override
+    public boolean updateIfInactive(TenantId tenant, Journey journey, Instant cutoff) {
+        return jdbc.sql("UPDATE " + table(tenant) + " SET state = :state, step = :step, withdrawal_reason = :reason, "
+                        + "ended_at = :endedAt WHERE id = :id AND state = :inProgress AND last_activity <= :cutoff")
+                .param(STATE, journey.state().code())
+                .param(STEP, journey.step().code())
+                .param("reason", journey.withdrawalReason().map(WithdrawalReason::code).orElse(null))
+                .param("endedAt", journey.endedAt().map(Timestamp::from).orElse(null))
+                .param("id", journey.id())
+                .param("inProgress", JourneyState.IN_PROGRESS.code())
+                .param("cutoff", Timestamp.from(cutoff))
+                .update() == 1;
+    }
+
+    @Override
+    public boolean deleteSessionIfClosedOrInactive(TenantId tenant, UUID journeyId, Instant cutoff) {
+        return jdbc.sql("DELETE FROM " + sessionTable(tenant) + " s USING " + table(tenant) + " j "
+                        + "WHERE s.journey_id = :id AND j.id = s.journey_id "
+                        + "AND (j.state = :withdrawn OR j.last_activity <= :cutoff)")
+                .param("id", journeyId)
+                .param("withdrawn", JourneyState.WITHDRAWN.code())
+                .param("cutoff", Timestamp.from(cutoff))
+                .update() > 0;
+    }
+
     private static String table(TenantId tenant) {
         return tenant.schema() + ".journey";
+    }
+
+    private static String sessionTable(TenantId tenant) {
+        return tenant.schema() + ".journey_session";
     }
 }

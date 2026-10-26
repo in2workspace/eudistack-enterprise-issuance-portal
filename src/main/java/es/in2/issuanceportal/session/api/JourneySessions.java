@@ -2,7 +2,6 @@ package es.in2.issuanceportal.session.api;
 
 import es.in2.issuanceportal.shared.tenant.TenantId;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -27,7 +26,4 @@ public interface JourneySessions {
 
     /** Replaces the session identifier, keeping the content. The old identifier stops working. */
     SessionId rotate(TenantId tenant, SessionId session);
-
-    /** The journeys that still have a session, that is, still hold personal data. */
-    List<UUID> openJourneys(TenantId tenant);
 }

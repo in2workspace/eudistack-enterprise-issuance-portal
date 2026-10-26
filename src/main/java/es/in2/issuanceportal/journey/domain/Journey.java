@@ -1,8 +1,5 @@
 package es.in2.issuanceportal.journey.domain;
 
-import es.in2.issuanceportal.shared.error.ProblemCode;
-import es.in2.issuanceportal.shared.error.ProblemException;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -62,7 +59,7 @@ public final class Journey {
      */
     public void touch(Instant now) {
         if (state == JourneyState.WITHDRAWN) {
-            throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
+            throw new JourneyClosedException();
         }
         lastActivity = now;
     }
@@ -106,7 +103,7 @@ public final class Journey {
 
     private void requireInProgress() {
         if (state != JourneyState.IN_PROGRESS) {
-            throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
+            throw new JourneyClosedException();
         }
     }
 

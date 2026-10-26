@@ -93,21 +93,6 @@ abstract class JourneySessionsContract {
     }
 
     @Test
-    void openJourneys_mixedSessions_listsOnlyOpenOfTenant() {
-        SessionId open = SessionId.generate();
-        UUID openJourney = newJourney(SANDBOX);
-        sessions().open(SANDBOX, open, openJourney);
-        SessionId closed = SessionId.generate();
-        UUID closedJourney = newJourney(SANDBOX);
-        sessions().open(SANDBOX, closed, closedJourney);
-        sessions().close(SANDBOX, closedJourney);
-        UUID otherTenant = newJourney(KPMG);
-        sessions().open(KPMG, SessionId.generate(), otherTenant);
-
-        assertThat(sessions().openJourneys(SANDBOX)).contains(openJourney).doesNotContain(closedJourney, otherTenant);
-    }
-
-    @Test
     void journeyOf_sessionOfAnotherTenant_returnsEmpty() {
         SessionId session = openSession(KPMG);
 

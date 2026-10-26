@@ -1,7 +1,5 @@
 package es.in2.issuanceportal.journey.domain;
 
-import es.in2.issuanceportal.shared.error.ProblemCode;
-import es.in2.issuanceportal.shared.error.ProblemException;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
 
@@ -128,9 +126,6 @@ class JourneyTest {
     }
 
     private static void assertJourneyClosed(ThrowingCallable call) {
-        assertThatThrownBy(call)
-                .isInstanceOf(ProblemException.class)
-                .extracting(e -> ((ProblemException) e).problem())
-                .isEqualTo(ProblemCode.JOURNEY_CLOSED);
+        assertThatThrownBy(call).isInstanceOf(JourneyClosedException.class);
     }
 }

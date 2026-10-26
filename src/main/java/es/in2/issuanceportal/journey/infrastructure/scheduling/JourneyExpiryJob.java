@@ -2,7 +2,7 @@ package es.in2.issuanceportal.journey.infrastructure.scheduling;
 
 import es.in2.issuanceportal.journey.application.JourneyService;
 import es.in2.issuanceportal.shared.tenant.TenantId;
-import es.in2.issuanceportal.shared.tenant.TenantRegistry;
+import es.in2.issuanceportal.shared.tenant.TenantSchemas;
 import lombok.extern.slf4j.Slf4j;
 import net.javacrumbs.shedlock.core.DefaultLockingTaskExecutor;
 import net.javacrumbs.shedlock.core.LockConfiguration;
@@ -19,7 +19,8 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Every minute, closes the sessions inactive for 15 minutes in every active tenant (design.md AD-4).
+ * Every minute, closes the sessions inactive for 15 minutes in every tenant with a schema, active or
+ * not: a deactivated tenant must not keep personal data either (design.md AD-4).
  * Each tenant has its own ShedLock lock in its schema, so with several instances each tenant is swept
  * by one of them only. A failing tenant does not stop the others.
  */
@@ -35,12 +36,12 @@ public class JourneyExpiryJob {
     private static final Duration LOCK_AT_LEAST = Duration.ofSeconds(30);
 
     private final JourneyService journeys;
-    private final TenantRegistry tenants;
+    private final TenantSchemas tenants;
     private final JdbcTemplate jdbcTemplate;
     private final Clock clock;
     private final Map<TenantId, LockingTaskExecutor> executors = new ConcurrentHashMap<>();
 
-    public JourneyExpiryJob(JourneyService journeys, TenantRegistry tenants, JdbcTemplate jdbcTemplate, Clock clock) {
+    public JourneyExpiryJob(JourneyService journeys, TenantSchemas tenants, JdbcTemplate jdbcTemplate, Clock clock) {
         this.journeys = journeys;
         this.tenants = tenants;
         this.jdbcTemplate = jdbcTemplate;
@@ -49,7 +50,7 @@ public class JourneyExpiryJob {
 
     @Scheduled(cron = "0 * * * * *")
     public void run() {
-        for (TenantId tenant : tenants.activeTenants()) {
+        for (TenantId tenant : tenants.withSchema()) {
             try {
                 sweep(tenant);
             } catch (RuntimeException e) {

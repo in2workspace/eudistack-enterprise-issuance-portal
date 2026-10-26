@@ -3,7 +3,7 @@ package es.in2.issuanceportal.journey.infrastructure.scheduling;
 import es.in2.issuanceportal.TestcontainersConfiguration;
 import es.in2.issuanceportal.journey.application.JourneyService;
 import es.in2.issuanceportal.shared.tenant.TenantId;
-import es.in2.issuanceportal.shared.tenant.TenantRegistry;
+import es.in2.issuanceportal.shared.tenant.TenantSchemas;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -29,7 +29,7 @@ class JourneyExpiryJobIT {
     @Autowired
     private JourneyService service;
     @Autowired
-    private TenantRegistry tenants;
+    private TenantSchemas tenants;
     @Autowired
     private JdbcTemplate jdbcTemplate;
     @Autowired
@@ -59,16 +59,30 @@ class JourneyExpiryJobIT {
     @Test
     @DisplayName("EC-05 — sweep_lockHeldByAnotherInstance_skipsTenant")
     void sweep_lockHeldByAnotherInstance_skipsTenant() {
-        JourneyExpiryJob first = job();
-        JourneyExpiryJob second = job();
         UUID journey = inactiveJourney();
+        // Another instance holds the tenant's lock. The job uses database time, so lock_until does too.
+        jdbc.sql("INSERT INTO \"kpmg_issuance_portal\".shedlock (name, lock_until, locked_at, locked_by) "
+                        + "VALUES (:name, now() + interval '1 minute', now(), 'another-instance')")
+                .param("name", JourneyExpiryJob.LOCK_NAME).update();
 
-        boolean firstSwept = first.sweep(KPMG);
-        boolean secondSwept = second.sweep(KPMG);
+        assertThat(job().sweep(KPMG)).isFalse();
 
-        assertThat(firstSwept).isTrue();
-        assertThat(secondSwept).isFalse();
-        assertThat(journeyRow(journey)).containsEntry("withdrawal_reason", "expired");
+        assertThat(journeyRow(journey)).containsEntry("state", "in_progress");
+        assertThat(sessionRows(journey)).isOne();
+    }
+
+    @Test
+    void run_tenantDeactivatedWithJourneysInProgress_stillDeletesTheirPersonalData() {
+        UUID journey = inactiveJourney();
+        jdbc.sql("UPDATE public.tenant_registry SET status = 'inactive' WHERE schema_name = 'kpmg'").update();
+        try {
+            job().run();
+
+            assertThat(sessionRows(journey)).isZero();
+            assertThat(journeyRow(journey)).containsEntry("withdrawal_reason", "expired");
+        } finally {
+            jdbc.sql("UPDATE public.tenant_registry SET status = 'active' WHERE schema_name = 'kpmg'").update();
+        }
     }
 
     private JourneyExpiryJob job() {
