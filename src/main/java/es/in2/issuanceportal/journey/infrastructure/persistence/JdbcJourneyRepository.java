@@ -25,6 +25,7 @@ class JdbcJourneyRepository implements JourneyRepository {
     /** Column and parameter names, used by the row mapper and both writes. */
     private static final String STATE = "state";
     private static final String STEP = "step";
+    private static final String CUTOFF = "cutoff";
 
     private static final String COLUMNS =
             "id, state, step, withdrawal_reason, identification_method, issuance_process_ids, created_at, last_activity, ended_at";
@@ -93,7 +94,7 @@ class JdbcJourneyRepository implements JourneyRepository {
                         + " j ON j.id = s.journey_id WHERE (j.state = :withdrawn OR j.last_activity <= :cutoff)"
                         + " AND s.journey_id > :afterId ORDER BY s.journey_id LIMIT :limit")
                 .param("withdrawn", JourneyState.WITHDRAWN.code())
-                .param("cutoff", Timestamp.from(cutoff))
+                .param(CUTOFF, Timestamp.from(cutoff))
                 .param("afterId", afterId)
                 .param("limit", limit)
                 .query(UUID.class)
@@ -110,7 +111,7 @@ class JdbcJourneyRepository implements JourneyRepository {
                 .param("endedAt", journey.endedAt().map(Timestamp::from).orElse(null))
                 .param("id", journey.id())
                 .param("inProgress", JourneyState.IN_PROGRESS.code())
-                .param("cutoff", Timestamp.from(cutoff))
+                .param(CUTOFF, Timestamp.from(cutoff))
                 .update() == 1;
     }
 
@@ -121,7 +122,7 @@ class JdbcJourneyRepository implements JourneyRepository {
                         + "AND (j.state = :withdrawn OR j.last_activity <= :cutoff)")
                 .param("id", journeyId)
                 .param("withdrawn", JourneyState.WITHDRAWN.code())
-                .param("cutoff", Timestamp.from(cutoff))
+                .param(CUTOFF, Timestamp.from(cutoff))
                 .update() > 0;
     }
 

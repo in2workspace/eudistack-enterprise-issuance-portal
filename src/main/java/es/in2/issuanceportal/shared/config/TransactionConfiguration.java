@@ -1,6 +1,5 @@
 package es.in2.issuanceportal.shared.config;
 
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -24,8 +23,7 @@ public class TransactionConfiguration {
         return new TransactionTemplate(transactionManager);
     }
 
-    @Bean
-    @Qualifier(INDEPENDENT)
+    @Bean(INDEPENDENT)
     TransactionTemplate independentTransactions(PlatformTransactionManager transactionManager) {
         TransactionTemplate template = new TransactionTemplate(transactionManager);
         template.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);

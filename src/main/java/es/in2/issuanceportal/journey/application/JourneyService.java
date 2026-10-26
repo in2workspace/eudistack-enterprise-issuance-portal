@@ -224,7 +224,7 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
                     }
                     try {
                         withdraw(tenant, journey, WithdrawalReason.CANCELLED);
-                    } catch (JourneyClosedException e) {
+                    } catch (JourneyClosedException _) {
                         // A parallel request (a double submit) or the expiry job closed it first: it is
                         // closed either way, and the holder still gets a new journey.
                         log.debug("Previous journey {} was already closed", journey.id());

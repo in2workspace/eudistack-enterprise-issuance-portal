@@ -22,8 +22,6 @@ import static net.logstash.logback.argument.StructuredArguments.kv;
 @Component
 class LogJourneyAuditTrail implements JourneyAuditTrail {
 
-    private static final Logger FAILURES = LoggerFactory.getLogger(LogJourneyAuditTrail.class);
-
     private final Logger audit;
 
     @Autowired
@@ -65,7 +63,7 @@ class LogJourneyAuditTrail implements JourneyAuditTrail {
                     kv("withdrawal_reason", event.withdrawalReason().map(WithdrawalReason::code).orElse(null)),
                     kv("occurred_at", event.occurredAt()));
         } catch (RuntimeException e) {
-            FAILURES.error("Could not record the {} event {} of journey {}",
+            audit.error("Could not record the {} event {} of journey {}",
                     event.kind(), event.eventId(), event.journeyId(), e);
         }
     }
