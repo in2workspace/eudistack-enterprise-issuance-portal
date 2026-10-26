@@ -12,3 +12,7 @@ issuance-portal:
   # JdbcPortalConfigRepositoryIT checks the five-minute cache on its own instance.
   portal-config:
     cache-ttl: 0s
+  incidents:
+    mail:
+      provider: local
+      from: noreply@mail.test.eudistack.net
