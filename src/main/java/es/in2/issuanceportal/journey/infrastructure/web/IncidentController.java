@@ -2,6 +2,8 @@ package es.in2.issuanceportal.journey.infrastructure.web;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import es.in2.issuanceportal.journey.application.IncidentService;
+import es.in2.issuanceportal.shared.error.ProblemCode;
+import es.in2.issuanceportal.shared.error.ProblemException;
 import es.in2.issuanceportal.shared.tenant.CurrentTenant;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
@@ -19,14 +21,23 @@ import org.springframework.web.bind.annotation.RestController;
 class IncidentController {
 
     private final IncidentService service;
+    private final IncidentRateLimiter limiter;
 
-    IncidentController(IncidentService service) {
+    IncidentController(IncidentService service, IncidentRateLimiter limiter) {
         this.service = service;
+        this.limiter = limiter;
     }
 
+    /**
+     * The limit is checked once the body is valid: a rejected body does not count. The address is the
+     * client's, as the load balancer or nginx forwards it ({@code server.forward-headers-strategy}).
+     */
     @PostMapping("/api/v1/incidents")
     @ResponseStatus(HttpStatus.ACCEPTED)
     IncidentAccepted send(@Valid @RequestBody IncidentRequest incident, HttpServletRequest request) {
+        if (!limiter.tryConsume(request.getRemoteAddr())) {
+            throw new ProblemException(ProblemCode.TOO_MANY_REQUESTS);
+        }
         return new IncidentAccepted(service.send(CurrentTenant.of(request), incident.toIncident()));
     }
 

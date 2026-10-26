@@ -64,6 +64,10 @@ dependencies {
     // --- Caching ---
     implementation 'com.github.ben-manes.caffeine:caffeine'
 
+    // --- Rate limiting ---
+    // At most 5 incidents per hour from each IP address (design.md AD-8).
+    implementation 'com.bucket4j:bucket4j_jdk17-core:8.14.0'
+
     // --- Observability ---
     implementation 'io.micrometer:micrometer-tracing-bridge-otel'
     implementation 'io.opentelemetry:opentelemetry-exporter-otlp'

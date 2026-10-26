@@ -16,6 +16,8 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
+import java.util.concurrent.atomic.AtomicInteger;
+
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -28,6 +30,7 @@ class IncidentApiIT {
     private static final String CONTEXT = "/issuance-portal";
     private static final String INCIDENTS = CONTEXT + "/api/v1/incidents";
     private static final String SANDBOX_HOST = "sandbox.127.0.0.1.nip.io";
+    private static final AtomicInteger NEXT_ADDRESS = new AtomicInteger();
 
     private static final String CONFIG_JSON = """
             {
@@ -101,6 +104,22 @@ class IncidentApiIT {
     }
 
     @Test
+    @DisplayName("AC-06, EC-04 — postIncident_sixthWithinAnHourFromSameAddress_isTooManyRequests")
+    void postIncident_sixthWithinAnHourFromSameAddress_isTooManyRequests() throws Exception {
+        configureSandbox();
+        String address = "203.0.113.66";
+        mvc.perform(from(post("{}"), address)).andExpect(status().isBadRequest());
+        for (int i = 0; i < 5; i++) {
+            mvc.perform(from(post(VALID), address)).andExpect(status().isAccepted());
+        }
+
+        mvc.perform(from(post(VALID), address))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.type").value("too_many_requests"));
+        mvc.perform(post(VALID)).andExpect(status().isAccepted());
+    }
+
+    @Test
     @DisplayName("AC-01 — postIncident_tenantWithoutConfiguration_isConfigUnavailable")
     void postIncident_tenantWithoutConfiguration_isConfigUnavailable() throws Exception {
         mvc.perform(post(VALID))
@@ -120,14 +139,27 @@ class IncidentApiIT {
         return postWithoutRequestedWith(body).header("X-Requested-With", "issuance-portal");
     }
 
+    /**
+     * Each request comes from its own address unless a test sets one: the rate limiter is shared by every
+     * test in the context.
+     */
     private static MockHttpServletRequestBuilder postWithoutRequestedWith(String body) {
+        String address = "10.0.0." + NEXT_ADDRESS.incrementAndGet() % 250;
         return MockMvcRequestBuilders.post(INCIDENTS)
                 .contextPath(CONTEXT)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body)
                 .with(request -> {
                     request.setServerName(SANDBOX_HOST);
+                    request.setRemoteAddr(address);
                     return request;
                 });
+    }
+
+    private static MockHttpServletRequestBuilder from(MockHttpServletRequestBuilder request, String address) {
+        return request.with(r -> {
+            r.setRemoteAddr(address);
+            return r;
+        });
     }
 }
