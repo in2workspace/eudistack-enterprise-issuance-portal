@@ -4,10 +4,12 @@ import com.tngtech.archunit.base.DescribedPredicate;
 import com.tngtech.archunit.core.domain.JavaClass;
 import com.tngtech.archunit.lang.ArchRule;
 
-import java.util.Arrays;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Set;
 
 import static com.tngtech.archunit.core.domain.JavaClass.Predicates.resideInAnyPackage;
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.classes;
 import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
 
 /**
@@ -18,30 +20,33 @@ final class ArchitectureRules {
 
     static final String BASE = "es.in2.issuanceportal";
     static final List<String> MODULES = List.of("journey", "identification", "authenticsource");
+    /** Modules that still have no classes: their rules may match nothing until their stories land. */
+    static final Set<String> EMPTY_MODULES = Set.of("identification", "authenticsource");
     /** What a module may use from another: its published package, nothing else. */
     static final String PUBLISHED = "api";
 
     private ArchitectureRules() {
     }
 
-    static final ArchRule DOMAIN_DOES_NOT_DEPEND_ON_INFRASTRUCTURE = noClasses()
+    /**
+     * The domain depends on the JDK and on itself only: no infrastructure, no Spring, and none of the
+     * shared web or tenant types either.
+     */
+    static final ArchRule DOMAIN_ONLY_DEPENDS_ON_JAVA_AND_DOMAIN = classes()
             .that().resideInAPackage("..domain..")
-            .should().dependOnClassesThat().resideInAPackage("..infrastructure..")
-            .allowEmptyShould(true);
+            .should().onlyDependOnClassesThat().resideInAnyPackage("java..", "..domain..");
 
-    static final ArchRule DOMAIN_DOES_NOT_DEPEND_ON_SPRING_WEB = noClasses()
-            .that().resideInAPackage("..domain..")
-            .should().dependOnClassesThat().resideInAPackage("org.springframework.web..")
-            .allowEmptyShould(true);
+    static final ArchRule APPLICATION_DOES_NOT_DEPEND_ON_INFRASTRUCTURE = noClasses()
+            .that().resideInAPackage("..application..")
+            .should().dependOnClassesThat().resideInAPackage("..infrastructure..");
 
     /** The session is the contract between modules (AD-3), so it cannot know any of them. */
     static final ArchRule SESSION_DOES_NOT_DEPEND_ON_MODULES = noClasses()
             .that().resideInAPackage(BASE + ".session..")
-            .should().dependOnClassesThat().resideInAnyPackage(modulePackages(MODULES))
-            .allowEmptyShould(true);
+            .should().dependOnClassesThat().resideInAnyPackage(modulePackages(MODULES));
 
     static ArchRule moduleOnlyUsesPublishedPackagesOfOthers(String module) {
-        List<String> others = new java.util.ArrayList<>(MODULES);
+        List<String> others = new ArrayList<>(MODULES);
         others.remove(module);
         others.add("session");
         DescribedPredicate<JavaClass> internalsOfOthers = resideInAnyPackage(modulePackages(others))
@@ -50,7 +55,7 @@ final class ArchitectureRules {
         return noClasses()
                 .that().resideInAPackage(BASE + "." + module + "..")
                 .should().dependOnClassesThat(internalsOfOthers)
-                .allowEmptyShould(true);
+                .allowEmptyShould(EMPTY_MODULES.contains(module));
     }
 
     private static String[] modulePackages(List<String> modules) {
@@ -62,8 +67,6 @@ final class ArchitectureRules {
     }
 
     static List<ArchRule> moduleBoundaries() {
-        return Arrays.asList(MODULES.stream()
-                .map(ArchitectureRules::moduleOnlyUsesPublishedPackagesOfOthers)
-                .toArray(ArchRule[]::new));
+        return MODULES.stream().map(ArchitectureRules::moduleOnlyUsesPublishedPackagesOfOthers).toList();
     }
 }

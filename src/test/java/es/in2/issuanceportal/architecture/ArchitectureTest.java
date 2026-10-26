@@ -6,7 +6,11 @@ import com.tngtech.archunit.core.importer.ImportOption;
 import es.in2.issuanceportal.identification.archfixture.IllegalCaller;
 import es.in2.issuanceportal.identification.archfixture.LegalCaller;
 import es.in2.issuanceportal.journey.api.archfixture.PublishedPort;
+import es.in2.issuanceportal.journey.application.archfixture.ApplicationUsingInfrastructure;
 import es.in2.issuanceportal.journey.archfixture.JourneyInternal;
+import es.in2.issuanceportal.journey.domain.archfixture.DomainUsingSharedError;
+import es.in2.issuanceportal.journey.domain.archfixture.DomainUsingSpringWeb;
+import es.in2.issuanceportal.journey.infrastructure.archfixture.SomeAdapter;
 import es.in2.issuanceportal.session.archfixture.SessionKnowingJourney;
 import org.junit.jupiter.api.Test;
 
@@ -20,9 +24,32 @@ class ArchitectureTest {
             .importPackages(ArchitectureRules.BASE);
 
     @Test
-    void domainRules_productionCode_haveNoViolations() {
-        ArchitectureRules.DOMAIN_DOES_NOT_DEPEND_ON_INFRASTRUCTURE.check(PRODUCTION);
-        ArchitectureRules.DOMAIN_DOES_NOT_DEPEND_ON_SPRING_WEB.check(PRODUCTION);
+    void layerRules_productionCode_haveNoViolations() {
+        ArchitectureRules.DOMAIN_ONLY_DEPENDS_ON_JAVA_AND_DOMAIN.check(PRODUCTION);
+        ArchitectureRules.APPLICATION_DOES_NOT_DEPEND_ON_INFRASTRUCTURE.check(PRODUCTION);
+    }
+
+    @Test
+    void domainRule_domainUsesSharedErrorCodes_reportsViolation() {
+        JavaClasses classes = new ClassFileImporter().importClasses(DomainUsingSharedError.class);
+
+        assertThat(ArchitectureRules.DOMAIN_ONLY_DEPENDS_ON_JAVA_AND_DOMAIN.evaluate(classes).hasViolation()).isTrue();
+    }
+
+    @Test
+    void domainRule_domainUsesSpringWeb_reportsViolation() {
+        JavaClasses classes = new ClassFileImporter().importClasses(DomainUsingSpringWeb.class);
+
+        assertThat(ArchitectureRules.DOMAIN_ONLY_DEPENDS_ON_JAVA_AND_DOMAIN.evaluate(classes).hasViolation()).isTrue();
+    }
+
+    @Test
+    void applicationRule_applicationUsesInfrastructure_reportsViolation() {
+        JavaClasses classes = new ClassFileImporter()
+                .importClasses(ApplicationUsingInfrastructure.class, SomeAdapter.class);
+
+        assertThat(ArchitectureRules.APPLICATION_DOES_NOT_DEPEND_ON_INFRASTRUCTURE.evaluate(classes).hasViolation())
+                .isTrue();
     }
 
     @Test
