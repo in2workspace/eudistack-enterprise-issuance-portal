@@ -20,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -74,11 +75,37 @@ class JourneyApiIT {
     @DisplayName("AC-02 — getJourney_journeyInProgress_returnsStateAndStep")
     void getJourney_journeyInProgress_returnsStateAndStep() throws Exception {
         SessionId session = start();
+        UUID journeyId = sessions.journeyOf(SANDBOX, session).orElseThrow();
+        jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET last_activity = now() - interval '5 minutes' "
+                + "WHERE id = :id").param("id", journeyId).update();
+        java.time.Instant before = lastActivity(journeyId);
 
         mvc.perform(withSession(get(JOURNEY, SANDBOX_HOST), session))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.state").value("in_progress"))
                 .andExpect(jsonPath("$.step").value("started"));
+
+        assertThat(lastActivity(journeyId)).isAfter(before);
+    }
+
+    @Test
+    void anyResponse_successOrError_carriesTheSecurityHeaders() throws Exception {
+        MvcResult ok = mvc.perform(post(JOURNEY, SANDBOX_HOST)).andExpect(status().isCreated()).andReturn();
+        MvcResult forbidden = mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post(JOURNEY).contextPath(CONTEXT).with(host(SANDBOX_HOST)))
+                .andExpect(status().isForbidden()).andReturn();
+
+        for (MvcResult result : List.of(ok, forbidden)) {
+            assertThat(result.getResponse().getHeader("Cache-Control")).isEqualTo("no-store");
+            assertThat(result.getResponse().getHeader("Pragma")).isEqualTo("no-cache");
+            assertThat(result.getResponse().getHeader("X-Content-Type-Options")).isEqualTo("nosniff");
+            assertThat(result.getResponse().getHeader("X-Frame-Options")).isEqualTo("DENY");
+            assertThat(result.getResponse().getHeader("Content-Security-Policy"))
+                    .isEqualTo("default-src 'none'; frame-ancestors 'none'");
+            assertThat(result.getResponse().getHeader("Strict-Transport-Security")).startsWith("max-age=31536000");
+            assertThat(result.getResponse().getHeader("Referrer-Policy")).isEqualTo("strict-origin-when-cross-origin");
+            assertThat(result.getResponse().getHeader("Permissions-Policy")).contains("camera=()");
+        }
     }
 
     @Test
@@ -159,6 +186,7 @@ class JourneyApiIT {
         UUID journeyId = sessions.journeyOf(SANDBOX, session).orElseThrow();
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET last_activity = now() - interval '16 minutes' "
                 + "WHERE id = :id").param("id", journeyId).update();
+        java.time.Instant before = lastActivity(journeyId);
 
         mvc.perform(withSession(get(JOURNEY, SANDBOX_HOST), session))
                 .andExpect(status().isGone())
@@ -168,6 +196,27 @@ class JourneyApiIT {
                 .containsEntry("state", "withdrawn")
                 .containsEntry("withdrawal_reason", "expired");
         assertThat(sessionRows(journeyId)).isZero();
+        assertThat(lastActivity(journeyId)).isEqualTo(before);
+    }
+
+    @Test
+    @DisplayName("EC-03 — postWithdrawal_staleSessionBeforeExpiryJob_returns410AndWithdrawsAsExpired")
+    void postWithdrawal_staleSessionBeforeExpiryJob_returns410AndWithdrawsAsExpired() throws Exception {
+        SessionId session = start();
+        UUID journeyId = sessions.journeyOf(SANDBOX, session).orElseThrow();
+        jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET last_activity = now() - interval '16 minutes' "
+                + "WHERE id = :id").param("id", journeyId).update();
+        java.time.Instant before = lastActivity(journeyId);
+
+        mvc.perform(withSession(post(JOURNEY + "/withdrawal", SANDBOX_HOST), session))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.type").value("journey_closed"));
+
+        assertThat(journeyRow(journeyId))
+                .containsEntry("state", "withdrawn")
+                .containsEntry("withdrawal_reason", "expired");
+        assertThat(sessionRows(journeyId)).isZero();
+        assertThat(lastActivity(journeyId)).isEqualTo(before);
     }
 
     @Test
@@ -280,6 +329,11 @@ class JourneyApiIT {
     private Map<String, Object> journeyRow(UUID id) {
         return jdbc.sql("SELECT state, step, withdrawal_reason, ended_at FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
                 .param("id", id).query().singleRow();
+    }
+
+    private java.time.Instant lastActivity(UUID journeyId) {
+        return jdbc.sql("SELECT last_activity FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
+                .param("id", journeyId).query(java.sql.Timestamp.class).single().toInstant();
     }
 
     private long sessionRows(UUID journeyId) {
