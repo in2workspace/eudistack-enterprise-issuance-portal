@@ -146,12 +146,21 @@ jobs:
       # init-databases.sh leaves it locally, and a local data key (no KMS here).
       - name: Run database and container
         run: |
-          docker run -d --name postgres --network host             -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=admin -e POSTGRES_DB=eudistack             -v "$PWD/src/test/resources/db/tenant-registry.sql:/docker-entrypoint-initdb.d/tenant-registry.sql:ro"             postgres:17-alpine
+          docker run -d --name postgres --network host \
+            -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=admin -e POSTGRES_DB=eudistack \
+            -v "$PWD/src/test/resources/db/tenant-registry.sql:/docker-entrypoint-initdb.d/tenant-registry.sql:ro" \
+            postgres:17-alpine
           for i in $(seq 1 30); do
             if docker exec postgres pg_isready -U admin -d eudistack; then break; fi
             sleep 2
           done
-          docker run -d --name issuance-portal --network host             -e DB_URL=jdbc:postgresql://localhost:5432/eudistack             -e DB_USERNAME=admin -e DB_PASSWORD=admin             -e PORTAL_CRYPTO_PROVIDER=local             -e PORTAL_LOCAL_DATA_KEY="$(head -c 32 /dev/urandom | base64)"             eudistack-enterprise-issuance-portal:pr
+          docker run -d --name issuance-portal --network host \
+            -e DB_URL=jdbc:postgresql://localhost:5432/eudistack \
+            -e DB_USERNAME=admin -e DB_PASSWORD=admin \
+            -e PORTAL_ENV=local \
+            -e PORTAL_CRYPTO_PROVIDER=local \
+            -e PORTAL_LOCAL_DATA_KEY="$(head -c 32 /dev/urandom | base64)" \
+            eudistack-enterprise-issuance-portal:pr
 
       - name: Wait for service health
         run: |
