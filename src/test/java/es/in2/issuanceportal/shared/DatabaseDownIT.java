@@ -54,7 +54,7 @@ class DatabaseDownIT {
     private MockMvc mvc;
 
     @Test
-    @DisplayName("ES-04 — api_databaseDown_returns503ServiceUnavailable")
+    @DisplayName("EUD-275 ES-04, EUD-276 ES-05 — api_databaseDown_returns503ServiceUnavailable")
     void api_databaseDown_returns503ServiceUnavailable() throws Exception {
         // sandbox is now in the tenant cache, kpmg is not.
         MvcResult started = mvc.perform(post("sandbox")).andExpect(status().isCreated()).andReturn();

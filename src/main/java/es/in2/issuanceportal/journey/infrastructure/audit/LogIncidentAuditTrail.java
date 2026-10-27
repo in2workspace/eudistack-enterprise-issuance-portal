@@ -13,7 +13,7 @@ import static net.logstash.logback.argument.StructuredArguments.kv;
  * Provisional trail: each incident event as a structured log line.
  *
  * <p>TODO(EUD-276): send the events to the audit API (EUD-244) instead, together with the journey
- * events of {@link LogJourneyAuditTrail}. Recorded in the feature's tech-debt.md.
+ * events of {@link LogJourneyAuditTrail}. Recorded in the review of EUD-276 (review.md, technical debt).
  */
 @Component
 class LogIncidentAuditTrail implements IncidentAuditTrail {
