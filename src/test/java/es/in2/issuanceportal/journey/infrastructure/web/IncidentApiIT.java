@@ -17,6 +17,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.system.CapturedOutput;
 import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Import;
+import io.micrometer.core.instrument.MeterRegistry;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -27,11 +29,13 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.matchesPattern;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -67,6 +71,8 @@ class IncidentApiIT {
     private MockMvc mvc;
     @Autowired
     private JdbcClient jdbc;
+    @Autowired
+    private MeterRegistry meters;
     @MockitoBean
     private IncidentMailer mailer;
 
@@ -157,6 +163,9 @@ class IncidentApiIT {
     @ValueSource(strings = {
             "{\"email\": \"ana@example.org\", \"type\": \"access\", \"subject\": \"S\", \"description\": \"D\"}",
             "{\"name\": \"Ana\", \"email\": \"ana-at-example\", \"type\": \"access\", \"subject\": \"S\", \"description\": \"D\"}",
+            "{\"name\": \"Ana\", \"email\": \"\\\"x,victim@a.com\\\"@evil.com\", \"type\": \"access\", \"subject\": \"S\", \"description\": \"D\"}",
+            "{\"name\": \"Ana\", \"email\": \"ana@localhost\", \"type\": \"access\", \"subject\": \"S\", \"description\": \"D\"}",
+            "{\"name\": \"Ana\", \"email\": \"anñ@example.org\", \"type\": \"access\", \"subject\": \"S\", \"description\": \"D\"}",
             "{\"name\": \"Ana\", \"email\": \"ana@example.org\", \"type\": \"billing\", \"subject\": \"S\", \"description\": \"D\"}",
             "{\"name\": \"Ana\", \"email\": \"ana@example.org\", \"type\": \"access\", \"subject\": \" \", \"description\": \"D\"}",
             "{\"name\": \"Ana\", \"email\": \"ana@example.org\", \"phone\": \"0123456789012345678901234567890\", \"type\": \"access\", \"subject\": \"S\", \"description\": \"D\"}",
@@ -195,7 +204,7 @@ class IncidentApiIT {
 
     @Test
     @DisplayName("AC-06, EC-04 — postIncident_sixthWithinAnHourFromSameAddress_isTooManyRequests")
-    void postIncident_sixthWithinAnHourFromSameAddress_isTooManyRequests() throws Exception {
+    void postIncident_sixthWithinAnHourFromSameAddress_isTooManyRequests(CapturedOutput output) throws Exception {
         configure("sandbox", "soporte@sandbox.example.org", "48 horas");
         String address = "203.0.113.66";
         mvc.perform(from(post("{}"), address)).andExpect(status().isBadRequest());
@@ -205,8 +214,12 @@ class IncidentApiIT {
 
         mvc.perform(from(post(VALID), address))
                 .andExpect(status().isTooManyRequests())
+                .andExpect(header().string(HttpHeaders.RETRY_AFTER, matchesPattern("3[5-6][0-9][0-9]")))
                 .andExpect(jsonPath("$.type").value("too_many_requests"));
         verify(mailer, times(5)).send(any());
+        assertThat(output.getAll()).contains("rate.limit.exceeded", "sandbox", "203.0.113.66");
+        assertThat(meters.counter("issuance_portal.incidents.rate_limited", "tenant", "sandbox").count())
+                .isGreaterThanOrEqualTo(1);
         mvc.perform(post(VALID)).andExpect(status().isAccepted());
     }
 

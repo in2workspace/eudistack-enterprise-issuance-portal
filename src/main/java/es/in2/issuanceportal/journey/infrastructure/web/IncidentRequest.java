@@ -10,11 +10,14 @@ import jakarta.validation.constraints.Size;
 /** {@code Incident} of the contract, with its required fields, lengths and formats. */
 record IncidentRequest(
         @NotBlank @Size(max = 200) String name,
-        @NotBlank @Email String email,
+        // Goes to Reply-To: plain ASCII addresses only, which SES accepts as they are.
+        @NotBlank @Size(max = 254) @Email @Pattern(regexp = EMAIL) String email,
         @Size(max = 30) String phone,
         @NotBlank @Pattern(regexp = "technical|access|credentials|other") String type,
         @NotBlank @Size(max = 200) String subject,
         @NotBlank @Size(max = 5000) String description) {
+
+    static final String EMAIL = "[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)*\\.[A-Za-z]{2,}";
 
     Incident toIncident() {
         return new Incident(name, email, phone, IncidentType.fromCode(type), subject, description);
