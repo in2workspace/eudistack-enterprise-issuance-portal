@@ -32,6 +32,8 @@ class DatabaseDownIT {
 
     private static final String CONTEXT = "/issuance-portal";
     private static final String JOURNEY = CONTEXT + "/api/v1/journey";
+    private static final String CONFIG = CONTEXT + "/api/v1/config";
+    private static final String INCIDENTS = CONTEXT + "/api/v1/incidents";
 
     private static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:17-alpine")
             .withInitScript("db/tenant-registry.sql");
@@ -52,7 +54,7 @@ class DatabaseDownIT {
     private MockMvc mvc;
 
     @Test
-    @DisplayName("ES-04 — api_databaseDown_returns503ServiceUnavailable")
+    @DisplayName("EUD-275 ES-04, EUD-276 ES-05 — api_databaseDown_returns503ServiceUnavailable")
     void api_databaseDown_returns503ServiceUnavailable() throws Exception {
         // sandbox is now in the tenant cache, kpmg is not.
         MvcResult started = mvc.perform(post("sandbox")).andExpect(status().isCreated()).andReturn();
@@ -67,6 +69,21 @@ class DatabaseDownIT {
         assertThat(start.getResponse().getHeader(HttpHeaders.SET_COOKIE)).isNull();
         // Filter path: the tenant registry itself cannot be read.
         assertServiceUnavailable(mvc.perform(get("kpmg")).andReturn());
+        // EUD-276 ES-05: the portal configuration cannot be read, for GET /config nor for an incident.
+        assertServiceUnavailable(mvc.perform(MockMvcRequestBuilders.get(CONFIG).contextPath(CONTEXT)
+                .with(request -> {
+                    request.setServerName("sandbox.127.0.0.1.nip.io");
+                    return request;
+                })).andReturn());
+        assertServiceUnavailable(mvc.perform(MockMvcRequestBuilders.post(INCIDENTS).contextPath(CONTEXT)
+                .header("X-Requested-With", "issuance-portal")
+                .contentType("application/json")
+                .content("{\"name\": \"Ana\", \"email\": \"ana@example.org\", \"type\": \"other\", "
+                        + "\"subject\": \"S\", \"description\": \"D\"}")
+                .with(request -> {
+                    request.setServerName("sandbox.127.0.0.1.nip.io");
+                    return request;
+                })).andReturn());
     }
 
     private static void assertServiceUnavailable(MvcResult result) throws Exception {

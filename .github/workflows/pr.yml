@@ -160,6 +160,9 @@ jobs:
             -e PORTAL_ENV=local \
             -e PORTAL_CRYPTO_PROVIDER=local \
             -e PORTAL_LOCAL_DATA_KEY="$(head -c 32 /dev/urandom | base64)" \
+            -e PORTAL_MAIL_PROVIDER=local \
+            -e PORTAL_MAIL_FROM=noreply@mail.local.eudistack.net \
+            -e PORTAL_TRUSTED_PROXIES=0 \
             eudistack-enterprise-issuance-portal:pr
 
       - name: Wait for service health

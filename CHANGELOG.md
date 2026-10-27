@@ -6,6 +6,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-27
+
+### Added
+
+- **EUD-276 — configuración del portal e incidencias**: tabla `portal_config` en el esquema de cada tenant (migración `V2`, sin datos), con la configuración del portal en JSON: la parte pública del contrato (`texts`, `legal_links`, `support`, `wallet_url`) y la interna del servicio (tipo de atestación, colocación de datos, alta con ticket, `client_id` del portal y tipo de identificador por tipo de atestación). Se valida al leerla: una configuración incompleta o con `wallet_url` que no es una URL `https` se trata como ausente.
+- `GET /config`, sin token ni cookie, con solo la parte pública. Caché de 5 minutos por tenant (`issuance-portal.portal-config.cache-ttl`) que no guarda la ausencia ni la configuración no válida. Sin configuración válida responde 503 `config_unavailable`.
+- `POST /incidents`, sin token ni cookie: valida los campos del contrato (400 `bad_request`, con solo los nombres de los campos en `detail`), envía la incidencia en texto plano a `support.email` del tenant con el correo del titular en `Reply-To` y responde 202 con `response_time`. No guarda la incidencia. Sin dirección de soporte o plazo, o si el envío falla, 503 `service_unavailable`.
+- Envío por Amazon SES (`PORTAL_MAIL_PROVIDER=ses`) o adaptador local que no envía (`local`), con el remitente en `PORTAL_MAIL_FROM`. Las dos variables son obligatorias.
+- Límite de 5 incidencias en cualquier hora por cliente, con una ventana deslizante sobre las últimas incidencias aceptadas (una IPv6 cuenta por su /64), comprobado después de validar el cuerpo. Al superarlo, 429 `too_many_requests` con `Retry-After`, un log `rate.limit.exceeded` y el contador `issuance_portal.incidents.rate_limited` por tenant. El límite es por instancia.
+- El correo de la incidencia se limita a 254 caracteres ASCII con un formato estricto, porque va en el `Reply-To`.
+- Traza de cada intento de envío (`audit.incident`: tenant, tipo, resultado y motivo del fallo), sin el contenido de la incidencia.
+- La IP del cliente se toma de `X-Forwarded-For` contando los proxies de la plataforma desde la derecha (`PORTAL_TRUSTED_PROXIES`: 1 detrás de nginx, 2 detrás de CloudFront y el ALB, obligatoria), nunca de lo que escribe el cliente; solo se acepta una IP literal, en forma canónica. Se ignora la cabecera `Forwarded`.
+
 ## [0.1.0] - 2026-10-19
 
 ### Added
