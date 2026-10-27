@@ -8,6 +8,9 @@ issuance-portal:
   # Tests run the expiry sweep explicitly, never on the minute.
   expiry:
     enabled: false
+  # MockMvc requests set their address directly. ClientAddressIT checks the proxies on its own context.
+  client-address:
+    trusted-proxies: 0
   # Tests share one context: no cached configuration from one test may answer for another.
   # JdbcPortalConfigRepositoryIT checks the five-minute cache on its own instance.
   portal-config:

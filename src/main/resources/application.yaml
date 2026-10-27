@@ -17,8 +17,9 @@ spring:
 
 server:
   port: ${SERVER_PORT:8080}
-  # The tenant comes from the public host, which nginx and the ALB pass in X-Forwarded-Host.
-  forward-headers-strategy: framework
+  # The forwarded headers are read by the filters of ForwardedHeadersConfiguration: the client's address
+  # first, then the public host (the tenant comes from it) and scheme.
+  forward-headers-strategy: none
   servlet:
     # The API lives under /issuance-portal/api/v1; health and metrics under /issuance-portal/actuator.
     context-path: /issuance-portal
@@ -33,6 +34,10 @@ issuance-portal:
     provider: ${PORTAL_CRYPTO_PROVIDER:}
     kms-key-id: ${PORTAL_KMS_KEY_ID:}
     local-key: ${PORTAL_LOCAL_DATA_KEY:}
+  client-address:
+    # Proxies of the platform in front of the service, each appending to X-Forwarded-For: 1 in Docker
+    # Compose (nginx), 2 in AWS (CloudFront and the ALB). Empty: the service does not start.
+    trusted-proxies: ${PORTAL_TRUSTED_PROXIES:}
   portal-config:
     # How long a valid portal configuration is cached (design.md AD-7).
     cache-ttl: 5m

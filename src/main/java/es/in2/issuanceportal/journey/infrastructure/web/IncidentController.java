@@ -30,7 +30,7 @@ class IncidentController {
 
     /**
      * The limit is checked once the body is valid: a rejected body does not count. The address is the
-     * client's, as the load balancer or nginx forwards it ({@code server.forward-headers-strategy}).
+     * client's as the platform's proxies saw it, never one the client wrote ({@code ClientAddressFilter}).
      */
     @PostMapping("/api/v1/incidents")
     @ResponseStatus(HttpStatus.ACCEPTED)
