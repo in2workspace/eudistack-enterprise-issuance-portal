@@ -8,11 +8,13 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.net.InetAddress;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -48,6 +50,8 @@ public class ClientAddressFilter extends OncePerRequestFilter {
     /**
      * The chain of addresses is every {@code X-Forwarded-For} entry followed by the connection's peer. With
      * fewer entries than trusted proxies the request skipped one of them: the leftmost entry is the best guess.
+     * The entry must be an IP literal: otherwise the nearest valid entry to its right, which a proxy wrote,
+     * or the peer. Returned in canonical form, so one address never counts as several.
      */
     String clientAddress(HttpServletRequest request) {
         if (trustedProxies == 0) {
@@ -62,7 +66,22 @@ public class ClientAddressFilter extends OncePerRequestFilter {
             }
         }
         chain.add(request.getRemoteAddr());
-        return chain.get(Math.max(0, chain.size() - 1 - trustedProxies));
+        for (int i = Math.max(0, chain.size() - 1 - trustedProxies); i < chain.size(); i++) {
+            Optional<String> address = ipLiteral(chain.get(i));
+            if (address.isPresent()) {
+                return address.get();
+            }
+        }
+        return request.getRemoteAddr();
+    }
+
+    /** Parses without any DNS lookup; a host name, a port or any other text is not an address. */
+    private static Optional<String> ipLiteral(String entry) {
+        try {
+            return Optional.of(InetAddress.ofLiteral(entry).getHostAddress());
+        } catch (IllegalArgumentException e) {
+            return Optional.empty();
+        }
     }
 
     private static final class ClientAddressRequest extends HttpServletRequestWrapper {

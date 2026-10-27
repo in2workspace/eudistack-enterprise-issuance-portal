@@ -53,6 +53,26 @@ class ClientAddressFilterTest {
     }
 
     @Test
+    void doFilter_entryThatIsNotAnAddress_takesTheNearestValidEntryToItsRight() throws Exception {
+        HttpServletRequest seen = filter(2, "10.0.1.15", "x".repeat(4000) + ", 130.176.0.1");
+
+        assertThat(seen.getRemoteAddr()).isEqualTo("130.176.0.1");
+    }
+
+    @Test
+    void doFilter_hostNameOrPort_isNotTakenAsAnAddress() throws Exception {
+        assertThat(filter(1, NGINX, "evil.example.org").getRemoteAddr()).isEqualTo(NGINX);
+        assertThat(filter(1, NGINX, "198.51.100.20:8080").getRemoteAddr()).isEqualTo(NGINX);
+    }
+
+    @Test
+    void doFilter_ipv6Address_isReturnedInCanonicalForm() throws Exception {
+        HttpServletRequest seen = filter(1, NGINX, "2001:DB8:0:0:0:0:0:1");
+
+        assertThat(seen.getRemoteAddr()).isEqualTo("2001:db8:0:0:0:0:0:1");
+    }
+
+    @Test
     void doFilter_noProxies_ignoresTheHeader() throws Exception {
         HttpServletRequest seen = filter(0, "198.51.100.20", "203.0.113.7");
 
