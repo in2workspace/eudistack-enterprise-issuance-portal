@@ -55,7 +55,7 @@ dependencies {
 
     // --- Scheduling ---
     // The expiry job runs on one instance per tenant at a time (design.md AD-4).
-    implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:6.0.2'
+    implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:7.10.1'
 
     // --- Caching ---
     implementation 'com.github.ben-manes.caffeine:caffeine'
