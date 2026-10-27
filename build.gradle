@@ -6,7 +6,7 @@ plugins {
     id 'checkstyle'
     id 'org.sonarqube' version '7.4.0.8496'
     id 'com.github.ben-manes.versions' version '0.61.0'
-    id 'org.cyclonedx.bom' version '2.2.0'
+    id 'org.cyclonedx.bom' version '3.5.1'
 }
 
 group = 'com.eudistack'
