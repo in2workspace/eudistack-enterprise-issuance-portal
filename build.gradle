@@ -12,7 +12,7 @@ plugins {
 group = 'com.eudistack'
 // Plain version, no SNAPSHOT: the ci job tags the release v${version}
 // and refuses to run if that tag already exists.
-version = '0.1.0'
+version = '0.2.0'
 
 java {
     toolchain {

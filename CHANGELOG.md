@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-27
+
 ### Added
 
 - **EUD-276 — configuración del portal e incidencias**: tabla `portal_config` en el esquema de cada tenant (migración `V2`, sin datos), con la configuración del portal en JSON: la parte pública del contrato (`texts`, `legal_links`, `support`, `wallet_url`) y la interna del servicio (tipo de atestación, colocación de datos, alta con ticket, `client_id` del portal y tipo de identificador por tipo de atestación). Se valida al leerla: una configuración incompleta o con `wallet_url` que no es una URL `https` se trata como ausente.
