@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.context.request.WebRequest;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
 
+import java.time.Duration;
 import java.util.stream.Collectors;
 
 /**
@@ -33,7 +34,17 @@ public class ProblemExceptionHandler extends ResponseEntityExceptionHandler {
         if (exception.problem() == ProblemCode.SERVICE_UNAVAILABLE) {
             log.error("Dependency unavailable", exception);
         }
-        return respond(Problems.of(exception.problem()));
+        ProblemDetail detail = Problems.of(exception.problem());
+        return exception.retryAfter()
+                .map(wait -> ResponseEntity.status(detail.getStatus())
+                        .header(HttpHeaders.RETRY_AFTER, Long.toString(retryAfterSeconds(wait)))
+                        .body(detail))
+                .orElseGet(() -> respond(detail));
+    }
+
+    /** Whole seconds, rounded up so a client that waits exactly that long is accepted. */
+    private static long retryAfterSeconds(Duration wait) {
+        return Math.max(1, wait.plusMillis(999).toSeconds());
     }
 
     /**

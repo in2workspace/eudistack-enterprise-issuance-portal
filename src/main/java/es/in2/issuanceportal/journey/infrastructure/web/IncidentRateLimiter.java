@@ -2,18 +2,28 @@ package es.in2.issuanceportal.journey.infrastructure.web;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import io.github.bucket4j.Bandwidth;
-import io.github.bucket4j.Bucket;
-import io.github.bucket4j.TimeMeter;
 import org.springframework.stereotype.Component;
 
+import java.net.InetAddress;
+import java.net.UnknownHostException;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HexFormat;
+import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
 /**
- * At most {@value #LIMIT} incidents per hour from each IP address (design.md AD-8). The buckets live in
- * memory, so the limit applies per instance of the service.
+ * At most {@value #LIMIT} incidents in any hour from each client (design.md AD-8, ac.md AC-06): a sliding
+ * window over the times of the last accepted incidents, so a sixth within an hour of the oldest is always
+ * rejected, also across the turn of the hour. Bucket4j cannot give that guarantee (a fixed window allows
+ * ten around its boundary), which is why the window is kept here. The windows live in memory, so the limit
+ * applies per instance of the service.
+ *
+ * <p>An IPv6 client counts by its /64, the prefix a single host usually holds; an IPv4-mapped address
+ * counts as its IPv4 address.
  */
 @Component
 class IncidentRateLimiter {
@@ -21,41 +31,48 @@ class IncidentRateLimiter {
     static final int LIMIT = 5;
     static final Duration WINDOW = Duration.ofHours(1);
 
-    private final Cache<String, Bucket> byIp;
-    private final TimeMeter time;
+    private final Clock clock;
+    private final Cache<String, Deque<Instant>> byClient;
 
     IncidentRateLimiter(Clock clock) {
-        this.time = new ClockTimeMeter(clock);
-        this.byIp = Caffeine.newBuilder()
+        this.clock = clock;
+        this.byClient = Caffeine.newBuilder()
                 .expireAfterAccess(WINDOW)
                 .maximumSize(100_000)
                 .ticker(() -> TimeUnit.MILLISECONDS.toNanos(clock.millis()))
                 .build();
     }
 
-    /** False when the address has already sent {@value #LIMIT} incidents in the current hour. */
-    boolean tryConsume(String ip) {
-        return byIp.get(ip, key -> newBucket()).tryConsume(1);
-    }
-
-    private Bucket newBucket() {
-        return Bucket.builder()
-                .addLimit(Bandwidth.builder().capacity(LIMIT).refillIntervally(LIMIT, WINDOW).build())
-                .withCustomTimePrecision(time)
-                .build();
-    }
-
-    /** Bucket4j reads time from the injected clock, like the rest of the service. */
-    private record ClockTimeMeter(Clock clock) implements TimeMeter {
-
-        @Override
-        public long currentTimeNanos() {
-            return TimeUnit.MILLISECONDS.toNanos(clock.millis());
+    /**
+     * Records an incident from the address when it is within the limit. Otherwise returns how long until
+     * the oldest incident in the window leaves it, for {@code Retry-After}.
+     */
+    Optional<Duration> tryConsume(String address) {
+        Deque<Instant> accepted = byClient.get(clientKey(address), key -> new ArrayDeque<>(LIMIT));
+        synchronized (accepted) {
+            Instant now = clock.instant();
+            Instant windowStart = now.minus(WINDOW);
+            while (!accepted.isEmpty() && !accepted.peekFirst().isAfter(windowStart)) {
+                accepted.pollFirst();
+            }
+            if (accepted.size() < LIMIT) {
+                accepted.addLast(now);
+                return Optional.empty();
+            }
+            return Optional.of(Duration.between(windowStart, accepted.peekFirst()));
         }
+    }
 
-        @Override
-        public boolean isWallClockBased() {
-            return true;
+    /** The address as the limit counts it: IPv4 as is, IPv6 by its /64. */
+    static String clientKey(String address) {
+        try {
+            byte[] bytes = InetAddress.ofLiteral(address).getAddress();
+            if (bytes.length == 4) {
+                return InetAddress.getByAddress(bytes).getHostAddress();
+            }
+            return HexFormat.of().formatHex(bytes, 0, 8) + "::/64";
+        } catch (IllegalArgumentException | UnknownHostException e) {
+            return address;
         }
     }
 }
