@@ -50,14 +50,14 @@ public class IncidentService {
             mailer.send(IncidentMessage.of(incident, support.email()));
         } catch (IncidentDeliveryException e) {
             log.warn("Incident of tenant {} not sent: {}", tenant, e.getMessage());
-            record(tenant, incident, Outcome.FAILED, Optional.of(e.getMessage()));
+            trace(tenant, incident, Outcome.FAILED, Optional.of(e.getMessage()));
             throw new ProblemException(ProblemCode.SERVICE_UNAVAILABLE);
         }
-        record(tenant, incident, Outcome.SENT, Optional.empty());
+        trace(tenant, incident, Outcome.SENT, Optional.empty());
         return support.responseTime();
     }
 
-    private void record(TenantId tenant, Incident incident, Outcome outcome, Optional<String> reason) {
+    private void trace(TenantId tenant, Incident incident, Outcome outcome, Optional<String> reason) {
         trail.append(tenant, new IncidentAuditTrail.Event(UUID.randomUUID(), incident.type(), outcome, reason,
                 clock.instant()));
     }

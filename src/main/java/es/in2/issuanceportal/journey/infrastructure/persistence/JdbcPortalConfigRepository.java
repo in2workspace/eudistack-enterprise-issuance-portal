@@ -58,7 +58,7 @@ class JdbcPortalConfigRepository implements PortalConfigRepository {
     }
 
     private Optional<PortalConfig> load(TenantId tenant) {
-        return jdbc.sql("SELECT config::text FROM " + tenant.schema() + ".portal_config WHERE tenant = :tenant")
+        return jdbc.sql("SELECT config::text FROM " + table(tenant) + " WHERE tenant = :tenant")
                 .param("tenant", tenant.value())
                 .query(String.class)
                 .optional()
@@ -78,10 +78,14 @@ class JdbcPortalConfigRepository implements PortalConfigRepository {
             log.warn("Portal configuration of tenant {} is invalid: {}", tenant, e.getMessage());
         } catch (JsonMappingException e) {
             log.warn("Portal configuration of tenant {} is invalid: wrong type at {}", tenant, path(e));
-        } catch (JsonProcessingException e) {
+        } catch (JsonProcessingException _) {
             log.warn("Portal configuration of tenant {} is not valid JSON", tenant);
         }
         return Optional.empty();
+    }
+
+    private static String table(TenantId tenant) {
+        return tenant.schema() + ".portal_config";
     }
 
     private static String path(JsonMappingException e) {

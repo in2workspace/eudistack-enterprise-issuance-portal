@@ -79,7 +79,7 @@ public class ClientAddressFilter extends OncePerRequestFilter {
     private static Optional<String> ipLiteral(String entry) {
         try {
             return Optional.of(InetAddress.ofLiteral(entry).getHostAddress());
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException _) {
             return Optional.empty();
         }
     }
@@ -100,7 +100,7 @@ public class ClientAddressFilter extends OncePerRequestFilter {
 
         @Override
         public String getRemoteHost() {
-            return clientAddress;
+            return getRemoteAddr();
         }
 
         @Override

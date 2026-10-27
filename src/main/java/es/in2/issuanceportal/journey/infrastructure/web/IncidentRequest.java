@@ -11,13 +11,14 @@ import jakarta.validation.constraints.Size;
 record IncidentRequest(
         @NotBlank @Size(max = 200) String name,
         // Goes to Reply-To: plain ASCII addresses only, which SES accepts as they are.
-        @NotBlank @Size(max = 254) @Email @Pattern(regexp = EMAIL) String email,
+        @NotBlank @Size(max = 254) @Email @Pattern(regexp = EMAIL_FORMAT) String email,
         @Size(max = 30) String phone,
         @NotBlank @Pattern(regexp = "technical|access|credentials|other") String type,
         @NotBlank @Size(max = 200) String subject,
         @NotBlank @Size(max = 5000) String description) {
 
-    static final String EMAIL = "[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9-]+(\\.[A-Za-z0-9-]+)*\\.[A-Za-z]{2,}";
+    /** ASCII local part, then one to eight domain labels and a top-level domain: bounded, no backtracking. */
+    static final String EMAIL_FORMAT = "[A-Za-z0-9._%+-]{1,64}@(?:[A-Za-z0-9-]{1,63}\\.){1,8}[A-Za-z]{2,63}";
 
     Incident toIncident() {
         return new Incident(name, email, phone, IncidentType.fromCode(type), subject, description);

@@ -4,6 +4,8 @@ import es.in2.issuanceportal.journey.application.port.IncidentMailer;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain;
 import software.amazon.awssdk.services.sesv2.SesV2Client;
 
 import java.time.Duration;
@@ -20,7 +22,9 @@ class IncidentMailConfiguration {
     IncidentMailer incidentMailer(IncidentMailProperties properties) {
         log.info("Incidents sent with the {} mail provider", properties.provider());
         return mailerFor(properties, () -> SesV2Client.builder()
-                // Region and credentials come from the ECS task environment.
+                // Region and credentials come from the ECS task environment (AWS_REGION, the task role).
+                .region(new DefaultAwsRegionProviderChain().getRegion())
+                .credentialsProvider(DefaultCredentialsProvider.builder().build())
                 .overrideConfiguration(config -> config.apiCallTimeout(SES_CALL_TIMEOUT))
                 .build());
     }

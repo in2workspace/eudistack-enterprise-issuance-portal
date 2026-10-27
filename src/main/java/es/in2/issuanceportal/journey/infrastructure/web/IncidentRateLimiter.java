@@ -71,7 +71,7 @@ class IncidentRateLimiter {
                 return InetAddress.getByAddress(bytes).getHostAddress();
             }
             return HexFormat.of().formatHex(bytes, 0, 8) + "::/64";
-        } catch (IllegalArgumentException | UnknownHostException e) {
+        } catch (IllegalArgumentException | UnknownHostException _) {
             return address;
         }
     }
