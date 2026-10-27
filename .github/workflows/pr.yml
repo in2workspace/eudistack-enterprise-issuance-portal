@@ -1,0 +1,242 @@
+name: pr-to-main
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+env:
+  JACOCO_MIN_COVERAGE_OVERALL: 40
+  JACOCO_MIN_COVERAGE_CHANGED_FILES: 60
+
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+concurrency:
+  group: ci-${{ github.head_ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: Detect code changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - name: Filter changed paths
+        id: filter
+        uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
+        with:
+          predicate-quantifier: 'every'
+          filters: |
+            code:
+              - '!**/*.md'
+              - '!docs/**'
+              - '!.github/**'
+              - '!LICENSE'
+              - '!.gitignore'
+
+  build:
+    name: Build & Test
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: 'temurin'
+          java-version: '25'
+          cache: 'gradle'
+
+      - name: Make Gradlew Executable
+        run: chmod +x ./gradlew
+
+      - name: Build & Test
+        run: ./gradlew build --info
+
+      - name: Publish JaCoCo Coverage
+        if: always()
+        uses: madrapps/jacoco-report@e51ce1f46f7f8b5331593f935e59cbaf44b84920 # v1.8.0
+        with:
+          paths: build/reports/jacoco/test/jacocoTestReport.xml
+          token: ${{ secrets.GITHUB_TOKEN }}
+          min-coverage-overall: ${{ env.JACOCO_MIN_COVERAGE_OVERALL }}
+          min-coverage-changed-files: ${{ env.JACOCO_MIN_COVERAGE_CHANGED_FILES }}
+
+      - name: Upload Coverage Report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: jacoco-report
+          path: build/jacocoHtml/
+
+      - name: SonarCloud Scan
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: ./gradlew sonar --info
+
+      - name: SonarCloud Quality Gate
+        uses: sonarsource/sonarqube-quality-gate-action@7a5fffe8e523c40e0c740b6bc2712ab503e52efa # v1.2.1
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          scanMetadataReportFile: build/sonar/report-task.txt
+
+      - name: Get current date
+        id: date
+        run: echo "date=$(date -u +'%Y-%m-%d')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Trivy vulnerability DB
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/trivy
+          key: ${{ runner.os }}-trivy-db-${{ steps.date.outputs.date }}
+          restore-keys: |
+            ${{ runner.os }}-trivy-db-
+
+      - name: Trivy Vulnerability Scan
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: 'fs'
+          scan-ref: 'build/libs'
+          severity: 'HIGH,CRITICAL'
+          exit-code: '1'
+          ignore-unfixed: true
+          format: 'table'
+          cache-dir: '~/.cache/trivy'
+          trivyignores: 'config/trivy/.trivyignore'
+
+  dast-baseline:
+    name: ZAP DAST Baseline
+    needs: [changes, build]
+    # Gated on `!cancelled()` and deliberately NOT on `needs.build.result`: what
+    # this job exercises (the image boots and serves its public endpoints) is
+    # orthogonal to the unit-test/coverage/Sonar gate in `build`, so a red
+    # `build` should not suppress the DAST signal.
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    runs-on: ubuntu-latest
+    # Severity-split gate, not an all-or-nothing one:
+    #   - Low / Informational findings -> `fail_action: false` on the scan step.
+    #     On a passive baseline they are noise and never fail anything.
+    #   - High / Critical findings -> the "Fail on High/Critical findings" step
+    #     exits non-zero, which reddens the run so GitHub's failure notification
+    #     fires. Merge protection is unaffected: this job is not a required check.
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # SKIP_TESTS=true: the `build` job already ran the full suite for the
+      # quality gate — re-running it inside the image build would duplicate the
+      # work and risk failing this job on something unrelated to DAST.
+      - name: Build Docker image
+        run: docker build --build-arg SKIP_TESTS=true -t eudistack-enterprise-issuance-portal:pr .
+
+      # The service needs PostgreSQL with the platform's tenant registry, as
+      # init-databases.sh leaves it locally, and a local data key (no KMS here).
+      - name: Run database and container
+        run: |
+          docker run -d --name postgres --network host \
+            -e POSTGRES_USER=admin -e POSTGRES_PASSWORD=admin -e POSTGRES_DB=eudistack \
+            -v "$PWD/src/test/resources/db/tenant-registry.sql:/docker-entrypoint-initdb.d/tenant-registry.sql:ro" \
+            postgres:17-alpine
+          for i in $(seq 1 30); do
+            if docker exec postgres pg_isready -U admin -d eudistack; then break; fi
+            sleep 2
+          done
+          docker run -d --name issuance-portal --network host \
+            -e DB_URL=jdbc:postgresql://localhost:5432/eudistack \
+            -e DB_USERNAME=admin -e DB_PASSWORD=admin \
+            -e PORTAL_ENV=local \
+            -e PORTAL_CRYPTO_PROVIDER=local \
+            -e PORTAL_LOCAL_DATA_KEY="$(head -c 32 /dev/urandom | base64)" \
+            eudistack-enterprise-issuance-portal:pr
+
+      - name: Wait for service health
+        run: |
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8080/issuance-portal/actuator/health/readiness; then exit 0; fi
+            sleep 2
+          done
+          echo "Service did not become healthy in time"
+          docker logs issuance-portal
+          exit 1
+
+      # Guards the scan against silently degrading into a no-op: if the target
+      # stops returning 200, ZAP would still "pass" while scanning nothing.
+      - name: Verify scan target returns 200
+        run: |
+          target='http://localhost:8080/issuance-portal/actuator/health'
+          status=$(curl -s -o /tmp/target.json -w '%{http_code}' "$target")
+          echo "GET $target -> $status"
+          if [ "$status" != "200" ]; then
+            echo "Scan target is not reachable — the ZAP baseline would scan an empty surface."
+            cat /tmp/target.json || true
+            docker logs issuance-portal
+            exit 1
+          fi
+
+      # Target is the health endpoint: the journey API answers 200 only with a
+      # session cookie and a tenant host, which a passive baseline cannot set up.
+      # Known limitation: the API itself is covered by the integration tests,
+      # not by this scan.
+      - name: ZAP Baseline Scan
+        uses: zaproxy/action-baseline@de8ad967d3548d44ef623df22cf95c3b0baf8b25 # v0.15.0
+        with:
+          target: 'http://localhost:8080/issuance-portal/actuator/health'
+          rules_file_name: 'dev-tools/testing/zap/zap-baseline.conf'
+          artifact_name: 'zap-report'
+          fail_action: false
+          allow_issue_writing: false
+
+      # The `zap-report` artifact is a ZIP with 90-day retention, so reading it
+      # means downloading it first. Dumping ZAP's markdown report into the job
+      # summary makes it readable on the run page itself, which is what a PR
+      # actually needs. action-baseline writes report_md.md to GITHUB_WORKSPACE.
+      - name: Publish ZAP report in the job summary
+        if: always()
+        run: |
+          if [ -f report_md.md ]; then
+            {
+              echo '## ZAP DAST Baseline'
+              echo
+              cat report_md.md
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            {
+              echo '## ZAP DAST Baseline'
+              echo
+              echo 'The scan produced no markdown report — check the step above.'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # High/Critical gate. ZAP's risk scale tops out at 3 (High) today, so
+      # >= 3 also covers a future Critical level.
+      - name: Fail on High/Critical findings
+        if: always()
+        run: |
+          if [ ! -f report_json.json ]; then
+            echo "::warning::No ZAP JSON report to evaluate."
+            exit 0
+          fi
+          high=$(jq '[.site[]?.alerts[]? | select(((.riskcode // "0") | tonumber) >= 3)] | length' report_json.json)
+          echo "High/Critical alerts: ${high}"
+          if [ "${high}" -gt 0 ]; then
+            {
+              echo
+              echo "### Blocking: ${high} High/Critical finding(s)"
+              jq -r '.site[]?.alerts[]? | select(((.riskcode // "0") | tonumber) >= 3) | "- \(.riskdesc) — \(.name) (\(.count) instance(s))"' report_json.json
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::ZAP reported ${high} High/Critical alert(s)."
+            exit 1
+          fi

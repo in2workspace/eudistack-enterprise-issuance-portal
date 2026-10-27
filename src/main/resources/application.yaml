@@ -1,0 +1,67 @@
+spring:
+  application:
+    name: eudistack-enterprise-issuance-portal
+  threads:
+    virtual:
+      enabled: true
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/eudistack}
+    username: ${DB_USERNAME:admin}
+    password: ${DB_PASSWORD:}
+    hikari:
+      # Fail fast with 503 when the database is down instead of holding the request ~30 s.
+      connection-timeout: ${DB_CONNECTION_TIMEOUT_MS:3000}
+  flyway:
+    # Migrations run per tenant schema in TenantSchemaMigrator, never on the default schema.
+    enabled: false
+
+server:
+  port: ${SERVER_PORT:8080}
+  # The tenant comes from the public host, which nginx and the ALB pass in X-Forwarded-Host.
+  forward-headers-strategy: framework
+  servlet:
+    # The API lives under /issuance-portal/api/v1; health and metrics under /issuance-portal/actuator.
+    context-path: /issuance-portal
+
+issuance-portal:
+  # Filled in from build.gradle when the resources are processed.
+  version: "@version@"
+  # local, test, stg or pro. No default: the service does not start without it.
+  env: ${PORTAL_ENV}
+  crypto:
+    # kms in AWS environments, local in Docker Compose. Empty: the service does not start.
+    provider: ${PORTAL_CRYPTO_PROVIDER:}
+    kms-key-id: ${PORTAL_KMS_KEY_ID:}
+    local-key: ${PORTAL_LOCAL_DATA_KEY:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: when-authorized
+  # Trace and span ids are always created, so every log line and error carries them.
+  # Export is opt-in: in AWS the ADOT sidecar sends spans to X-Ray (conv-observability §4).
+  tracing:
+    sampling:
+      probability: ${OTEL_TRACES_SAMPLER_ARG:1.0}
+    propagation:
+      type: w3c
+  otlp:
+    tracing:
+      export:
+        enabled: ${OTEL_TRACES_EXPORT_ENABLED:false}
+      endpoint: ${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces
+  metrics:
+    distribution:
+      # p95 of each journey step is an NFR (< 300 ms).
+      percentiles-histogram:
+        http.server.requests: true
+
+logging:
+  level:
+    es.in2.issuanceportal: ${LOG_LEVEL:INFO}
