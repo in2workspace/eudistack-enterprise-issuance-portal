@@ -143,7 +143,8 @@ class EntitlementSimulatedIT {
 
     @Test
     @DisplayName("AC-09, NFR-2 — postEntitlement_slowRecord_isUnavailableWithinTheTimeout")
-    void postEntitlement_slowRecord_isUnavailableWithinTheTimeout() throws Exception {
+    void postEntitlement_slowRecord_isUnavailableWithinTheTimeout(CapturedOutput output) throws Exception {
+        int before = output.getOut().length();
         SessionId session = journeyWith(IdentifierType.DNI, "00000003A");
         UUID journeyId = sessions.journeyOf(SANDBOX, session).orElseThrow();
 
@@ -157,6 +158,10 @@ class EntitlementSimulatedIT {
         assertThat(took).isBetween(Duration.ofSeconds(10), Duration.ofSeconds(11));
         assertThat(journeyRow(journeyId)).containsEntry("state", "in_progress").containsEntry("step", "started");
         assertThat(sessions.read(SANDBOX, session, Section.ENTITLEMENT)).isEmpty();
+        String logged = output.getOut().substring(before);
+        assertThat(logged).contains("\"result\":\"unavailable\"")
+                .doesNotContain(PERSONAL_DATA.toArray(String[]::new))
+                .doesNotContain("Prueba Lenta", "Geriatrics");
     }
 
     @Test
