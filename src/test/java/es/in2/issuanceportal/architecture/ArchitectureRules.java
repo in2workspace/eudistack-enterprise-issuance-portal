@@ -21,7 +21,7 @@ final class ArchitectureRules {
     static final String BASE = "es.in2.issuanceportal";
     static final List<String> MODULES = List.of("journey", "identification", "authenticsource");
     /** Modules that still have no classes: their rules may match nothing until their stories land. */
-    static final Set<String> EMPTY_MODULES = Set.of("identification", "authenticsource");
+    static final Set<String> EMPTY_MODULES = Set.of("identification");
     /** What a module may use from another: its published package, nothing else. */
     static final String PUBLISHED = "api";
 
