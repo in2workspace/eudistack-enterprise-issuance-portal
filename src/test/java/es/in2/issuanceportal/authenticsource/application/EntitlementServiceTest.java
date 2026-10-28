@@ -32,8 +32,11 @@ import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.transaction.support.TransactionOperations;
 
 import java.time.Duration;
@@ -44,10 +47,14 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@ExtendWith(OutputCaptureExtension.class)
 class EntitlementServiceTest {
 
     private static final TenantId CGCOM = new TenantId("cgcom");
@@ -72,7 +79,7 @@ class EntitlementServiceTest {
     private final EntitlementService service = new EntitlementService(journey, journey, journey, sessions,
             new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
                     new AdapterRegistry(List.of(adapter))),
-            trail, TransactionOperations.withoutTransaction(), clock);
+            trail, TransactionOperations.withoutTransaction(), clock, 100);
 
     /** Two people: the active one, findable by DNI and by registration number; one deregistered. */
     private static LookupResult source(PersonalIdentifier searched) {
@@ -215,7 +222,7 @@ class EntitlementServiceTest {
 
     @Test
     @DisplayName("ES-01 — check_sourceFails_isUnavailableNeverConfirmed")
-    void check_sourceFails_isUnavailableNeverConfirmed() {
+    void check_sourceFails_isUnavailableNeverConfirmed(CapturedOutput output) {
         SessionId session = journeyWithDni("00000001R");
         adapter.answering(searched -> {
             throw new IllegalStateException("source said 00000001R is unknown");
@@ -224,6 +231,8 @@ class EntitlementServiceTest {
         assertThatThrownBy(() -> service.check(CGCOM, session)).isInstanceOfSatisfying(ProblemException.class,
                 e -> assertThat(e.problem()).isEqualTo(ProblemCode.AUTHENTIC_SOURCE_UNAVAILABLE));
         assertThat(stored(journeyId(session)).state()).isEqualTo(JourneyState.IN_PROGRESS);
+        assertThat(output.getOut()).contains("Authentic source simulated of tenant cgcom failed: IllegalStateException")
+                .doesNotContain("00000001R");
     }
 
     @Test
@@ -270,7 +279,7 @@ class EntitlementServiceTest {
 
     @Test
     @DisplayName("ES-02 — check_identityWithInvalidShape_isStepNotAllowed")
-    void check_identityWithInvalidShape_isStepNotAllowed() {
+    void check_identityWithInvalidShape_isStepNotAllowed(CapturedOutput output) {
         configure(null);
         SessionId session = journey.start(CGCOM, Optional.empty()).session();
         sessions.write(CGCOM, session, Section.IDENTITY,
@@ -279,6 +288,8 @@ class EntitlementServiceTest {
         assertThatThrownBy(() -> service.check(CGCOM, session)).isInstanceOfSatisfying(ProblemException.class,
                 e -> assertThat(e.problem()).isEqualTo(ProblemCode.STEP_NOT_ALLOWED));
         assertThat(adapter.searches()).isEmpty();
+        assertThat(output.getOut()).contains("Identity of the journey session is invalid at personal_identifier.type")
+                .doesNotContain("\"nif\"");
     }
 
     @Test
@@ -374,16 +385,18 @@ class EntitlementServiceTest {
 
     @Test
     @DisplayName("ES-05 — check_trailFails_answersTheSame")
-    void check_trailFails_answersTheSame() {
+    void check_trailFails_answersTheSame(CapturedOutput output) {
         SessionId session = journeyWithDni("00000001R");
         EntitlementService failingTrail = new EntitlementService(journey, journey, journey, sessions,
                 new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
                         new AdapterRegistry(List.of(adapter))),
                 (tenant, event) -> {
                     throw new IllegalStateException("log sink down");
-                }, TransactionOperations.withoutTransaction(), clock);
+                }, TransactionOperations.withoutTransaction(), clock, 100);
 
         assertThat(failingTrail.check(CGCOM, session)).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
+        assertThat(output.getOut()).contains("Could not record the entitlement check of journey")
+                .doesNotContain("00000001R", "Lucía");
         failingTrail.close();
     }
 
@@ -394,7 +407,7 @@ class EntitlementServiceTest {
         EntitlementService failing = new EntitlementService(journey, journey, (tenant, s, cause) -> {
             throw new IllegalStateException("database down");
         }, sessions, new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
-                new AdapterRegistry(List.of(adapter))), trail, TransactionOperations.withoutTransaction(), clock);
+                new AdapterRegistry(List.of(adapter))), trail, TransactionOperations.withoutTransaction(), clock, 100);
 
         assertThatThrownBy(() -> failing.check(CGCOM, session)).isInstanceOf(IllegalStateException.class);
         failing.close();
@@ -421,10 +434,58 @@ class EntitlementServiceTest {
                 throw new IllegalStateException("database down");
             }
         }, new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
-                new AdapterRegistry(List.of(adapter))), trail, TransactionOperations.withoutTransaction(), clock);
+                new AdapterRegistry(List.of(adapter))), trail, TransactionOperations.withoutTransaction(), clock, 100);
 
         assertThatThrownBy(() -> failing.check(CGCOM, session)).isInstanceOf(IllegalStateException.class);
         assertThat(stored(id).step()).isEqualTo(JourneyStep.STARTED);
         failing.close();
+    }
+
+    @Test
+    @DisplayName("AC-13 — check_identityTypeTheSourceIsNotSearchedBy_isConfigUnavailable")
+    void check_identityTypeTheSourceIsNotSearchedBy_isConfigUnavailable() {
+        SessionId session = journeyWith(es.in2.issuanceportal.session.api.IdentifierType.COLEGIADO, "280000001", null);
+        rows.put(CGCOM, new AuthenticSourceConfig(DOCTORID, Set.of(), Map.of(DOCTORID,
+                new SourceSettings("DoctorID", "simulated", null, null, null, Set.of(IdentifierType.DNI), MAPPING,
+                        null, null))));
+
+        assertThatThrownBy(() -> service.check(CGCOM, session)).isInstanceOfSatisfying(ProblemException.class,
+                e -> assertThat(e.problem()).isEqualTo(ProblemCode.CONFIG_UNAVAILABLE));
+        assertThat(adapter.searches()).isEmpty();
+        assertThat(stored(journeyId(session)).state()).isEqualTo(JourneyState.IN_PROGRESS);
+    }
+
+    @Test
+    void check_tooManySearchesInFlight_isUnavailableAtOnce() throws Exception {
+        CountDownLatch inside = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        adapter.answering(searched -> {
+            inside.countDown();
+            try {
+                release.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return source(searched);
+        });
+        EntitlementService oneAtATime = new EntitlementService(journey, journey, journey, sessions,
+                new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
+                        new AdapterRegistry(List.of(adapter))), trail, TransactionOperations.withoutTransaction(),
+                clock, 1);
+        SessionId first = journeyWithDni("00000001R");
+        SessionId second = journeyWithDni("00000001R");
+        AtomicReference<EntitlementService.Outcome> firstOutcome = new AtomicReference<>();
+        Thread firstCheck = Thread.ofVirtual().start(() -> firstOutcome.set(oneAtATime.check(CGCOM, first)));
+        assertThat(inside.await(5, TimeUnit.SECONDS)).isTrue();
+
+        assertThatThrownBy(() -> oneAtATime.check(CGCOM, second)).isInstanceOfSatisfying(ProblemException.class,
+                e -> assertThat(e.problem()).isEqualTo(ProblemCode.AUTHENTIC_SOURCE_UNAVAILABLE));
+        assertThat(adapter.searches()).hasSize(1);
+
+        release.countDown();
+        firstCheck.join(5_000);
+        assertThat(firstOutcome.get()).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
+        assertThat(oneAtATime.check(CGCOM, second)).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
+        oneAtATime.close();
     }
 }

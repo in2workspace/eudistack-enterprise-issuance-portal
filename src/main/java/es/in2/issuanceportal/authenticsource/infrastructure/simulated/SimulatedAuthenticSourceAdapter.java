@@ -81,9 +81,15 @@ class SimulatedAuthenticSourceAdapter implements AuthenticSourceAdapter {
         return LookupResult.found(found);
     }
 
+    /**
+     * The records of the tenant's source, read again here because the port only carries the tenant and the
+     * type. If the configuration changed since the module checked it and no longer chooses this adapter,
+     * the search fails (an unavailable source) rather than answer with another configuration's people.
+     */
     private List<SimulatedRecord> records(TenantId tenant, String attestationType) {
         SourceSettings settings = configs.find(tenant)
                 .flatMap(config -> Optional.ofNullable(config.sources().get(attestationType)))
+                .filter(source -> TYPE.equals(source.adapter()))
                 .orElseThrow(() -> new IllegalStateException("No simulated source configured"));
         Object records = settings.adapterSettings().get("records");
         if (records == null) {

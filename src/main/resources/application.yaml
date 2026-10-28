@@ -41,6 +41,9 @@ issuance-portal:
   portal-config:
     # How long a valid portal configuration is cached (design.md AD-7).
     cache-ttl: 5m
+  authentic-source:
+    # Searches of the authentic source in flight per instance; beyond it a check answers 503 at once.
+    max-concurrent-lookups: ${PORTAL_AUTHENTIC_SOURCE_MAX_LOOKUPS:100}
   incidents:
     mail:
       # ses in AWS environments, local in Docker Compose. Empty: the service does not start.

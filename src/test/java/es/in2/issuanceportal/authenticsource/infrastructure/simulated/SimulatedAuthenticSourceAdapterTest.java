@@ -146,4 +146,14 @@ class SimulatedAuthenticSourceAdapterTest {
         assertThat(search(CGCOM, IdentifierType.DNI, "00000001R"))
                 .isInstanceOf(LookupResult.NotFound.class);
     }
+
+    @Test
+    void lookup_entryNoLongerChoosesTheSimulatedAdapter_throws() {
+        rows.put(CGCOM, new AuthenticSourceConfig(DOCTORID, Set.of(), Map.of(DOCTORID,
+                new SourceSettings("DoctorID", "cgcom", null, null, null, Set.of(IdentifierType.DNI), List.of(),
+                        null, Map.of("records", List.of(record("00000001R", "280000001", true)))))));
+
+        assertThatThrownBy(() -> search(CGCOM, IdentifierType.DNI, "00000001R"))
+                .isInstanceOf(IllegalStateException.class);
+    }
 }

@@ -24,6 +24,7 @@ import es.in2.issuanceportal.shared.error.ProblemCode;
 import es.in2.issuanceportal.shared.error.ProblemException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionOperations;
 
@@ -38,6 +39,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -64,10 +66,14 @@ public class EntitlementService implements AutoCloseable {
     private final TransactionOperations transactions;
     private final Clock clock;
     private final ExecutorService lookups = Executors.newVirtualThreadPerTaskExecutor();
+    /** Searches in flight in this instance, including those the module stopped waiting for. */
+    private final Semaphore lookupSlots;
 
     public EntitlementService(JourneyAccess access, JourneyProgress progress, JourneyWithdrawal withdrawal,
                               JourneySessions sessions, AuthenticSourceConfigs configs, AuthenticSourceAuditTrail trail,
-                              TransactionOperations transactions, Clock clock) {
+                              TransactionOperations transactions, Clock clock,
+                              @Value("${issuance-portal.authentic-source.max-concurrent-lookups:100}")
+                              int maxConcurrentLookups) {
         this.access = access;
         this.progress = progress;
         this.withdrawal = withdrawal;
@@ -76,6 +82,7 @@ public class EntitlementService implements AutoCloseable {
         this.trail = trail;
         this.transactions = transactions;
         this.clock = clock;
+        this.lookupSlots = new Semaphore(maxConcurrentLookups);
     }
 
     /** The result the interface gets: confirmed with what the Data step shows, or not confirmed. */
@@ -104,6 +111,12 @@ public class EntitlementService implements AutoCloseable {
             trace.record(AuthenticSourceAuditTrail.Result.CONFIRMED, null);
             confirm(tenant, session, null, Map.of(), preview);
             return new Outcome.Confirmed(preview);
+        }
+        if (!current.identifierTypes().contains(searched.type())) {
+            // The configuration checks cover the login's types; an identity outside them is a tenant setup error.
+            log.warn("Authentic source configuration of tenant {} for {} cannot search by {}", tenant,
+                    current.attestationType(), searched.type().code());
+            throw new ProblemException(ProblemCode.CONFIG_UNAVAILABLE);
         }
         LookupResult answer;
         try {
@@ -175,8 +188,25 @@ public class EntitlementService implements AutoCloseable {
      */
     private LookupResult lookup(TenantId tenant, AuthenticSourceConfigs.Current current, PersonalIdentifier searched) {
         Duration timeout = current.settings().timeout();
-        Future<LookupResult> answer = lookups.submit(() -> current.adapter()
-                .lookup(tenant, current.attestationType(), searched, timeout));
+        if (!lookupSlots.tryAcquire()) {
+            // A slow source must not take every thread of the service with it: refuse at once instead.
+            log.warn("Authentic source {} of tenant {} not asked: too many searches in flight",
+                    current.adapter().type(), tenant);
+            throw unavailable();
+        }
+        Future<LookupResult> answer;
+        try {
+            answer = lookups.submit(() -> {
+                try {
+                    return current.adapter().lookup(tenant, current.attestationType(), searched, timeout);
+                } finally {
+                    lookupSlots.release();
+                }
+            });
+        } catch (RuntimeException e) {
+            lookupSlots.release();
+            throw unavailable();
+        }
         try {
             return Objects.requireNonNull(answer.get(timeout.toMillis(), TimeUnit.MILLISECONDS),
                     "lookup answered nothing");
