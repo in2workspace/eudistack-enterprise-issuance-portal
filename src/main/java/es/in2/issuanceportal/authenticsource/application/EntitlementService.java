@@ -1,5 +1,6 @@
 package es.in2.issuanceportal.authenticsource.application;
 
+import es.in2.issuanceportal.authenticsource.application.port.AuthenticSourceAuditTrail;
 import es.in2.issuanceportal.authenticsource.domain.AttestationPreview;
 import es.in2.issuanceportal.authenticsource.domain.AttestationTranslation;
 import es.in2.issuanceportal.authenticsource.domain.EntitlementDecision;
@@ -31,6 +32,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -57,18 +60,20 @@ public class EntitlementService implements AutoCloseable {
     private final JourneyWithdrawal withdrawal;
     private final JourneySessions sessions;
     private final AuthenticSourceConfigs configs;
+    private final AuthenticSourceAuditTrail trail;
     private final TransactionOperations transactions;
     private final Clock clock;
     private final ExecutorService lookups = Executors.newVirtualThreadPerTaskExecutor();
 
     public EntitlementService(JourneyAccess access, JourneyProgress progress, JourneyWithdrawal withdrawal,
-                              JourneySessions sessions, AuthenticSourceConfigs configs,
+                              JourneySessions sessions, AuthenticSourceConfigs configs, AuthenticSourceAuditTrail trail,
                               TransactionOperations transactions, Clock clock) {
         this.access = access;
         this.progress = progress;
         this.withdrawal = withdrawal;
         this.sessions = sessions;
         this.configs = configs;
+        this.trail = trail;
         this.transactions = transactions;
         this.clock = clock;
     }
@@ -84,24 +89,73 @@ public class EntitlementService implements AutoCloseable {
     }
 
     public Outcome check(TenantId tenant, SessionId session) {
+        long started = System.nanoTime();
         access.requireInProgress(tenant, session);
+        // Read before anything else: a withdrawal deletes the session, and the trace still needs the journey.
+        UUID journeyId = sessions.journeyOf(tenant, session)
+                .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
         HolderIdentity identity = identity(tenant, session);
+        PersonalIdentifier searched = toDomain(identity);
         AuthenticSourceConfigs.Current current = configs.current(tenant);
+        Trace trace = new Trace(tenant, journeyId, current, searched.type(), started);
         if (!current.hasSource()) {
             AttestationPreview preview = AttestationPreview.of(current.attestationType(), identity.givenName(),
                     identity.familyName(), List.of(), Map.of(), identity.email(), null);
+            trace.record(AuthenticSourceAuditTrail.Result.CONFIRMED, null);
             confirm(tenant, session, null, Map.of(), preview);
             return new Outcome.Confirmed(preview);
         }
-        PersonalIdentifier searched = toDomain(identity);
-        LookupResult answer = lookup(tenant, current, searched);
+        LookupResult answer;
+        try {
+            answer = lookup(tenant, current, searched);
+        } catch (ProblemException unavailable) {
+            trace.record(AuthenticSourceAuditTrail.Result.UNAVAILABLE, null);
+            throw unavailable;
+        }
+        // The trace says what the source answered before acting on it, so a failure afterwards keeps it.
         return switch (EntitlementRules.decide(searched, answer)) {
-            case EntitlementDecision.Confirmed(SourceRecord found) -> confirmed(tenant, session, identity, current, found);
+            case EntitlementDecision.Confirmed(SourceRecord found) -> {
+                trace.record(AuthenticSourceAuditTrail.Result.CONFIRMED, null);
+                yield confirmed(tenant, session, identity, current, found);
+            }
             case EntitlementDecision.NotConfirmed(NotConfirmedReason reason) -> {
+                trace.record(AuthenticSourceAuditTrail.Result.NOT_CONFIRMED, reason);
                 withdrawal.withdraw(tenant, session, JourneyWithdrawal.Cause.NOT_ENTITLED);
                 yield new Outcome.NotConfirmed(reason);
             }
         };
+    }
+
+    /** One check's trace: what it was, so each outcome only adds its result. */
+    private final class Trace {
+
+        private final TenantId tenant;
+        private final UUID journeyId;
+        private final AuthenticSourceConfigs.Current current;
+        private final IdentifierType identifierType;
+        private final long started;
+
+        Trace(TenantId tenant, UUID journeyId, AuthenticSourceConfigs.Current current, IdentifierType identifierType,
+              long started) {
+            this.tenant = tenant;
+            this.journeyId = journeyId;
+            this.current = current;
+            this.identifierType = identifierType;
+            this.started = started;
+        }
+
+        /** The trail never decides the outcome of a check: a failure is logged and the check goes on. */
+        void record(AuthenticSourceAuditTrail.Result result, NotConfirmedReason reason) {
+            try {
+                trail.append(tenant, new AuthenticSourceAuditTrail.Event(UUID.randomUUID(), journeyId,
+                        current.attestationType(),
+                        current.hasSource() ? current.adapter().type() : AuthenticSourceAuditTrail.NO_ADAPTER,
+                        identifierType, result, Optional.ofNullable(reason),
+                        Duration.ofNanos(System.nanoTime() - started), clock.instant()));
+            } catch (RuntimeException e) {
+                log.error("Could not record the entitlement check of journey {}", journeyId, e);
+            }
+        }
     }
 
     private HolderIdentity identity(TenantId tenant, SessionId session) {
