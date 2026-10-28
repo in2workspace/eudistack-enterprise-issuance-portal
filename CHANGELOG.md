@@ -20,6 +20,16 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Traza de cada comprobación (`audit.authentic_source`: recorrido, tenant, tipo de atestación, adaptador, tipo de identificador, resultado, motivo, duración y momento), sin identificador personal ni datos de la fuente.
 - `JourneyAccess.requireInProgress`: un recorrido completado responde 410 `journey_closed` antes de consultar la fuente.
 
+### Fixed
+
+Revisión de la orden:
+
+- El adaptador simulado solo se registra con `PORTAL_ENV` `local`, `test` o `stg`. Con cualquier otro valor (`pro`, `PRO`, `prod`, vacío…) queda fuera, aunque un tenant lo configure.
+- Si el tipo de identificador de la identidad no está entre los que admite la fuente del tenant, 503 `config_unavailable` sin consultarla. El adaptador simulado comprueba que la entrada del tenant sigue eligiéndolo.
+- Como mucho 100 búsquedas en la fuente a la vez por instancia (`PORTAL_AUTHENTIC_SOURCE_MAX_LOOKUPS`). Por encima, 503 `authentic_source_unavailable` sin esperar.
+- Un elemento vacío en la traducción de la configuración (`"mapping": [null]`) es una configuración no válida (503 `config_unavailable`, con el campo en el log), no un error 500.
+- La respuesta de `POST /entitlement` y los documentos JSON de la configuración y de las secciones `identity` y `entitlement` no muestran datos personales, direcciones ni secretos en su representación de texto.
+
 ## [0.2.0] - 2026-10-27
 
 ### Added
