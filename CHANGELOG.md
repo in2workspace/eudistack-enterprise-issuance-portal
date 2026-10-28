@@ -6,6 +6,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-28
+
 ### Added
 
 - **EUD-281 — módulo de fuente auténtica con adaptador simulado**: `POST /entitlement` bajo `/issuance-portal/api/v1`, sin cuerpo: cualquier dato que envíe la interfaz se ignora. Toma el identificador personal y su tipo (`dni` o `colegiado`) solo de la identidad del recorrido y busca en la fuente siempre por ese tipo. Responde `confirmed` con la vista previa del paso Datos, o `not_confirmed` con el motivo (`not_found`, `not_entitled` o `identifier_mismatch`).
