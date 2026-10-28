@@ -358,6 +358,25 @@ class JourneyServiceTest {
         assertThat(sessions.journeyOf(SANDBOX, next.session())).contains(next.journey().id());
     }
 
+    @Test
+    void requireInProgress_journeyInProgress_passesAndRecordsActivity() {
+        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
+        clock.advance(Duration.ofMinutes(10));
+
+        service.requireInProgress(SANDBOX, started.session());
+
+        assertThat(stored(started).lastActivity()).isEqualTo(clock.instant());
+    }
+
+    @Test
+    void requireInProgress_completedJourney_isClosedThoughRequireActivePasses() {
+        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
+        complete(started);
+
+        service.requireActive(SANDBOX, started.session());
+        assertJourneyClosed(() -> service.requireInProgress(SANDBOX, started.session()));
+    }
+
     private void complete(JourneyService.Started started) {
         Journey journey = stored(started);
         journey.complete(clock.instant());
