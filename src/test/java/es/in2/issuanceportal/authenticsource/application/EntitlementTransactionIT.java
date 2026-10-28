@@ -1,5 +1,6 @@
 package es.in2.issuanceportal.authenticsource.application;
 
+import com.zaxxer.hikari.HikariDataSource;
 import es.in2.issuanceportal.TestcontainersConfiguration;
 import es.in2.issuanceportal.authenticsource.RecordingAuthenticSourceAuditTrail;
 import es.in2.issuanceportal.authenticsource.StubAdapter;
@@ -24,15 +25,16 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.transaction.support.TransactionOperations;
-import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import javax.sql.DataSource;
+import java.sql.SQLException;
 import java.time.Clock;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -57,11 +59,26 @@ class EntitlementTransactionIT {
     @Autowired
     private Clock clock;
 
-    private final AtomicBoolean transactionDuringLookup = new AtomicBoolean(true);
+    @Autowired
+    private DataSource dataSource;
+
+    /**
+     * Connections taken from the pool while the source is asked. The transaction state of Spring belongs to
+     * the request's thread and the search runs on another, so the pool is what shows a transaction held.
+     */
+    private final AtomicInteger connectionsDuringLookup = new AtomicInteger(-1);
     private final StubAdapter adapter = StubAdapter.searchingByBoth("stub").answering(searched -> {
-        transactionDuringLookup.set(TransactionSynchronizationManager.isActualTransactionActive());
+        connectionsDuringLookup.set(activeConnections());
         return LookupResult.found(new SourceRecord(List.of(ACTIVE), true, Map.of("registration_number", "280000001")));
     });
+
+    private int activeConnections() {
+        try {
+            return dataSource.unwrap(HikariDataSource.class).getHikariPoolMXBean().getActiveConnections();
+        } catch (SQLException e) {
+            throw new IllegalStateException(e);
+        }
+    }
     private EntitlementService service;
 
     @AfterEach
@@ -77,7 +94,7 @@ class EntitlementTransactionIT {
                         null)));
         service = new EntitlementService(journey, progress, journey, sessions,
                 new AuthenticSourceConfigs(tenant -> Optional.of(config), new AdapterRegistry(List.of(adapter))),
-                new RecordingAuthenticSourceAuditTrail(), transactions, clock, 100);
+                new RecordingAuthenticSourceAuditTrail(), transactions, clock, new LookupSlots(100, 100));
         return service;
     }
 
@@ -90,13 +107,25 @@ class EntitlementTransactionIT {
     }
 
     @Test
-    void check_sourceIsAskedWithoutATransactionOpen() {
+    void check_sourceIsAskedWithoutAConnectionHeld() {
         SessionId session = journeyWithIdentity();
 
         serviceWith(journey).check(SANDBOX, session);
 
         assertThat(adapter.searches()).hasSize(1);
-        assertThat(transactionDuringLookup).isFalse();
+        assertThat(connectionsDuringLookup).hasValue(0);
+    }
+
+    /** The measure above can fail: a check run inside a transaction holds its connection during the search. */
+    @Test
+    void check_insideATransaction_holdsAConnectionDuringTheSearch() {
+        SessionId session = journeyWithIdentity();
+        EntitlementService checks = serviceWith(journey);
+
+        transactions.executeWithoutResult(status -> checks.check(SANDBOX, session));
+
+        assertThat(adapter.searches()).hasSize(1);
+        assertThat(connectionsDuringLookup.get()).isPositive();
     }
 
     @Test
