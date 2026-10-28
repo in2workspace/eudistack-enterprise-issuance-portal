@@ -24,7 +24,6 @@ import es.in2.issuanceportal.shared.error.ProblemCode;
 import es.in2.issuanceportal.shared.error.ProblemException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionOperations;
 
@@ -39,7 +38,6 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
@@ -66,14 +64,11 @@ public class EntitlementService implements AutoCloseable {
     private final TransactionOperations transactions;
     private final Clock clock;
     private final ExecutorService lookups = Executors.newVirtualThreadPerTaskExecutor();
-    /** Searches in flight in this instance, including those the module stopped waiting for. */
-    private final Semaphore lookupSlots;
+    private final LookupSlots lookupSlots;
 
-    public EntitlementService(JourneyAccess access, JourneyProgress progress, JourneyWithdrawal withdrawal,
-                              JourneySessions sessions, AuthenticSourceConfigs configs, AuthenticSourceAuditTrail trail,
-                              TransactionOperations transactions, Clock clock,
-                              @Value("${issuance-portal.authentic-source.max-concurrent-lookups:100}")
-                              int maxConcurrentLookups) {
+    EntitlementService(JourneyAccess access, JourneyProgress progress, JourneyWithdrawal withdrawal,
+                       JourneySessions sessions, AuthenticSourceConfigs configs, AuthenticSourceAuditTrail trail,
+                       TransactionOperations transactions, Clock clock, LookupSlots lookupSlots) {
         this.access = access;
         this.progress = progress;
         this.withdrawal = withdrawal;
@@ -82,7 +77,7 @@ public class EntitlementService implements AutoCloseable {
         this.trail = trail;
         this.transactions = transactions;
         this.clock = clock;
-        this.lookupSlots = new Semaphore(maxConcurrentLookups);
+        this.lookupSlots = lookupSlots;
     }
 
     /** The result the interface gets: confirmed with what the Data step shows, or not confirmed. */
@@ -188,23 +183,27 @@ public class EntitlementService implements AutoCloseable {
      */
     private LookupResult lookup(TenantId tenant, AuthenticSourceConfigs.Current current, PersonalIdentifier searched) {
         Duration timeout = current.settings().timeout();
-        if (!lookupSlots.tryAcquire()) {
-            // A slow source must not take every thread of the service with it: refuse at once instead.
+        // A slow source must not take every thread of the service, nor the slots of other tenants, with it.
+        LookupSlots.Slot slot = lookupSlots.tryAcquire(tenant).orElseThrow(() -> {
             log.warn("Authentic source {} of tenant {} not asked: too many searches in flight",
                     current.adapter().type(), tenant);
-            throw unavailable();
-        }
+            return unavailable();
+        });
         Future<LookupResult> answer;
         try {
             answer = lookups.submit(() -> {
+                if (!slot.start()) {
+                    // Cancelled before it started: whoever stopped waiting already gave the slot back.
+                    return null;
+                }
                 try {
                     return current.adapter().lookup(tenant, current.attestationType(), searched, timeout);
                 } finally {
-                    lookupSlots.release();
+                    slot.release();
                 }
             });
         } catch (RuntimeException e) {
-            lookupSlots.release();
+            slot.release();
             throw unavailable();
         }
         try {
@@ -223,6 +222,9 @@ public class EntitlementService implements AutoCloseable {
             Thread.currentThread().interrupt();
             answer.cancel(true);
             throw unavailable();
+        } finally {
+            // A search cancelled before it started never runs its own release.
+            slot.abandon();
         }
     }
 

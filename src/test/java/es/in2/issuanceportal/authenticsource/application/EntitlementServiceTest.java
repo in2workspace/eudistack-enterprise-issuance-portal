@@ -79,7 +79,7 @@ class EntitlementServiceTest {
     private final EntitlementService service = new EntitlementService(journey, journey, journey, sessions,
             new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
                     new AdapterRegistry(List.of(adapter))),
-            trail, TransactionOperations.withoutTransaction(), clock, 100);
+            trail, TransactionOperations.withoutTransaction(), clock, new LookupSlots(100, 100));
 
     /** Two people: the active one, findable by DNI and by registration number; one deregistered. */
     private static LookupResult source(PersonalIdentifier searched) {
@@ -392,7 +392,7 @@ class EntitlementServiceTest {
                         new AdapterRegistry(List.of(adapter))),
                 (tenant, event) -> {
                     throw new IllegalStateException("log sink down");
-                }, TransactionOperations.withoutTransaction(), clock, 100);
+                }, TransactionOperations.withoutTransaction(), clock, new LookupSlots(100, 100));
 
         assertThat(failingTrail.check(CGCOM, session)).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
         assertThat(output.getOut()).contains("Could not record the entitlement check of journey")
@@ -407,7 +407,8 @@ class EntitlementServiceTest {
         EntitlementService failing = new EntitlementService(journey, journey, (tenant, s, cause) -> {
             throw new IllegalStateException("database down");
         }, sessions, new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
-                new AdapterRegistry(List.of(adapter))), trail, TransactionOperations.withoutTransaction(), clock, 100);
+                new AdapterRegistry(List.of(adapter))), trail, TransactionOperations.withoutTransaction(), clock,
+                new LookupSlots(100, 100));
 
         assertThatThrownBy(() -> failing.check(CGCOM, session)).isInstanceOf(IllegalStateException.class);
         failing.close();
@@ -434,7 +435,8 @@ class EntitlementServiceTest {
                 throw new IllegalStateException("database down");
             }
         }, new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
-                new AdapterRegistry(List.of(adapter))), trail, TransactionOperations.withoutTransaction(), clock, 100);
+                new AdapterRegistry(List.of(adapter))), trail, TransactionOperations.withoutTransaction(), clock,
+                new LookupSlots(100, 100));
 
         assertThatThrownBy(() -> failing.check(CGCOM, session)).isInstanceOf(IllegalStateException.class);
         assertThat(stored(id).step()).isEqualTo(JourneyStep.STARTED);
@@ -471,7 +473,7 @@ class EntitlementServiceTest {
         EntitlementService oneAtATime = new EntitlementService(journey, journey, journey, sessions,
                 new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
                         new AdapterRegistry(List.of(adapter))), trail, TransactionOperations.withoutTransaction(),
-                clock, 1);
+                clock, new LookupSlots(1, 1));
         SessionId first = journeyWithDni("00000001R");
         SessionId second = journeyWithDni("00000001R");
         AtomicReference<EntitlementService.Outcome> firstOutcome = new AtomicReference<>();
@@ -486,6 +488,57 @@ class EntitlementServiceTest {
         firstCheck.join(5_000);
         assertThat(firstOutcome.get()).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
         assertThat(oneAtATime.check(CGCOM, second)).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
+        oneAtATime.close();
+    }
+
+    @Test
+    void check_requestInterruptedBeforeTheSourceAnswers_givesTheSlotBack() throws Exception {
+        EntitlementService oneAtATime = new EntitlementService(journey, journey, journey, sessions,
+                new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
+                        new AdapterRegistry(List.of(adapter))), trail, TransactionOperations.withoutTransaction(),
+                clock, new LookupSlots(1, 1));
+        SessionId interrupted = journeyWithDni("00000001R");
+        SessionId next = journeyWithDni("00000001R");
+        AtomicReference<Throwable> failure = new AtomicReference<>();
+        Thread request = Thread.ofVirtual().unstarted(() -> {
+            // The wait for the source fails at once, whether or not the search has started.
+            Thread.currentThread().interrupt();
+            try {
+                oneAtATime.check(CGCOM, interrupted);
+            } catch (ProblemException e) {
+                failure.set(e);
+            }
+        });
+        request.start();
+        request.join(5_000);
+        assertThat(failure.get()).isInstanceOfSatisfying(ProblemException.class,
+                e -> assertThat(e.problem()).isEqualTo(ProblemCode.AUTHENTIC_SOURCE_UNAVAILABLE));
+
+        assertThat(oneAtATime.check(CGCOM, next)).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
+        oneAtATime.close();
+    }
+
+    @Test
+    void check_sourceSlowerThanTheTimeout_givesTheSlotBack() {
+        EntitlementService oneAtATime = new EntitlementService(journey, journey, journey, sessions,
+                new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
+                        new AdapterRegistry(List.of(adapter))), trail, TransactionOperations.withoutTransaction(),
+                clock, new LookupSlots(1, 1));
+        SessionId slow = journeyWithDni("00000001R");
+        SessionId next = journeyWithDni("00000001R");
+        configure(Duration.ofSeconds(1));
+        adapter.answering(searched -> {
+            try {
+                Thread.sleep(5_000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return source(searched);
+        });
+        assertThatThrownBy(() -> oneAtATime.check(CGCOM, slow)).isInstanceOf(ProblemException.class);
+
+        adapter.answering(EntitlementServiceTest::source);
+        assertThat(oneAtATime.check(CGCOM, next)).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
         oneAtATime.close();
     }
 }
