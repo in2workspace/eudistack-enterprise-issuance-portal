@@ -33,10 +33,11 @@ class SimulatedAdapterStartupTest {
             .withBean(ObjectMapper.class)
             .withBean(AuthenticSourceConfigRepository.class, () -> tenant -> Optional.empty());
 
-    @Test
-    @DisplayName("AC-12 — start_production_registryHasNoSimulatedAdapter")
-    void start_production_registryHasNoSimulatedAdapter() {
-        context.withPropertyValues("issuance-portal.env=pro").run(started -> {
+    @ParameterizedTest
+    @ValueSource(strings = {"pro", "PRO", "prod", "production", " pro", ""})
+    @DisplayName("AC-12 — start_productionOrAnyOtherValue_registryHasNoSimulatedAdapter")
+    void start_productionOrAnyOtherValue_registryHasNoSimulatedAdapter(String env) {
+        context.withPropertyValues("issuance-portal.env=" + env).run(started -> {
             assertThat(started).hasNotFailed();
             assertThat(started.getBean(AdapterRegistry.class).find("simulated")).isEmpty();
         });
@@ -44,8 +45,8 @@ class SimulatedAdapterStartupTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"local", "test", "stg"})
-    @DisplayName("AC-12 — start_otherEnvironments_registryHasTheSimulatedAdapter")
-    void start_otherEnvironments_registryHasTheSimulatedAdapter(String env) {
+    @DisplayName("AC-12 — start_allowedEnvironments_registryHasTheSimulatedAdapter")
+    void start_allowedEnvironments_registryHasTheSimulatedAdapter(String env) {
         context.withPropertyValues("issuance-portal.env=" + env).run(started ->
                 assertThat(started.getBean(AdapterRegistry.class).find("simulated")).isPresent());
     }

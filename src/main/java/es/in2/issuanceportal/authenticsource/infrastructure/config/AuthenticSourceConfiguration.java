@@ -15,8 +15,11 @@ import java.util.Set;
 @Configuration
 class AuthenticSourceConfiguration {
 
-    /** The production environment (issuance-portal.env). */
-    static final String PRODUCTION = "pro";
+    /**
+     * Environments (issuance-portal.env) where adapters with synthetic data may run. An allowlist, like
+     * the local data key's: any other value, production or a misspelling of it, leaves them out.
+     */
+    static final Set<String> SYNTHETIC_DATA_ENVIRONMENTS = Set.of("local", "test", "stg");
     /** Adapters with synthetic data: never registered in production, even if a tenant configures them. */
     static final Set<String> NON_PRODUCTION_ADAPTERS = Set.of("simulated");
 
@@ -32,9 +35,9 @@ class AuthenticSourceConfiguration {
         return registry;
     }
 
-    /** The adapters this environment may use: in production, none with synthetic data (design.md AD-3). */
+    /** The adapters this environment may use: outside the allowlist, none with synthetic data (design.md AD-3). */
     static List<AuthenticSourceAdapter> allowedIn(String env, List<AuthenticSourceAdapter> adapters) {
-        if (!PRODUCTION.equals(env)) {
+        if (env != null && SYNTHETIC_DATA_ENVIRONMENTS.contains(env)) {
             return adapters;
         }
         return adapters.stream().filter(adapter -> !NON_PRODUCTION_ADAPTERS.contains(adapter.type())).toList();

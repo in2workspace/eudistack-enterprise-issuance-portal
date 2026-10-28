@@ -15,14 +15,20 @@ class AuthenticSourceConfigurationTest {
     private static final List<AuthenticSourceAdapter> ADAPTERS =
             List.of(StubAdapter.searchingByBoth("simulated"), StubAdapter.searchingByBoth("cgcom"));
 
+    @ParameterizedTest
+    @ValueSource(strings = {"pro", "PRO", "prod", "production", " pro", "pro ", "", "dev", "Stg"})
+    void registry_environmentOutsideTheAllowlist_leavesTheSimulatedAdapterOut(String env) {
+        assertThat(AuthenticSourceConfiguration.registry(env, ADAPTERS).types()).containsExactly("cgcom");
+    }
+
     @Test
-    void registry_production_leavesTheSimulatedAdapterOut() {
-        assertThat(AuthenticSourceConfiguration.registry("pro", ADAPTERS).types()).containsExactly("cgcom");
+    void registry_noEnvironment_leavesTheSimulatedAdapterOut() {
+        assertThat(AuthenticSourceConfiguration.registry(null, ADAPTERS).types()).containsExactly("cgcom");
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"local", "test", "stg"})
-    void registry_otherEnvironments_keepEveryAdapter(String env) {
+    void registry_allowedEnvironments_keepEveryAdapter(String env) {
         assertThat(AuthenticSourceConfiguration.registry(env, ADAPTERS).types())
                 .containsExactlyInAnyOrder("simulated", "cgcom");
     }
