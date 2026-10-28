@@ -1,0 +1,95 @@
+{
+  "texts": {
+    "es": {
+      "issuanceInfo.title": "Obtén tu DoctorID en tu cartera digital",
+      "portal": { "app_name": "Portal de emisión de DoctorID" }
+    },
+    "en": {
+      "issuanceInfo.title": "Get your DoctorID in your digital wallet",
+      "portal": { "app_name": "DoctorID Issuance Portal" }
+    }
+  },
+  "legal_links": {},
+  "support": {
+    "email": "soporte@cgcom-identidad.es",
+    "phone": "900 123 456",
+    "schedule": "L-V 9:00-18:00",
+    "response_time": "48 horas"
+  },
+  "wallet_url": "https://cgcom.127.0.0.1.nip.io:4443/wallet",
+  "attestation_type": "doctorid.sd.1",
+  "data_placement": {
+    "givenName": "identity.given_name",
+    "familyName": "identity.family_name",
+    "personal_administrative_number": "authentic_source.personal_administrative_number",
+    "medical_board": "authentic_source.medical_board",
+    "medical_speciality": "authentic_source.medical_speciality",
+    "legally_entitled": "authentic_source.legally_entitled"
+  },
+  "onboarding": {
+    "enabled": true,
+    "wallet_unit_service_url": "http://wallet-ebw-service:8080"
+  },
+  "identifier_types": {
+    "doctorid.sd.1": "colegiado"
+  },
+  "authentic_source": {
+    "doctorid.sd.1": {
+      "type_name": "DoctorID",
+      "adapter": "simulated",
+      "timeout_seconds": 10,
+      "identifier_types": ["dni", "colegiado"],
+      "mapping": [
+        { "attribute": "registration_number", "claim": "personal_administrative_number", "label": "Número de colegiado" },
+        { "attribute": "medical_boards", "claim": "medical_board", "label": "Colegio" },
+        { "attribute": "specialities", "claim": "medical_speciality", "label": "Especialidad" },
+        { "attribute": "entitled_to_practise", "claim": "legally_entitled", "label": "Habilitado para ejercer" }
+      ],
+      "email_attribute": "email",
+      "settings": {
+        "records": [
+          {
+            "dni": "00000001R",
+            "colegiado": "280000001",
+            "entitled": true,
+            "attributes": {
+              "given_name": "Lucía",
+              "family_name": "Prueba Activa",
+              "registration_number": "280000001",
+              "medical_boards": ["Colegio de Médicos de Prueba"],
+              "specialities": ["Family and Community Medicine", "Cardiology"],
+              "entitled_to_practise": true
+            }
+          },
+          {
+            "dni": "00000002W",
+            "colegiado": "280000002",
+            "entitled": false,
+            "attributes": {
+              "given_name": "Mario",
+              "family_name": "Prueba Baja",
+              "registration_number": "280000002",
+              "medical_boards": ["Colegio de Médicos de Prueba"],
+              "specialities": ["Internal Medicine"],
+              "entitled_to_practise": false
+            }
+          },
+          {
+            "dni": "00000003A",
+            "colegiado": "280000003",
+            "entitled": true,
+            "delay_seconds": 15,
+            "attributes": {
+              "given_name": "Sara",
+              "family_name": "Prueba Lenta",
+              "registration_number": "280000003",
+              "medical_boards": ["Colegio de Médicos de Prueba"],
+              "specialities": ["Geriatrics"],
+              "entitled_to_practise": true
+            }
+          }
+        ]
+      }
+    }
+  }
+}
