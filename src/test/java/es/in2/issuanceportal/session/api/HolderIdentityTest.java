@@ -84,4 +84,14 @@ class HolderIdentityTest {
         e.printStackTrace(new PrintWriter(out));
         return out.toString();
     }
+
+    @Test
+    void toString_jsonDocuments_hidePersonalData() {
+        HolderIdentity.Document document = new HolderIdentity.Document("Lucía", "Prueba",
+                new HolderIdentity.IdentifierDocument("dni", "00000001R"), "lucia@example.org");
+
+        assertThat(document + " " + document.personalIdentifier())
+                .contains("dni")
+                .doesNotContain("Lucía", "Prueba", "00000001R", "lucia@example.org");
+    }
 }

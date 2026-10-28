@@ -69,8 +69,18 @@ public record HolderIdentity(String givenName, String familyName, PersonalIdenti
                     @JsonProperty("family_name") String familyName,
                     @JsonProperty("personal_identifier") IdentifierDocument personalIdentifier,
                     @JsonProperty("email") String email) {
+
+        @Override
+        public String toString() {
+            return "HolderIdentity.Document[personal data redacted]";
+        }
     }
 
     record IdentifierDocument(@JsonProperty("type") String type, @JsonProperty("value") String value) {
+
+        @Override
+        public String toString() {
+            return "HolderIdentity.IdentifierDocument[type=" + type + ", value=redacted]";
+        }
     }
 }

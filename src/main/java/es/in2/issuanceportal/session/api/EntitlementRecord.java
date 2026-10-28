@@ -105,5 +105,10 @@ public record EntitlementRecord(IdentifierType identifierType, Map<String, Objec
                     @JsonProperty("claims") Map<String, Object> claims,
                     @JsonProperty("preview") Preview preview,
                     @JsonProperty("checked_at") Instant checkedAt) {
+
+        @Override
+        public String toString() {
+            return "EntitlementRecord.Document[result=" + result + ", personal data redacted]";
+        }
     }
 }

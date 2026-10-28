@@ -77,4 +77,13 @@ class EntitlementRecordTest {
                 .doesNotContain("280000001", "Madrid", "Pediatría", "Lucía");
         assertThat(confirmed().preview().toString()).doesNotContain("Lucía");
     }
+
+    @Test
+    void toString_jsonDocument_hidesPersonalData() {
+        EntitlementRecord record = confirmed();
+        EntitlementRecord.Document document = new EntitlementRecord.Document("confirmed", "colegiado",
+                record.claims(), record.preview(), record.checkedAt());
+
+        assertThat(document.toString()).contains("confirmed").doesNotContain("280000001", "Madrid", "Lucía");
+    }
 }

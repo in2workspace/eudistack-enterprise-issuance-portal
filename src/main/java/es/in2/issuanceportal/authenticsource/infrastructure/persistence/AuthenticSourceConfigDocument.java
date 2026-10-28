@@ -9,6 +9,7 @@ import es.in2.issuanceportal.authenticsource.domain.config.InvalidSourceConfigEx
 import es.in2.issuanceportal.authenticsource.domain.config.SourceSettings;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -76,8 +77,26 @@ record AuthenticSourceConfigDocument(
             return new SourceSettings(typeName, adapter, url, secretRef,
                     timeoutSeconds == null ? null : Duration.ofSeconds(timeoutSeconds),
                     identifierTypes == null ? null : types(identifierTypes, "identifier_types"),
-                    mapping == null ? null : mapping.stream().map(MappingDocument::toDomain).toList(),
+                    mapping == null ? null : translatedMapping(),
                     emailAttribute, settings);
+        }
+
+        /** An empty element of the list is a broken configuration, not a missing attribute. */
+        private List<AttributeMapping> translatedMapping() {
+            List<AttributeMapping> translated = new ArrayList<>();
+            for (int i = 0; i < mapping.size(); i++) {
+                if (mapping.get(i) == null) {
+                    throw new InvalidSourceConfigException("mapping[" + i + "] is empty");
+                }
+                translated.add(mapping.get(i).toDomain());
+            }
+            return translated;
+        }
+
+        /** The address, the secret reference and the adapter's settings (synthetic people) stay out. */
+        @Override
+        public String toString() {
+            return "SourceDocument[adapter=" + adapter + ", redacted]";
         }
     }
 
@@ -88,5 +107,11 @@ record AuthenticSourceConfigDocument(
         AttributeMapping toDomain() {
             return new AttributeMapping(attribute, claim, label);
         }
+    }
+
+    @Override
+    public String toString() {
+        return "AuthenticSourceConfigDocument[attestationType=" + attestationType + ", sources="
+                + (authenticSource == null ? "[]" : authenticSource.keySet()) + "]";
     }
 }

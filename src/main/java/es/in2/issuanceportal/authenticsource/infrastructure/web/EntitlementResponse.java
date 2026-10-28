@@ -7,7 +7,10 @@ import es.in2.issuanceportal.authenticsource.domain.AttestationPreview;
 
 import java.util.List;
 
-/** {@code EntitlementResult} of the contract (annex/openapi.yaml). */
+/**
+ * {@code EntitlementResult} of the contract (annex/openapi.yaml). Its text form carries no personal data:
+ * Spring writes it to the log at DEBUG.
+ */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 record EntitlementResponse(String result, Attestation attestation, String reason) {
 
@@ -18,6 +21,11 @@ record EntitlementResponse(String result, Attestation attestation, String reason
             case EntitlementService.Outcome.NotConfirmed notConfirmed ->
                     new EntitlementResponse("not_confirmed", null, notConfirmed.reason().code());
         };
+    }
+
+    @Override
+    public String toString() {
+        return "EntitlementResponse[result=" + result + ", reason=" + reason + ", attestation=" + attestation + "]";
     }
 
     /** {@code AttestationPreview} of the contract. */
@@ -32,8 +40,19 @@ record EntitlementResponse(String result, Attestation attestation, String reason
                     preview.fields().stream().map(field -> new Field(field.label(), field.value())).toList(),
                     preview.email(), preview.emailRequired());
         }
+
+        @Override
+        public String toString() {
+            return "Attestation[typeName=" + typeName + ", fields=" + fields.size() + ", emailRequired="
+                    + emailRequired + ", personal data redacted]";
+        }
     }
 
     record Field(String label, String value) {
+
+        @Override
+        public String toString() {
+            return "Field[label=" + label + ", value=redacted]";
+        }
     }
 }

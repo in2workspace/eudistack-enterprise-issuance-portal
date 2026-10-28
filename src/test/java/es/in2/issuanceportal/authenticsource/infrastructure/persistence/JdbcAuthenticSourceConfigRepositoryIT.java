@@ -11,8 +11,11 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
 
@@ -25,6 +28,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
+@ExtendWith(OutputCaptureExtension.class)
 class JdbcAuthenticSourceConfigRepositoryIT {
 
     private static final TenantId SANDBOX = new TenantId("sandbox");
@@ -140,5 +144,28 @@ class JdbcAuthenticSourceConfigRepositoryIT {
                 .param("tenant", tenant.value())
                 .param("config", config)
                 .update();
+    }
+
+    @Test
+    @DisplayName("AC-13, ES-03 — find_emptyMappingElement_isInvalidAndNamesTheField")
+    void find_emptyMappingElement_isInvalidAndNamesTheField(CapturedOutput output) {
+        save(SANDBOX, VALID.replace("\"mapping\": [", "\"mapping\": [null, "));
+
+        assertThat(repository.find(SANDBOX)).isEmpty();
+        assertThat(output.getOut())
+                .contains("Authentic source configuration of tenant sandbox is invalid: "
+                        + "authentic_source.doctorid.sd.1.mapping[0] is empty")
+                .doesNotContain("00000001R");
+    }
+
+    @Test
+    @DisplayName("AC-13 — find_invalidSource_logsTheFieldNeverTheValue")
+    void find_invalidSource_logsTheFieldNeverTheValue(CapturedOutput output) {
+        save(SANDBOX, VALID.replace("\"timeout_seconds\": 5", "\"timeout_seconds\": 30"));
+
+        assertThat(repository.find(SANDBOX)).isEmpty();
+        assertThat(output.getOut())
+                .contains("authentic_source.doctorid.sd.1.timeout_seconds must be between 1 and 10")
+                .doesNotContain("00000001R");
     }
 }
