@@ -1,7 +1,6 @@
 package es.in2.issuanceportal.journey.domain.config;
 
 import java.util.Map;
-import java.util.Set;
 
 /**
  * Portal configuration of a tenant (design.md AD-7). Valid by construction: the public part follows the
@@ -20,7 +19,7 @@ public record PortalConfig(Map<String, Object> texts, LegalLinks legalLinks, Sup
         ConfigValues.required(legalLinks, "legal_links");
         ConfigValues.required(support, "support");
         ConfigValues.required(walletUrl, "wallet_url");
-        ConfigValues.requireUrl(walletUrl, "wallet_url", Set.of("https"));
+        ConfigValues.requireHttpsUrl(walletUrl, "wallet_url");
         settings = settings == null ? ServiceSettings.NONE : settings;
     }
 }

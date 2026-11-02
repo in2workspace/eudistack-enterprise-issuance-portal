@@ -4,9 +4,9 @@ package es.in2.issuanceportal.journey.domain.config;
 public record LegalLinks(String legalNotice, String privacy, String terms, String accessibility) {
 
     public LegalLinks {
-        ConfigValues.requireWebUrl(legalNotice, "legal_links.legal_notice");
-        ConfigValues.requireWebUrl(privacy, "legal_links.privacy");
-        ConfigValues.requireWebUrl(terms, "legal_links.terms");
-        ConfigValues.requireWebUrl(accessibility, "legal_links.accessibility");
+        ConfigValues.requireHttpsUrl(legalNotice, "legal_links.legal_notice");
+        ConfigValues.requireHttpsUrl(privacy, "legal_links.privacy");
+        ConfigValues.requireHttpsUrl(terms, "legal_links.terms");
+        ConfigValues.requireHttpsUrl(accessibility, "legal_links.accessibility");
     }
 }

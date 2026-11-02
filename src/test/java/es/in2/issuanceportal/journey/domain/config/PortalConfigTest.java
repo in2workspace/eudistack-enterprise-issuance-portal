@@ -89,7 +89,7 @@ class PortalConfigTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"aviso-legal", "javascript:alert(1)", "https://"})
+    @ValueSource(strings = {"aviso-legal", "javascript:alert(1)", "https://", "http://example.org/privacidad"})
     void legalLinks_notAWebUrl_isInvalid(String link) {
         assertThatThrownBy(() -> new LegalLinks(null, link, null, null))
                 .isInstanceOf(InvalidPortalConfigException.class)

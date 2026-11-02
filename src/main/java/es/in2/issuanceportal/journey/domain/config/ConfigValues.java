@@ -12,6 +12,7 @@ import java.util.Set;
 final class ConfigValues {
 
     private static final Set<String> WEB_SCHEMES = Set.of("http", "https");
+    private static final Set<String> HTTPS = Set.of("https");
 
     private ConfigValues() {
     }
@@ -40,6 +41,11 @@ final class ConfigValues {
 
     static void requireWebUrl(String value, String field) {
         requireUrl(value, field, WEB_SCHEMES);
+    }
+
+    /** What the interface accepts for a link it shows the holder: an https URL. */
+    static void requireHttpsUrl(String value, String field) {
+        requireUrl(value, field, HTTPS);
     }
 
     /** One {@code @}, a local part, and a domain with a dot that neither starts nor ends it; no whitespace. */
