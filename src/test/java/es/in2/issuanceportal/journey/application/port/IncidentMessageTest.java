@@ -10,6 +10,11 @@ import static org.assertj.core.api.Assertions.assertThat;
 class IncidentMessageTest {
 
     private static final String SUPPORT = "soporte@cgcom-identidad.es";
+    /** Built from code points, so the source holds no invisible characters. */
+    private static final String RLO = Character.toString(0x202E);
+    private static final String ZERO_WIDTH_SPACE = Character.toString(0x200B);
+    private static final String BYTE_ORDER_MARK = Character.toString(0xFEFF);
+    private static final String LEFT_TO_RIGHT_ISOLATE = Character.toString(0x2066);
 
     @Test
     @DisplayName("AC-04 — of_validIncident_goesToSupportWithHolderAsReplyTo")
@@ -62,13 +67,13 @@ class IncidentMessageTest {
     @Test
     @DisplayName("EC-03 — of_invisibleFormatCharacters_areRemoved")
     void of_invisibleFormatCharacters_areRemoved() {
-        Incident incident = new Incident("Ana‮txe", "ana@example.org", null, IncidentType.OTHER,
-                "Duda​﻿ urgente⁦", "Texto");
+        Incident incident = new Incident("Ana" + RLO + "txe", "ana@example.org", null, IncidentType.OTHER,
+                "Duda" + ZERO_WIDTH_SPACE + BYTE_ORDER_MARK + " urgente" + LEFT_TO_RIGHT_ISOLATE, "Texto");
 
         IncidentMessage message = IncidentMessage.of(incident, SUPPORT);
 
         assertThat(message.subject()).isEqualTo("[Incidencia] Otro: Duda urgente");
-        assertThat(message.body()).contains("Nombre: Ana txe\n").doesNotContain("‮", "​", "﻿");
+        assertThat(message.body()).contains("Nombre: Ana txe\n").doesNotContain(RLO, ZERO_WIDTH_SPACE, BYTE_ORDER_MARK);
     }
 
     @Test
