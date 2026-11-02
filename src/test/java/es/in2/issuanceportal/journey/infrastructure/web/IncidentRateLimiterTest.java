@@ -99,7 +99,28 @@ class IncidentRateLimiterTest {
     @Test
     void clientKey_ipv4MappedAddress_countsAsItsIpv4Address() {
         assertThat(IncidentRateLimiter.clientKey("::ffff:203.0.113.7")).isEqualTo("203.0.113.7");
-        assertThat(IncidentRateLimiter.clientKey("2001:db8:1:2::5")).isEqualTo("20010db800010002::/64");
+        assertThat(IncidentRateLimiter.clientKey("2001:db8:1:2::5")).isEqualTo("2001:db8:1:2:0:0:0:0/64");
+    }
+
+    @Test
+    void giveBack_failedDelivery_freesItsPlaceInTheWindow() {
+        exhaust("203.0.113.7");
+
+        limiter.giveBack("203.0.113.7");
+
+        assertThat(limiter.tryConsume("203.0.113.7")).isEmpty();
+        assertThat(limiter.tryConsume("203.0.113.7")).isPresent();
+    }
+
+    @Test
+    void firstRejectionInWindow_onlyOncePerClientAndHour() {
+        assertThat(limiter.firstRejectionInWindow("203.0.113.7")).isTrue();
+        assertThat(limiter.firstRejectionInWindow("203.0.113.7")).isFalse();
+        assertThat(limiter.firstRejectionInWindow("198.51.100.4")).isTrue();
+
+        clock.advance(Duration.ofHours(1));
+
+        assertThat(limiter.firstRejectionInWindow("203.0.113.7")).isTrue();
     }
 
     private void exhaust(String ip) {

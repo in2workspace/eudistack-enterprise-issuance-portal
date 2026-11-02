@@ -11,7 +11,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
 import java.util.Deque;
-import java.util.HexFormat;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 
@@ -33,11 +32,18 @@ class IncidentRateLimiter {
 
     private final Clock clock;
     private final Cache<String, Deque<Instant>> byClient;
+    /** Clients already logged as over the limit in the current window: one log line each, not one per request. */
+    private final Cache<String, Boolean> reported;
 
     IncidentRateLimiter(Clock clock) {
         this.clock = clock;
         this.byClient = Caffeine.newBuilder()
                 .expireAfterAccess(WINDOW)
+                .maximumSize(100_000)
+                .ticker(() -> TimeUnit.MILLISECONDS.toNanos(clock.millis()))
+                .build();
+        this.reported = Caffeine.newBuilder()
+                .expireAfterWrite(WINDOW)
                 .maximumSize(100_000)
                 .ticker(() -> TimeUnit.MILLISECONDS.toNanos(clock.millis()))
                 .build();
@@ -63,6 +69,24 @@ class IncidentRateLimiter {
         }
     }
 
+    /**
+     * Takes back the client's latest incident when it could not be delivered: only incidents that reach
+     * support count, so a holder whose sends failed can retry what they wrote.
+     */
+    void giveBack(String address) {
+        Deque<Instant> accepted = byClient.getIfPresent(clientKey(address));
+        if (accepted != null) {
+            synchronized (accepted) {
+                accepted.pollLast();
+            }
+        }
+    }
+
+    /** True only for the first rejection of the client in the window, which is the one worth a log line. */
+    boolean firstRejectionInWindow(String address) {
+        return reported.asMap().putIfAbsent(clientKey(address), Boolean.TRUE) == null;
+    }
+
     /** The address as the limit counts it: IPv4 as is, IPv6 by its /64. */
     static String clientKey(String address) {
         try {
@@ -70,7 +94,9 @@ class IncidentRateLimiter {
             if (bytes.length == 4) {
                 return InetAddress.getByAddress(bytes).getHostAddress();
             }
-            return HexFormat.of().formatHex(bytes, 0, 8) + "::/64";
+            byte[] prefix = new byte[16];
+            System.arraycopy(bytes, 0, prefix, 0, 8);
+            return InetAddress.getByAddress(prefix).getHostAddress() + "/64";
         } catch (IllegalArgumentException | UnknownHostException _) {
             return address;
         }

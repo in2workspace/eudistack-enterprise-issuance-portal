@@ -54,14 +54,25 @@ class IncidentController {
             rateLimited(tenant, request.getRemoteAddr());
             throw new ProblemException(ProblemCode.TOO_MANY_REQUESTS, retryAfter.get());
         }
-        return new IncidentAccepted(service.send(tenant, incident.toIncident()));
+        try {
+            return new IncidentAccepted(service.send(tenant, incident.toIncident()));
+        } catch (RuntimeException e) {
+            limiter.giveBack(request.getRemoteAddr());
+            throw e;
+        }
     }
 
-    /** A security event (conv-quality-security-gates §14): the client as the limit counts it, never the incident. */
+    /**
+     * A security event (conv-quality-security-gates §14), logged once per client and window; every rejection is
+     * counted. It carries the client as the limit counts it, never the incident (see logback-spring.xml).
+     */
     private void rateLimited(TenantId tenant, String address) {
+        meters.counter(RATE_LIMITED_METRIC, "tenant", tenant.value()).increment();
+        if (!limiter.firstRejectionInWindow(address)) {
+            return;
+        }
         log.warn("Incident rate limit exceeded {} {} {}", kv("event", "rate.limit.exceeded"),
                 kv("tenant", tenant.value()), kv("client", IncidentRateLimiter.clientKey(address)));
-        meters.counter(RATE_LIMITED_METRIC, "tenant", tenant.value()).increment();
     }
 
     record IncidentAccepted(@JsonProperty("response_time") String responseTime) {

@@ -31,6 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.matchesPattern;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -128,6 +129,20 @@ class IncidentApiIT {
                         + "WHERE table_schema = 'sandbox_issuance_portal' AND table_name <> 'flyway_schema_history'")
                 .query(String.class).list())
                 .containsExactlyInAnyOrder("journey", "journey_session", "shedlock", "portal_config");
+    }
+
+    @Test
+    @DisplayName("ES-03, AC-06 — postIncident_failedDeliveries_doNotCountForTheLimit")
+    void postIncident_failedDeliveries_doNotCountForTheLimit() throws Exception {
+        configure("sandbox", "soporte@sandbox.example.org", "48 horas");
+        String address = "203.0.113.77";
+        doThrow(new IncidentDeliveryException("SES Throttling")).when(mailer).send(any());
+        for (int i = 0; i < 5; i++) {
+            mvc.perform(from(post(VALID), address)).andExpect(status().isServiceUnavailable());
+        }
+        doNothing().when(mailer).send(any());
+
+        mvc.perform(from(post(VALID), address)).andExpect(status().isAccepted());
     }
 
     @Test
