@@ -43,7 +43,9 @@ class AttestationPreviewTest {
 
         AttestationPreview preview = AttestationPreview.of("DoctorID", "Lucía", "Prueba", hidden, claims(), null, null);
 
-        assertThat(preview.fields()).extracting(AttestationPreview.Field::value).doesNotContain("280000001");
+        assertThat(preview.fields()).extracting(AttestationPreview.Field::value)
+                .isNotEmpty()
+                .doesNotContain("280000001");
     }
 
     @Test
