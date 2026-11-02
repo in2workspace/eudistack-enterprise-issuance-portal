@@ -8,7 +8,9 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.extern.slf4j.Slf4j;
+import org.flywaydb.core.api.FlywayException;
 import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.dao.DataAccessException;
@@ -18,11 +20,13 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.util.Optional;
+import java.util.function.Consumer;
 
 /**
  * Resolves the tenant of every request but health and metrics, with the same rule as nginx and the Verifier: the
  * {@code X-Tenant} header when nginx sends it (custom domains), otherwise the first segment of the
- * host. An unknown or inactive tenant gets 404 {@code tenant_not_found}.
+ * host. An unknown or inactive tenant gets 404 {@code tenant_not_found}. An active tenant without a schema yet,
+ * activated while the service runs, gets it before its request goes on.
  */
 @Slf4j
 @Component
@@ -35,9 +39,16 @@ public class TenantFilter extends OncePerRequestFilter {
     private static final String MDC_KEY = "tenant.id";
 
     private final TenantRegistry registry;
+    private final Consumer<TenantId> ensureSchema;
 
-    public TenantFilter(TenantRegistry registry) {
+    @Autowired
+    public TenantFilter(TenantRegistry registry, TenantSchemaMigrator migrator) {
+        this(registry, migrator::ensureSchema);
+    }
+
+    TenantFilter(TenantRegistry registry, Consumer<TenantId> ensureSchema) {
         this.registry = registry;
+        this.ensureSchema = ensureSchema;
     }
 
     @Override
@@ -51,9 +62,10 @@ public class TenantFilter extends OncePerRequestFilter {
         Optional<TenantId> tenant;
         try {
             tenant = resolve(request).filter(registry::isActive);
-        } catch (DataAccessException | TransactionException e) {
+            tenant.ifPresent(ensureSchema);
+        } catch (DataAccessException | TransactionException | FlywayException e) {
             // Outside Spring MVC: the exception handler never sees what fails here.
-            log.error("Tenant registry unavailable", e);
+            log.error("Tenant registry or tenant schema unavailable", e);
             Problems.write(response, ProblemCode.SERVICE_UNAVAILABLE);
             return;
         }

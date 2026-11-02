@@ -12,7 +12,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class TenantFilterTest {
 
-    private final TenantFilter filter = new TenantFilter(new FixedRegistry(Set.of("sandbox", "cgcom")));
+    private final TenantFilter filter = new TenantFilter(new FixedRegistry(Set.of("sandbox", "cgcom")), tenant -> { });
 
     @Test
     void doFilter_canonicalHost_resolvesTenantFromFirstSegment() throws Exception {

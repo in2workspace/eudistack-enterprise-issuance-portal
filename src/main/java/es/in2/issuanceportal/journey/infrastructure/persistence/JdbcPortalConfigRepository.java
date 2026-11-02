@@ -11,6 +11,7 @@ import es.in2.issuanceportal.journey.domain.config.PortalConfig;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.jdbc.BadSqlGrammarException;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
@@ -29,7 +30,8 @@ import java.util.stream.Collectors;
 @Repository
 class JdbcPortalConfigRepository implements PortalConfigRepository {
 
-    static final Duration CACHE_TTL = Duration.ofMinutes(5);
+    /** PostgreSQL {@code undefined_table}. */
+    private static final String UNDEFINED_TABLE = "42P01";
 
     private final JdbcClient jdbc;
     private final ObjectMapper json;
@@ -57,7 +59,23 @@ class JdbcPortalConfigRepository implements PortalConfigRepository {
         return loaded;
     }
 
+    /**
+     * A tenant whose schema is not there yet (the schema is created on its first request) has no
+     * configuration: {@code config_unavailable}, never a 500.
+     */
     private Optional<PortalConfig> load(TenantId tenant) {
+        try {
+            return query(tenant);
+        } catch (BadSqlGrammarException e) {
+            if (!UNDEFINED_TABLE.equals(e.getSQLException().getSQLState())) {
+                throw e;
+            }
+            log.warn("Portal configuration of tenant {} unavailable: its table does not exist", tenant);
+            return Optional.empty();
+        }
+    }
+
+    private Optional<PortalConfig> query(TenantId tenant) {
         return jdbc.sql("SELECT config::text FROM " + table(tenant) + " WHERE tenant = :tenant")
                 .param("tenant", tenant.value())
                 .query(String.class)

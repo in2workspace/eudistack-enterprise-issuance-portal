@@ -52,7 +52,7 @@ class JdbcPortalConfigRepositoryIT {
     void setUp() {
         clearRows();
         clock = new MutableClock(Instant.parse("2026-10-23T10:00:00Z"));
-        repository = new JdbcPortalConfigRepository(jdbc, json, clock, JdbcPortalConfigRepository.CACHE_TTL);
+        repository = new JdbcPortalConfigRepository(jdbc, json, clock, Duration.ofMinutes(5));
     }
 
     /** The container is shared with the other integration tests, which expect no configuration. */
@@ -83,6 +83,12 @@ class JdbcPortalConfigRepositoryIT {
     @DisplayName("AC-01 — find_noRow_returnsEmpty")
     void find_noRow_returnsEmpty() {
         assertThat(repository.find(SANDBOX)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("AC-01 — find_tenantWithoutSchemaYet_returnsEmpty")
+    void find_tenantWithoutSchemaYet_returnsEmpty() {
+        assertThat(repository.find(new TenantId("notyet"))).isEmpty();
     }
 
     @Test
