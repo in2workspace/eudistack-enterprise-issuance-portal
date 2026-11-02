@@ -1,10 +1,13 @@
 package es.in2.issuanceportal.shared.tenant;
 
+import org.flywaydb.core.api.FlywayException;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockFilterChain;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -47,6 +50,48 @@ class TenantFilterTest {
         assertThat(response.getStatus()).isEqualTo(404);
         assertThat(response.getContentType()).isEqualTo("application/problem+json");
         assertThat(response.getContentAsString()).contains("\"type\":\"tenant_not_found\"");
+        assertThat(chain.getRequest()).isNull();
+    }
+
+    @Test
+    @DisplayName("AC-08 — doFilter_activeTenant_ensuresItsSchemaBeforeGoingOn")
+    void doFilter_activeTenant_ensuresItsSchemaBeforeGoingOn() throws Exception {
+        List<TenantId> ensured = new ArrayList<>();
+        TenantFilter recording = new TenantFilter(new FixedRegistry(Set.of("sandbox")), ensured::add);
+        MockFilterChain chain = new MockFilterChain();
+
+        recording.doFilter(apiRequest("sandbox.127.0.0.1.nip.io"), new MockHttpServletResponse(), chain);
+
+        assertThat(ensured).containsExactly(new TenantId("sandbox"));
+        assertThat(chain.getRequest()).isNotNull();
+    }
+
+    @Test
+    @DisplayName("AC-08 — doFilter_unknownOrInactiveTenant_neverCreatesASchema")
+    void doFilter_unknownOrInactiveTenant_neverCreatesASchema() throws Exception {
+        List<TenantId> ensured = new ArrayList<>();
+        TenantFilter recording = new TenantFilter(new FixedRegistry(Set.of("sandbox")), ensured::add);
+
+        recording.doFilter(apiRequest("attacker.eudistack.net"), new MockHttpServletResponse(), new MockFilterChain());
+        MockHttpServletRequest withHeader = apiRequest("sandbox.127.0.0.1.nip.io");
+        withHeader.addHeader(TenantFilter.TENANT_HEADER, "pg_catalog");
+        recording.doFilter(withHeader, new MockHttpServletResponse(), new MockFilterChain());
+
+        assertThat(ensured).isEmpty();
+    }
+
+    @Test
+    void doFilter_schemaCannotBeCreated_returns503ServiceUnavailable() throws Exception {
+        TenantFilter failing = new TenantFilter(new FixedRegistry(Set.of("sandbox")), tenant -> {
+            throw new FlywayException("migration failed");
+        });
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        MockFilterChain chain = new MockFilterChain();
+
+        failing.doFilter(apiRequest("sandbox.127.0.0.1.nip.io"), response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(503);
+        assertThat(response.getContentAsString()).contains("\"type\":\"service_unavailable\"");
         assertThat(chain.getRequest()).isNull();
     }
 
