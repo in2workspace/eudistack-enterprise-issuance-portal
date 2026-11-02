@@ -12,7 +12,7 @@ plugins {
 group = 'com.eudistack'
 // Plain version, no SNAPSHOT: the ci job tags the release v${version}
 // and refuses to run if that tag already exists.
-version = '0.1.0'
+version = '0.2.0'
 
 java {
     toolchain {
@@ -52,6 +52,10 @@ dependencies {
     // --- Cryptography ---
     // Envelope encryption of the personal data in the journey session (design.md §5).
     implementation 'software.amazon.awssdk:kms:2.31.78'
+
+    // --- Mail ---
+    // Incidents go to the tenant's support by Amazon SES (design.md AD-8).
+    implementation 'software.amazon.awssdk:sesv2:2.31.78'
 
     // --- Scheduling ---
     // The expiry job runs on one instance per tenant at a time (design.md AD-4).

@@ -2,7 +2,11 @@
 <!--
   One JSON line per entry, with the fields of the log contract (conv-observability §2).
   Personal data never reaches a log: identity, source data and email stay in the encrypted session,
-  and SessionId never prints its value.
+  and SessionId never prints its value. One deliberate exception: the security event
+  rate.limit.exceeded carries the client's IP address (an IPv6 address by its /64), once per client and
+  hour, so abuse of the public incident form can be traced and blocked. Legal basis: legitimate
+  interest in the security of the service (GDPR art. 6.1.f, recital 49); kept as long as the
+  application logs of the environment (30 days in STG, set for PRO with its deployment).
 -->
 <configuration>
 
