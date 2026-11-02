@@ -49,6 +49,29 @@ class IncidentMessageTest {
     }
 
     @Test
+    @DisplayName("EC-03 — of_unicodeLineSeparatorsInSubject_areRemoved")
+    void of_unicodeLineSeparatorsInSubject_areRemoved() {
+        Incident incident = new Incident("Ana", "ana@example.org", null, IncidentType.TECHNICAL,
+                "Hola\u2028Bcc: x@example.org\u0085Fin\u2029", "Texto");
+
+        assertThat(IncidentMessage.of(incident, SUPPORT).subject())
+                .doesNotContain("\u2028", "\u0085", "\u2029")
+                .isEqualTo("[Incidencia] Problema técnico: Hola Bcc: x@example.org Fin");
+    }
+
+    @Test
+    @DisplayName("EC-03 — of_lineBreakInName_cannotFakeAnotherField")
+    void of_lineBreakInName_cannotFakeAnotherField() {
+        Incident incident = new Incident("Ana\nCorreo: falso@example.org", "ana@example.org", "600\r\n1",
+                IncidentType.OTHER, "Duda", "Texto");
+
+        String body = IncidentMessage.of(incident, SUPPORT).body();
+
+        assertThat(body).contains("Nombre: Ana Correo: falso@example.org\n", "Teléfono: 600 1\n")
+                .doesNotContain("\nCorreo: falso@example.org");
+    }
+
+    @Test
     @DisplayName("EC-03 — of_htmlInDescription_isKeptAsPlainText")
     void of_htmlInDescription_isKeptAsPlainText() {
         Incident incident = new Incident("Ana", "ana@example.org", null, IncidentType.OTHER, "Duda",

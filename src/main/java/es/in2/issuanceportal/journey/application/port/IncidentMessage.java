@@ -10,8 +10,11 @@ import java.util.regex.Pattern;
  */
 public record IncidentMessage(String to, String replyTo, String subject, String body) {
 
-    /** Line breaks and other control characters: in a subject they could add mail headers. */
-    private static final Pattern CONTROL = Pattern.compile("\\p{Cntrl}+");
+    /**
+     * Line breaks, other control characters and the Unicode line and paragraph separators: in a subject they
+     * could add mail headers, in a body field they could fake another field.
+     */
+    private static final Pattern BREAKS = Pattern.compile("[\\p{Cc}\\p{Zl}\\p{Zp}]+");
 
     public static IncidentMessage of(Incident incident, String supportEmail) {
         String subject = "[Incidencia] " + incident.type().label() + ": " + incident.subject();
@@ -24,13 +27,14 @@ public record IncidentMessage(String to, String replyTo, String subject, String 
 
                 Descripción:
                 %s
-                """.formatted(incident.name(), incident.email(), incident.phoneIfGiven().orElse("no indicado"),
-                incident.type().label(), incident.subject(), incident.description());
+                """.formatted(singleLine(incident.name()), singleLine(incident.email()),
+                incident.phoneIfGiven().map(IncidentMessage::singleLine).orElse("no indicado"),
+                incident.type().label(), singleLine(incident.subject()), incident.description());
         return new IncidentMessage(supportEmail, incident.email(), singleLine(subject), body);
     }
 
     private static String singleLine(String text) {
-        return CONTROL.matcher(text).replaceAll(" ").replaceAll(" {2,}", " ").trim();
+        return BREAKS.matcher(text).replaceAll(" ").replaceAll(" {2,}", " ").trim();
     }
 
     /** Never prints the content: it carries the holder's personal data. */
