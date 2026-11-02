@@ -137,7 +137,9 @@ class EntitlementTransactionIT {
             throw new IllegalStateException("database down");
         };
 
-        assertThatThrownBy(() -> serviceWith(failing).check(SANDBOX, session))
+        EntitlementService checks = serviceWith(failing);
+
+        assertThatThrownBy(() -> checks.check(SANDBOX, session))
                 .isInstanceOf(IllegalStateException.class);
 
         assertThat(sessions.read(SANDBOX, session, Section.ENTITLEMENT)).isEmpty();

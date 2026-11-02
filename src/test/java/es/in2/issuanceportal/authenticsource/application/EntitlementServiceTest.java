@@ -200,8 +200,8 @@ class EntitlementServiceTest {
         configure(Duration.ofSeconds(1));
         adapter.answering(searched -> {
             try {
-                Thread.sleep(5_000);
-            } catch (InterruptedException e) {
+                new CountDownLatch(1).await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
             return source(searched);
@@ -465,7 +465,7 @@ class EntitlementServiceTest {
             inside.countDown();
             try {
                 release.await(5, TimeUnit.SECONDS);
-            } catch (InterruptedException e) {
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
             return source(searched);
@@ -529,8 +529,8 @@ class EntitlementServiceTest {
         configure(Duration.ofSeconds(1));
         adapter.answering(searched -> {
             try {
-                Thread.sleep(5_000);
-            } catch (InterruptedException e) {
+                new CountDownLatch(1).await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException _) {
                 Thread.currentThread().interrupt();
             }
             return source(searched);

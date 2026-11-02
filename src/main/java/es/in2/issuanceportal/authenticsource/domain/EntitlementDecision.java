@@ -5,9 +5,9 @@ import java.util.Objects;
 /** The outcome of an answer of the source: confirmed with the person's record, or not confirmed. */
 public sealed interface EntitlementDecision {
 
-    record Confirmed(SourceRecord record) implements EntitlementDecision {
+    record Confirmed(SourceRecord source) implements EntitlementDecision {
         public Confirmed {
-            Objects.requireNonNull(record, "record");
+            Objects.requireNonNull(source, "source");
         }
     }
 

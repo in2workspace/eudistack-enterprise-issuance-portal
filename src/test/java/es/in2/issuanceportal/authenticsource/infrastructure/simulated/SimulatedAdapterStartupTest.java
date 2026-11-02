@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import es.in2.issuanceportal.authenticsource.application.AdapterRegistry;
 import es.in2.issuanceportal.authenticsource.application.port.AuthenticSourceConfigRepository;
 import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;

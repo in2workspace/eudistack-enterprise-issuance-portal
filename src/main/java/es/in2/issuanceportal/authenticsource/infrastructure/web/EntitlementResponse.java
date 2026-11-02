@@ -18,8 +18,8 @@ record EntitlementResponse(String result, Attestation attestation, String reason
         return switch (outcome) {
             case EntitlementService.Outcome.Confirmed(AttestationPreview preview) ->
                     new EntitlementResponse("confirmed", Attestation.of(preview), null);
-            case EntitlementService.Outcome.NotConfirmed notConfirmed ->
-                    new EntitlementResponse("not_confirmed", null, notConfirmed.reason().code());
+            case EntitlementService.Outcome.NotConfirmed(var reason) ->
+                    new EntitlementResponse("not_confirmed", null, reason.code());
         };
     }
 

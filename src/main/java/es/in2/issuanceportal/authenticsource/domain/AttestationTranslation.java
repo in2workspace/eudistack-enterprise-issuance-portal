@@ -18,10 +18,10 @@ public final class AttestationTranslation {
     }
 
     /** Each mapped attribute the source returned with a value, under its claim name, in mapping order. */
-    public static Map<String, Object> translate(List<AttributeMapping> mapping, SourceRecord record) {
+    public static Map<String, Object> translate(List<AttributeMapping> mapping, SourceRecord source) {
         Map<String, Object> claims = new LinkedHashMap<>();
         for (AttributeMapping entry : mapping) {
-            Object value = record.attributes().get(entry.attribute());
+            Object value = source.attributes().get(entry.attribute());
             if (value != null) {
                 claims.put(entry.claim(), value);
             }

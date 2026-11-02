@@ -33,7 +33,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -199,7 +199,7 @@ class EntitlementSimulatedIT {
             micros.add((System.nanoTime() - start) / 1_000);
         }
 
-        Collections.sort(micros);
+        micros.sort(Comparator.naturalOrder());
         long p95 = micros.get((int) Math.ceil(micros.size() * 0.95) - 1);
         System.out.printf("NFR-1 entitlement check p95=%.1f ms p50=%.1f ms max=%.1f ms over %d calls%n",
                 p95 / 1000.0, micros.get(micros.size() / 2) / 1000.0, micros.getLast() / 1000.0, micros.size());

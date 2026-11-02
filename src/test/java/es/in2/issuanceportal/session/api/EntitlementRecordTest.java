@@ -28,9 +28,9 @@ class EntitlementRecordTest {
 
     @Test
     void fromJson_writtenRecord_readsTheSame() {
-        EntitlementRecord record = confirmed();
+        EntitlementRecord entitlement = confirmed();
 
-        assertThat(EntitlementRecord.fromJson(record.toJson())).isEqualTo(record);
+        assertThat(EntitlementRecord.fromJson(entitlement.toJson())).isEqualTo(entitlement);
     }
 
     @Test
@@ -45,10 +45,10 @@ class EntitlementRecordTest {
 
     @Test
     void fromJson_withoutSource_hasNoIdentifierTypeNorClaims() {
-        EntitlementRecord record = new EntitlementRecord(null, null,
+        EntitlementRecord entitlement = new EntitlementRecord(null, null,
                 new EntitlementRecord.Preview("Atestación", List.of(), "lucia@example.org", false), CHECKED_AT);
 
-        EntitlementRecord read = EntitlementRecord.fromJson(record.toJson());
+        EntitlementRecord read = EntitlementRecord.fromJson(entitlement.toJson());
 
         assertThat(read.identifierTypeIfSearched()).isEmpty();
         assertThat(read.claims()).isEmpty();
@@ -80,9 +80,9 @@ class EntitlementRecordTest {
 
     @Test
     void toString_jsonDocument_hidesPersonalData() {
-        EntitlementRecord record = confirmed();
+        EntitlementRecord entitlement = confirmed();
         EntitlementRecord.Document document = new EntitlementRecord.Document("confirmed", "colegiado",
-                record.claims(), record.preview(), record.checkedAt());
+                entitlement.claims(), entitlement.preview(), entitlement.checkedAt());
 
         assertThat(document.toString()).contains("confirmed").doesNotContain("280000001", "Madrid", "Lucía");
     }

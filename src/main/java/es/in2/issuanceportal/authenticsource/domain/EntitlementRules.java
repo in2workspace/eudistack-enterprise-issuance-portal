@@ -17,7 +17,7 @@ public final class EntitlementRules {
      */
     public static EntitlementDecision decide(PersonalIdentifier searched, LookupResult result) {
         return switch (result) {
-            case LookupResult.NotFound notFound -> new EntitlementDecision.NotConfirmed(NotConfirmedReason.NOT_FOUND);
+            case LookupResult.NotFound _ -> new EntitlementDecision.NotConfirmed(NotConfirmedReason.NOT_FOUND);
             case LookupResult.Found(SourceRecord found) -> decideOn(searched, found);
         };
     }

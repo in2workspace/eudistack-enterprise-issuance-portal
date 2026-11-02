@@ -103,7 +103,7 @@ public class EntitlementService implements AutoCloseable {
         if (!current.hasSource()) {
             AttestationPreview preview = AttestationPreview.of(current.attestationType(), identity.givenName(),
                     identity.familyName(), List.of(), Map.of(), identity.email(), null);
-            trace.record(AuthenticSourceAuditTrail.Result.CONFIRMED, null);
+            trace.write(AuthenticSourceAuditTrail.Result.CONFIRMED, null);
             confirm(tenant, session, null, Map.of(), preview);
             return new Outcome.Confirmed(preview);
         }
@@ -117,17 +117,17 @@ public class EntitlementService implements AutoCloseable {
         try {
             answer = lookup(tenant, current, searched);
         } catch (ProblemException unavailable) {
-            trace.record(AuthenticSourceAuditTrail.Result.UNAVAILABLE, null);
+            trace.write(AuthenticSourceAuditTrail.Result.UNAVAILABLE, null);
             throw unavailable;
         }
         // The trace says what the source answered before acting on it, so a failure afterwards keeps it.
         return switch (EntitlementRules.decide(searched, answer)) {
             case EntitlementDecision.Confirmed(SourceRecord found) -> {
-                trace.record(AuthenticSourceAuditTrail.Result.CONFIRMED, null);
+                trace.write(AuthenticSourceAuditTrail.Result.CONFIRMED, null);
                 yield confirmed(tenant, session, identity, current, found);
             }
             case EntitlementDecision.NotConfirmed(NotConfirmedReason reason) -> {
-                trace.record(AuthenticSourceAuditTrail.Result.NOT_CONFIRMED, reason);
+                trace.write(AuthenticSourceAuditTrail.Result.NOT_CONFIRMED, reason);
                 withdrawal.withdraw(tenant, session, JourneyWithdrawal.Cause.NOT_ENTITLED);
                 yield new Outcome.NotConfirmed(reason);
             }
@@ -153,7 +153,7 @@ public class EntitlementService implements AutoCloseable {
         }
 
         /** The trail never decides the outcome of a check: a failure is logged and the check goes on. */
-        void record(AuthenticSourceAuditTrail.Result result, NotConfirmedReason reason) {
+        void write(AuthenticSourceAuditTrail.Result result, NotConfirmedReason reason) {
             try {
                 trail.append(tenant, new AuthenticSourceAuditTrail.Event(UUID.randomUUID(), journeyId,
                         current.attestationType(),
@@ -202,7 +202,7 @@ public class EntitlementService implements AutoCloseable {
                     slot.release();
                 }
             });
-        } catch (RuntimeException e) {
+        } catch (RuntimeException _) {
             slot.release();
             throw unavailable();
         }

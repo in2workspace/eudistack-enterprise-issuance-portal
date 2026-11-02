@@ -51,7 +51,7 @@ public record AttestationPreview(String typeName, List<Field> fields, String ema
 
     private static String displayed(Object value) {
         return switch (value) {
-            case Boolean flag -> flag ? "Sí" : "No";
+            case Boolean flag -> Boolean.TRUE.equals(flag) ? "Sí" : "No";
             case Collection<?> values -> values.stream().map(String::valueOf).collect(Collectors.joining(", "));
             default -> String.valueOf(value);
         };

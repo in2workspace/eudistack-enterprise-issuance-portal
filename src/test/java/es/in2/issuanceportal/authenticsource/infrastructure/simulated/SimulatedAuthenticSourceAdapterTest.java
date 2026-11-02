@@ -43,7 +43,7 @@ class SimulatedAuthenticSourceAdapterTest {
                         Map.of("records", records)))));
     }
 
-    private static Map<String, Object> record(String dni, String colegiado, boolean entitled) {
+    private static Map<String, Object> entry(String dni, String colegiado, boolean entitled) {
         return Map.of("dni", dni, "colegiado", colegiado, "entitled", entitled,
                 "attributes", Map.of("registration_number", colegiado, "medical_boards", List.of("Madrid")));
     }
@@ -56,11 +56,11 @@ class SimulatedAuthenticSourceAdapterTest {
     @CsvSource({"DNI,00000001R", "COLEGIADO,280000001", "DNI,00000001r"})
     @DisplayName("AC-15 — lookup_existingRecord_isFoundByEitherIdentifierWithBoth")
     void lookup_existingRecord_isFoundByEitherIdentifierWithBoth(IdentifierType type, String value) {
-        save(CGCOM, List.of(record("00000001R", "280000001", true)));
+        save(CGCOM, List.of(entry("00000001R", "280000001", true)));
 
         LookupResult result = search(CGCOM, type, value);
 
-        SourceRecord found = ((LookupResult.Found) result).record();
+        SourceRecord found = ((LookupResult.Found) result).source();
         assertThat(found.identifiers()).containsExactly(new PersonalIdentifier(IdentifierType.DNI, "00000001R"),
                 new PersonalIdentifier(IdentifierType.COLEGIADO, "280000001"));
         assertThat(found.entitled()).isTrue();
@@ -70,15 +70,15 @@ class SimulatedAuthenticSourceAdapterTest {
     @Test
     @DisplayName("AC-15 — lookup_deregistered_isFoundNotEntitled")
     void lookup_deregistered_isFoundNotEntitled() {
-        save(CGCOM, List.of(record("00000002W", "280000002", false)));
+        save(CGCOM, List.of(entry("00000002W", "280000002", false)));
 
-        assertThat(((LookupResult.Found) search(CGCOM, IdentifierType.DNI, "00000002W")).record().entitled()).isFalse();
+        assertThat(((LookupResult.Found) search(CGCOM, IdentifierType.DNI, "00000002W")).source().entitled()).isFalse();
     }
 
     @Test
     @DisplayName("AC-15 — lookup_unknownDniOrRegistrationNumber_isNotFound")
     void lookup_unknownDniOrRegistrationNumber_isNotFound() {
-        save(CGCOM, List.of(record("00000001R", "280000001", true)));
+        save(CGCOM, List.of(entry("00000001R", "280000001", true)));
 
         assertThat(search(CGCOM, IdentifierType.DNI, "00000009Y")).isInstanceOf(LookupResult.NotFound.class);
         assertThat(search(CGCOM, IdentifierType.COLEGIADO, "289999999")).isInstanceOf(LookupResult.NotFound.class);
@@ -86,7 +86,7 @@ class SimulatedAuthenticSourceAdapterTest {
 
     @Test
     void lookup_registrationNumberAsDni_isNotFound() {
-        save(CGCOM, List.of(record("00000001R", "280000001", true)));
+        save(CGCOM, List.of(entry("00000001R", "280000001", true)));
 
         assertThat(search(CGCOM, IdentifierType.DNI, "280000001")).isInstanceOf(LookupResult.NotFound.class);
     }
@@ -94,8 +94,8 @@ class SimulatedAuthenticSourceAdapterTest {
     @Test
     @DisplayName("EC-05 — lookup_recordOfAnotherTenant_isNotFound")
     void lookup_recordOfAnotherTenant_isNotFound() {
-        save(CGCOM, List.of(record("00000001R", "280000001", true)));
-        save(SANDBOX, List.of(record("00000005M", "280000005", true)));
+        save(CGCOM, List.of(entry("00000001R", "280000001", true)));
+        save(SANDBOX, List.of(entry("00000005M", "280000005", true)));
 
         assertThat(search(SANDBOX, IdentifierType.DNI, "00000001R")).isInstanceOf(LookupResult.NotFound.class);
     }
@@ -103,7 +103,7 @@ class SimulatedAuthenticSourceAdapterTest {
     @Test
     @DisplayName("EC-06 — lookup_failingRecord_throws")
     void lookup_failingRecord_throws() {
-        Map<String, Object> failing = new HashMap<>(record("00000004G", "280000004", true));
+        Map<String, Object> failing = new HashMap<>(entry("00000004G", "280000004", true));
         failing.put("fail", true);
         save(CGCOM, List.of(failing));
 
@@ -113,8 +113,8 @@ class SimulatedAuthenticSourceAdapterTest {
 
     @Test
     @DisplayName("AC-09 — lookup_slowRecord_waitsUntilInterrupted")
-    void lookup_slowRecord_waitsUntilInterrupted() throws Exception {
-        Map<String, Object> slow = new HashMap<>(record("00000003A", "280000003", true));
+    void lookup_slowRecord_waitsUntilInterrupted() {
+        Map<String, Object> slow = new HashMap<>(entry("00000003A", "280000003", true));
         slow.put("delay_seconds", 30);
         save(CGCOM, List.of(slow));
 
@@ -151,7 +151,7 @@ class SimulatedAuthenticSourceAdapterTest {
     void lookup_entryNoLongerChoosesTheSimulatedAdapter_throws() {
         rows.put(CGCOM, new AuthenticSourceConfig(DOCTORID, Set.of(), Map.of(DOCTORID,
                 new SourceSettings("DoctorID", "cgcom", null, null, null, Set.of(IdentifierType.DNI), List.of(),
-                        null, Map.of("records", List.of(record("00000001R", "280000001", true)))))));
+                        null, Map.of("records", List.of(entry("00000001R", "280000001", true)))))));
 
         assertThatThrownBy(() -> search(CGCOM, IdentifierType.DNI, "00000001R"))
                 .isInstanceOf(IllegalStateException.class);

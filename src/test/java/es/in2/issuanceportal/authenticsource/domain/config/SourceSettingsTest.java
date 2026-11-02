@@ -31,7 +31,9 @@ class SourceSettingsTest {
     @ParameterizedTest
     @ValueSource(longs = {0, -1, 11})
     void constructor_timeoutOutOfRange_isInvalid(long seconds) {
-        assertThatThrownBy(() -> settings(Duration.ofSeconds(seconds)))
+        Duration timeout = Duration.ofSeconds(seconds);
+
+        assertThatThrownBy(() -> settings(timeout))
                 .isInstanceOf(InvalidSourceConfigException.class)
                 .hasMessage("timeout_seconds must be between 1 and 10");
     }

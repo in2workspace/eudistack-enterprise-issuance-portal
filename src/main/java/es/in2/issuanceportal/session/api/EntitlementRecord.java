@@ -66,10 +66,12 @@ public record EntitlementRecord(IdentifierType identifierType, Map<String, Objec
         return new EntitlementRecord(type, document.claims(), document.preview(), document.checkedAt());
     }
 
+    private static final String REDACTED = ", personal data redacted]";
+
     @Override
     public String toString() {
         return "EntitlementRecord[identifierType=" + (identifierType == null ? "none" : identifierType.code())
-                + ", claims=" + claims.keySet() + ", checkedAt=" + checkedAt + ", personal data redacted]";
+                + ", claims=" + claims.keySet() + ", checkedAt=" + checkedAt + REDACTED;
     }
 
     /** What the interface shows in the Data step (openapi AttestationPreview). */
@@ -86,7 +88,7 @@ public record EntitlementRecord(IdentifierType identifierType, Map<String, Objec
         @Override
         public String toString() {
             return "Preview[typeName=" + typeName + ", fields=" + fields.size() + ", emailRequired="
-                    + emailRequired + ", personal data redacted]";
+                    + emailRequired + REDACTED;
         }
     }
 
@@ -108,7 +110,7 @@ public record EntitlementRecord(IdentifierType identifierType, Map<String, Objec
 
         @Override
         public String toString() {
-            return "EntitlementRecord.Document[result=" + result + ", personal data redacted]";
+            return "EntitlementRecord.Document[result=" + result + REDACTED;
         }
     }
 }
