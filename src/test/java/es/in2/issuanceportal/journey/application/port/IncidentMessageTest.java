@@ -60,6 +60,18 @@ class IncidentMessageTest {
     }
 
     @Test
+    @DisplayName("EC-03 — of_invisibleFormatCharacters_areRemoved")
+    void of_invisibleFormatCharacters_areRemoved() {
+        Incident incident = new Incident("Ana‮txe", "ana@example.org", null, IncidentType.OTHER,
+                "Duda​﻿ urgente⁦", "Texto");
+
+        IncidentMessage message = IncidentMessage.of(incident, SUPPORT);
+
+        assertThat(message.subject()).isEqualTo("[Incidencia] Otro: Duda urgente");
+        assertThat(message.body()).contains("Nombre: Ana txe\n").doesNotContain("‮", "​", "﻿");
+    }
+
+    @Test
     @DisplayName("EC-03 — of_lineBreakInName_cannotFakeAnotherField")
     void of_lineBreakInName_cannotFakeAnotherField() {
         Incident incident = new Incident("Ana\nCorreo: falso@example.org", "ana@example.org", "600\r\n1",

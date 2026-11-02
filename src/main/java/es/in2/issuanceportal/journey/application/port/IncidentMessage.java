@@ -11,10 +11,11 @@ import java.util.regex.Pattern;
 public record IncidentMessage(String to, String replyTo, String subject, String body) {
 
     /**
-     * Line breaks, other control characters and the Unicode line and paragraph separators: in a subject they
-     * could add mail headers, in a body field they could fake another field.
+     * Line breaks, other control characters, the Unicode line and paragraph separators, and invisible format
+     * characters (bidi overrides, zero-width): in a subject they could add mail headers or disguise it, in a
+     * body field they could fake another field.
      */
-    private static final Pattern BREAKS = Pattern.compile("[\\p{Cc}\\p{Zl}\\p{Zp}]+");
+    private static final Pattern BREAKS = Pattern.compile("[\\p{Cc}\\p{Cf}\\p{Zl}\\p{Zp}]+");
 
     public static IncidentMessage of(Incident incident, String supportEmail) {
         String subject = "[Incidencia] " + incident.type().label() + ": " + incident.subject();
