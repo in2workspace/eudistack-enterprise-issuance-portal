@@ -51,11 +51,11 @@ dependencies {
 
     // --- Cryptography ---
     // Envelope encryption of the personal data in the journey session (design.md §5).
-    implementation 'software.amazon.awssdk:kms:2.31.78'
+    implementation 'software.amazon.awssdk:kms:2.57.8'
 
     // --- Mail ---
     // Incidents go to the tenant's support by Amazon SES (design.md AD-8).
-    implementation 'software.amazon.awssdk:sesv2:2.31.78'
+    implementation 'software.amazon.awssdk:sesv2:2.57.8'
 
     // --- Scheduling ---
     // The expiry job runs on one instance per tenant at a time (design.md AD-4).
