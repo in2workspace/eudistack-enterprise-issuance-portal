@@ -7,13 +7,14 @@ on:
 
 permissions:
   contents: write
+  packages: read
   pull-requests: write
   id-token: write
   attestations: write
 
 jobs:
   release:
-    uses: in2workspace/eudistack-devops-workflows/.github/workflows/ecs-api-release.yml@12ed6fa9090ebd4564c6541b67111ed4466a61b1
+    uses: in2workspace/eudistack-devops-workflows/.github/workflows/ecs-api-release.yml@1335d59e67ca288d91b407996a2e4bf5bb4b092b
     with:
       project_name: 'eudistack'
       app_name: 'issuance-portal'
@@ -25,6 +26,7 @@ jobs:
       production_monitor_minutes: ${{ vars.PRO_MONITOR_MINUTES || '30' }}
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      PACKAGES_READ_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
       AWS_ACCESS_KEY_ID_STG: ${{ secrets.AWS_ACCESS_KEY_ID_STG }}
       AWS_SECRET_ACCESS_KEY_STG: ${{ secrets.AWS_SECRET_ACCESS_KEY_STG }}
       AWS_ACCESS_KEY_ID_PRO: ${{ secrets.AWS_ACCESS_KEY_ID_PRO }}
