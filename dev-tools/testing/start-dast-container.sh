@@ -25,3 +25,6 @@ docker run -d --name "${CONTAINER_NAME}" \
   -e CREDENTIAL_PROFILES_PATH=file:/etc/eudistack/schemas \
   -v "${profiles_dir}:/etc/eudistack/schemas:ro" \
   "${CONTAINER_IMAGE}"
+
+  
+
