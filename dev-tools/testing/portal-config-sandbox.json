@@ -1,0 +1,11 @@
+{
+  "texts": {"es": {"portal.app_name": "Portal de emisión"}},
+  "legal_links": {"legal_notice": "https://example.org/aviso-legal", "privacy": "https://example.org/privacidad"},
+  "support": {"email": "soporte@example.org", "phone": "900 000 000", "schedule": "L-V 9:00-18:00", "response_time": "48 horas"},
+  "wallet_url": "https://sandbox.stg.eudistack.net/wallet",
+  "attestation_type": "doctorid.sd.1",
+  "data_placement": {"givenName": "identity.given_name"},
+  "onboarding": {"enabled": false},
+  "portal_client_id": "issuance-portal-sandbox",
+  "identifier_types": {"doctorid.sd.1": "colegiado"}
+}
