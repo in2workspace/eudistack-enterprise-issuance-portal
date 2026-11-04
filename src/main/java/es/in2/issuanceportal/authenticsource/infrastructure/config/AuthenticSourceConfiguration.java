@@ -19,7 +19,7 @@ class AuthenticSourceConfiguration {
      * Environments (issuance-portal.env) where adapters with synthetic data may run. An allowlist, like
      * the local data key's: any other value, production or a misspelling of it, leaves them out.
      */
-    static final Set<String> SYNTHETIC_DATA_ENVIRONMENTS = Set.of("local", "test", "stg");
+    static final Set<String> SYNTHETIC_DATA_ENVIRONMENTS = Set.of("local", "test", "dev", "stg");
     /** Adapters with synthetic data: never registered in production, even if a tenant configures them. */
     static final Set<String> NON_PRODUCTION_ADAPTERS = Set.of("simulated");
 

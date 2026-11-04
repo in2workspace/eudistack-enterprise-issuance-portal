@@ -27,7 +27,7 @@ server:
 issuance-portal:
   # Filled in from build.gradle when the resources are processed.
   version: "@version@"
-  # local, test, stg or pro. No default: the service does not start without it.
+  # local, test, dev, stg or pro. No default: the service does not start without it.
   env: ${PORTAL_ENV}
   crypto:
     # kms in AWS environments, local in Docker Compose. Empty: the service does not start.

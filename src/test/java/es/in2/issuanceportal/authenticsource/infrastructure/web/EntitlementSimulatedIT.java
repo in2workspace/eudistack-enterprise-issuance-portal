@@ -68,6 +68,10 @@ class EntitlementSimulatedIT {
     @Autowired
     private JourneySessions sessions;
 
+    /**
+     * The JSON is a copy of cgcom's local configuration in eudistack-platform-dev
+     * ({@code local-env/postgres/portal-config/cgcom.json}), loaded for sandbox: change both together.
+     */
     @BeforeEach
     void loadTheDoctorIdConfiguration() throws Exception {
         String config = new ClassPathResource("authenticsource/doctorid-portal-config.json")

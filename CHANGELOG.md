@@ -24,7 +24,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Revisión de la orden:
 
-- El adaptador simulado solo se registra con `PORTAL_ENV` `local`, `test` o `stg`. Con cualquier otro valor (`pro`, `PRO`, `prod`, vacío…) queda fuera, aunque un tenant lo configure.
+- El adaptador simulado solo se registra con `PORTAL_ENV` `local`, `test`, `dev` o `stg` (DEV usa `dev` en la IaC). Con cualquier otro valor (`pro`, `PRO`, `prod`, vacío…) queda fuera, aunque un tenant lo configure.
 - Si el tipo de identificador de la identidad no está entre los que admite la fuente del tenant, 503 `config_unavailable` sin consultarla. El adaptador simulado comprueba que la entrada del tenant sigue eligiéndolo.
 - Como mucho 100 búsquedas en la fuente a la vez por instancia (`PORTAL_AUTHENTIC_SOURCE_MAX_LOOKUPS`) y 20 por tenant (`PORTAL_AUTHENTIC_SOURCE_MAX_LOOKUPS_PER_TENANT`), para que la fuente lenta de un tenant no deje sin búsquedas a los demás. Por encima, 503 `authentic_source_unavailable` sin esperar. Un valor menor que 1 impide arrancar. Una búsqueda cancelada antes de empezar (por la espera máxima o por una petición interrumpida) devuelve su plaza.
 - Un elemento vacío en la traducción de la configuración (`"mapping": [null]`) es una configuración no válida (503 `config_unavailable`, con el campo en el log), no un error 500.
