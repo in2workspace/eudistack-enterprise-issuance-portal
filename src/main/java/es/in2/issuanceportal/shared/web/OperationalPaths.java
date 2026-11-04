@@ -1,6 +1,7 @@
 package es.in2.issuanceportal.shared.web;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.Set;
 import org.springframework.util.StringUtils;
 import org.springframework.web.util.UrlPathHelper;
 
@@ -12,7 +13,10 @@ import org.springframework.web.util.UrlPathHelper;
  */
 public final class OperationalPaths {
 
-    private static final String ACTUATOR = "/actuator";
+    // Actuator endpoints at the root of the service (management.endpoints.web.base-path: /), as in the
+    // other platform services: /issuance-portal/health, /issuance-portal/prometheus.
+    private static final String HEALTH = "/health";
+    private static final Set<String> OTHER_ENDPOINTS = Set.of("/info", "/prometheus");
     private static final UrlPathHelper PATHS = new UrlPathHelper();
 
     static {
@@ -25,10 +29,10 @@ public final class OperationalPaths {
 
     public static boolean isOperational(HttpServletRequest request) {
         String path = PATHS.getPathWithinApplication(request);
-        // "/actuator/../api/..." must not count as operational, whatever the router later does with it.
+        // "/health/../api/..." must not count as operational, whatever the router later does with it.
         if (!path.equals(StringUtils.cleanPath(path))) {
             return false;
         }
-        return path.equals(ACTUATOR) || path.startsWith(ACTUATOR + "/");
+        return path.equals(HEALTH) || path.startsWith(HEALTH + "/") || OTHER_ENDPOINTS.contains(path);
     }
 }
