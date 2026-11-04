@@ -20,8 +20,8 @@ jobs:
     with:
       container_image: 'issuance-portal'
       container_name: 'issuance-portal'
-      smoke_url: 'http://localhost:8080/issuance-portal/health/readiness'
-      zap_target_url: 'http://localhost:8080/issuance-portal/.well-known/openid-credential-issuer'
+      smoke_url: 'http://localhost:8080/issuance-portal/actuator/health/readiness'
+      zap_target_url: 'http://localhost:8080/issuance-portal/api/v1/config'
       dast_start_script: 'dev-tools/testing/start-dast-container.sh'
     secrets:
       SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
