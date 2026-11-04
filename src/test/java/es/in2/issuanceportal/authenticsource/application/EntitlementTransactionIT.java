@@ -12,10 +12,13 @@ import es.in2.issuanceportal.authenticsource.domain.config.AuthenticSourceConfig
 import es.in2.issuanceportal.authenticsource.domain.config.SourceSettings;
 import es.in2.issuanceportal.journey.api.JourneyProgress;
 import es.in2.issuanceportal.journey.application.JourneyService;
+import es.in2.issuanceportal.journey.domain.JourneyClosedException;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.JourneySessions;
 import es.in2.issuanceportal.session.api.Section;
 import es.in2.issuanceportal.session.api.SessionId;
+import es.in2.issuanceportal.shared.error.ProblemCode;
+import es.in2.issuanceportal.shared.error.ProblemException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.DisplayName;
@@ -158,5 +161,52 @@ class EntitlementTransactionIT {
         assertThat(sessions.read(SANDBOX, session, Section.ENTITLEMENT)).isPresent();
         assertThat(jdbc.sql("SELECT step FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
                 .param("id", journeyId).query(String.class).single()).isEqualTo("entitlement_confirmed");
+    }
+
+    /** The search takes up to 10 s without a transaction: the journey may close before its answer is written. */
+    @Test
+    void check_journeyWithdrawnWhileTheSourceSearches_writesNothing() {
+        SessionId session = journeyWithIdentity();
+        UUID journeyId = sessions.journeyOf(SANDBOX, session).orElseThrow();
+        EntitlementService checks = serviceWith(journey);
+        adapter.answering(searched -> {
+            journey.cancel(SANDBOX, session);
+            return LookupResult.found(
+                    new SourceRecord(List.of(ACTIVE), true, Map.of("registration_number", "280000001")));
+        });
+
+        assertThatThrownBy(() -> checks.check(SANDBOX, session))
+                .isInstanceOfSatisfying(ProblemException.class,
+                        e -> assertThat(e.problem()).isEqualTo(ProblemCode.JOURNEY_CLOSED));
+
+        assertThat(journeyRow(journeyId)).isEqualTo("withdrawn/cancelled/started");
+        assertThat(sessionRows(journeyId)).isZero();
+    }
+
+    @Test
+    void check_journeyWithdrawnWhileTheSourceSearches_keepsItsWithdrawalReason() {
+        SessionId session = journeyWithIdentity();
+        UUID journeyId = sessions.journeyOf(SANDBOX, session).orElseThrow();
+        EntitlementService checks = serviceWith(journey);
+        adapter.answering(searched -> {
+            journey.cancel(SANDBOX, session);
+            return LookupResult.found(new SourceRecord(List.of(ACTIVE), false, Map.of()));
+        });
+
+        assertThatThrownBy(() -> checks.check(SANDBOX, session)).isInstanceOf(JourneyClosedException.class);
+
+        assertThat(journeyRow(journeyId)).isEqualTo("withdrawn/cancelled/started");
+        assertThat(sessionRows(journeyId)).isZero();
+    }
+
+    private String journeyRow(UUID journeyId) {
+        return jdbc.sql("SELECT state || '/' || withdrawal_reason || '/' || step "
+                        + "FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
+                .param("id", journeyId).query(String.class).single();
+    }
+
+    private int sessionRows(UUID journeyId) {
+        return jdbc.sql("SELECT count(*) FROM \"sandbox_issuance_portal\".journey_session WHERE journey_id = :id")
+                .param("id", journeyId).query(Integer.class).single();
     }
 }
