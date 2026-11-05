@@ -74,6 +74,9 @@ issuance-portal:
     # A 503 is retried only when this is on: until the Issuer shares its idempotency between instances
     # (EUD-254) a retry may create another process. Network errors and timeouts are always retried.
     retry-on-503: ${PORTAL_ISSUANCE_RETRY_ON_503:false}
+  wallet-unit-service:
+    # How long the tenant's Wallet Unit Service gets to answer the onboarding ticket; never retried (design.md §3.4).
+    request-timeout: 5s
   incidents:
     mail:
       # ses in AWS environments, local in Docker Compose. Empty: the service does not start.

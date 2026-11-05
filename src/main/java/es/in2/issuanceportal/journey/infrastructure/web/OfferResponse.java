@@ -7,21 +7,25 @@ import es.in2.issuanceportal.journey.application.IssuanceService;
 import java.time.Instant;
 
 /**
- * {@code Offer} of the contract. The offer address is a bearer secret: the text form never shows it. The
- * onboarding address and its expiry come with the onboarding ticket (EUD-277 task 7); the issuance process
- * is never part of it.
+ * {@code Offer} of the contract. The offer address and the onboarding address are bearer secrets: the text form
+ * never shows them. The onboarding fields are only present in a tenant with onboarding tickets; the issuance
+ * process is never part of it.
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 record OfferResponse(
         @JsonProperty("credential_offer_uri") String credentialOfferUri,
-        @JsonProperty("expires_at") Instant expiresAt) {
+        @JsonProperty("expires_at") Instant expiresAt,
+        @JsonProperty("onboarding_url") String onboardingUrl,
+        @JsonProperty("onboarding_expires_at") Instant onboardingExpiresAt) {
 
     static OfferResponse of(IssuanceService.Offer offer) {
-        return new OfferResponse(offer.credentialOfferUri(), offer.expiresAt());
+        return new OfferResponse(offer.credentialOfferUri(), offer.expiresAt(), offer.onboardingUrl(),
+                offer.onboardingExpiresAt());
     }
 
     @Override
     public String toString() {
-        return "OfferResponse[expiresAt=" + expiresAt + ", credentialOfferUri redacted]";
+        return "OfferResponse[expiresAt=" + expiresAt + ", onboardingExpiresAt=" + onboardingExpiresAt
+                + ", credentialOfferUri and onboardingUrl redacted]";
     }
 }

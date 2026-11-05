@@ -8,6 +8,9 @@ import es.in2.issuanceportal.journey.application.port.IssuanceResult;
 import es.in2.issuanceportal.journey.application.port.IssuanceUnavailableException;
 import es.in2.issuanceportal.journey.application.port.JourneyAuditTrail;
 import es.in2.issuanceportal.journey.application.port.JourneyRepository;
+import es.in2.issuanceportal.journey.application.port.OnboardingTicket;
+import es.in2.issuanceportal.journey.application.port.OnboardingTicketException;
+import es.in2.issuanceportal.journey.application.port.OnboardingTickets;
 import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
 import es.in2.issuanceportal.journey.domain.EmailAddress;
 import es.in2.issuanceportal.journey.domain.IncompletePlacementException;
@@ -16,6 +19,7 @@ import es.in2.issuanceportal.journey.domain.IssuanceProcessAlreadyRecordedExcept
 import es.in2.issuanceportal.journey.domain.IssuancePayload;
 import es.in2.issuanceportal.journey.domain.Journey;
 import es.in2.issuanceportal.journey.domain.JourneyState;
+import es.in2.issuanceportal.journey.domain.config.Onboarding;
 import es.in2.issuanceportal.journey.domain.config.ServiceSettings;
 import es.in2.issuanceportal.session.api.EmailRecord;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
@@ -33,6 +37,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionOperations;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
@@ -51,8 +56,10 @@ import java.util.UUID;
  * the key the first one stored (EC-03); the Issuer's idempotency gives both the same process, and the one
  * that finishes second answers with the offer the first stored.
  *
- * <p>The onboarding ticket (EUD-277 task 7) is requested between the Issuer's answer and the second
- * transaction, so an offer that cannot be turned into a ticket is never stored.
+ * <p>In a tenant with onboarding, the ticket is requested between the Issuer's answer and the second
+ * transaction, also outside any transaction, so an offer that cannot be turned into a ticket is never stored
+ * nor given: the second transaction then keeps only the process, and the journey stays where it was
+ * (AC-12, design.md §3.4).
  */
 @Slf4j
 @Service
@@ -60,24 +67,28 @@ public class IssuanceService {
 
     static final String DELIVERY = "ui";
     static final String GRANT_TYPE = "authorization_code";
+    /** How long before its offer the onboarding ticket expires (AC-11). */
+    static final Duration TICKET_MARGIN = Duration.ofSeconds(60);
 
     private final JourneyAccess access;
     private final JourneyRepository journeys;
     private final JourneySessions sessions;
     private final PortalConfigService configs;
     private final IssuanceApi issuance;
+    private final OnboardingTickets tickets;
     private final JourneyAuditTrail trail;
     private final TransactionOperations transactions;
     private final Clock clock;
 
     IssuanceService(JourneyAccess access, JourneyRepository journeys, JourneySessions sessions,
-                    PortalConfigService configs, IssuanceApi issuance, JourneyAuditTrail trail,
-                    TransactionOperations transactions, Clock clock) {
+                    PortalConfigService configs, IssuanceApi issuance, OnboardingTickets tickets,
+                    JourneyAuditTrail trail, TransactionOperations transactions, Clock clock) {
         this.access = access;
         this.journeys = journeys;
         this.sessions = sessions;
         this.configs = configs;
         this.issuance = issuance;
+        this.tickets = tickets;
         this.trail = trail;
         this.transactions = transactions;
         this.clock = clock;
@@ -88,17 +99,21 @@ public class IssuanceService {
      *
      * @param credentialOfferUri the offer exactly as the Issuer returned it
      * @param expiresAt          when the offer stops being valid
+     * @param onboardingUrl      the wallet onboarding address; {@code null} in a tenant without onboarding
+     * @param onboardingExpiresAt when that address stops being valid, before the offer; {@code null} with no address
      */
-    public record Offer(String credentialOfferUri, Instant expiresAt) {
+    public record Offer(String credentialOfferUri, Instant expiresAt, String onboardingUrl,
+                        Instant onboardingExpiresAt) {
 
         @Override
         public String toString() {
-            return "Offer[expiresAt=" + expiresAt + ", credentialOfferUri redacted]";
+            return "Offer[expiresAt=" + expiresAt + ", onboardingExpiresAt=" + onboardingExpiresAt
+                    + ", credentialOfferUri and onboardingUrl redacted]";
         }
     }
 
     /** What the first transaction leaves ready for the request. */
-    private record Prepared(UUID idempotencyKey, IssuanceRequest request) {
+    private record Prepared(UUID idempotencyKey, IssuanceRequest request, Onboarding onboarding) {
     }
 
     /**
@@ -112,8 +127,14 @@ public class IssuanceService {
         Prepared prepared = Objects.requireNonNull(
                 transactions.execute(status -> prepare(tenant, session, journeyId, email)));
         IssuanceResult issued = request(tenant, journeyId, prepared);
-        return Objects.requireNonNull(
-                transactions.execute(status -> finish(tenant, session, journeyId, prepared.idempotencyKey(), issued)));
+        boolean ticketNeeded = prepared.onboarding().enabled();
+        OnboardingTicket ticket = ticketNeeded ? requestTicket(tenant, journeyId, prepared, issued) : null;
+        trace(tenant, journeyId, ticketNeeded && ticket == null ? JourneyAuditTrail.IssuanceOutcome.ONBOARDING_FAILED
+                : JourneyAuditTrail.IssuanceOutcome.ISSUED, issued.processId());
+        Optional<Offer> offer = Objects.requireNonNull(transactions.execute(status -> finish(tenant, session,
+                journeyId, prepared.idempotencyKey(), issued, ticketNeeded, ticket)));
+        // The process is kept, the offer is not given: without the ticket the holder could not use it in the wallet.
+        return offer.orElseThrow(() -> new ProblemException(ProblemCode.ONBOARDING_UNAVAILABLE));
     }
 
     private static EmailAddress email(String raw) {
@@ -161,7 +182,7 @@ public class IssuanceService {
             sessions.write(tenant, session, Section.EMAIL, new EmailRecord(address).toJson());
         }
         return new Prepared(key, new IssuanceRequest(settings.attestationType(), payload, address,
-                DELIVERY, GRANT_TYPE));
+                DELIVERY, GRANT_TYPE), settings.onboarding());
     }
 
     private Optional<String> storedEmail(TenantId tenant, SessionId session) {
@@ -178,9 +199,7 @@ public class IssuanceService {
     /** Outside any transaction. Every failure leaves the journey in progress, with its key, for the next attempt. */
     private IssuanceResult request(TenantId tenant, UUID journeyId, Prepared prepared) {
         try {
-            IssuanceResult issued = issuance.issue(tenant, prepared.idempotencyKey(), prepared.request());
-            trace(tenant, journeyId, JourneyAuditTrail.IssuanceOutcome.ISSUED, issued.processId());
-            return issued;
+            return issuance.issue(tenant, prepared.idempotencyKey(), prepared.request());
         } catch (SystemTokenUnavailableException e) {
             log.warn("No system token of tenant {} to issue for journey {}: {}", tenant, journeyId, e.reason());
             trace(tenant, journeyId, JourneyAuditTrail.IssuanceOutcome.SYSTEM_TOKEN_UNAVAILABLE, null);
@@ -197,13 +216,45 @@ public class IssuanceService {
     }
 
     /**
-     * Second transaction: keeps the process and the offer and completes the journey. If a parallel
-     * confirmation of the same journey completed it first, answers with the offer that one stored.
+     * Outside any transaction. Any failure, or an offer with too little life left for a ticket that expires
+     * before it, gives no ticket: the process the Issuer created stays for the next attempt.
+     *
+     * @return the ticket, or {@code null} when it was not created
      */
-    private Offer finish(TenantId tenant, SessionId session, UUID journeyId, UUID key, IssuanceResult issued) {
+    private OnboardingTicket requestTicket(TenantId tenant, UUID journeyId, Prepared prepared, IssuanceResult issued) {
+        Duration expiresIn = Duration.between(clock.instant(), issued.offerExpiresAt()).minus(TICKET_MARGIN);
+        if (expiresIn.compareTo(Duration.ofSeconds(1)) < 0) {
+            log.warn("Offer of journey {} has too little life left for an onboarding ticket: not requested", journeyId);
+            traceTicket(tenant, journeyId, JourneyAuditTrail.TicketOutcome.FAILED);
+            return null;
+        }
+        try {
+            OnboardingTicket ticket = tickets.request(tenant, prepared.onboarding().walletUnitServiceUrl(),
+                    prepared.request().email(), issued.credentialOfferUri(), expiresIn);
+            traceTicket(tenant, journeyId, JourneyAuditTrail.TicketOutcome.CREATED);
+            return ticket;
+        } catch (OnboardingTicketException e) {
+            log.warn("Onboarding ticket of journey {} not created: {}", journeyId, e.reason());
+            traceTicket(tenant, journeyId, JourneyAuditTrail.TicketOutcome.FAILED);
+            return null;
+        }
+    }
+
+    /**
+     * Second transaction. With the ticket, or in a tenant without onboarding, keeps the process and the offer
+     * (and the onboarding address) and completes the journey. Without a ticket that was needed, keeps only the
+     * process: no offer and no address, and the journey stays in progress. If a parallel confirmation of the
+     * same journey completed it first, answers with the offer that one stored.
+     *
+     * @param ticketNeeded whether the tenant uses onboarding tickets
+     * @param ticket       {@code null} when the tenant has no onboarding or the ticket was not created
+     * @return the offer to give, or empty when the ticket was needed and not created
+     */
+    private Optional<Offer> finish(TenantId tenant, SessionId session, UUID journeyId, UUID key,
+                                   IssuanceResult issued, boolean ticketNeeded, OnboardingTicket ticket) {
         Journey journey = lock(tenant, journeyId);
         if (journey.state() == JourneyState.COMPLETED) {
-            return storedOffer(tenant, session, journeyId);
+            return Optional.of(storedOffer(tenant, session, journeyId));
         }
         if (!journey.isInProgress()) {
             // Withdrawn or expired while the Issuer was asked. The process it created stays unused.
@@ -218,14 +269,23 @@ public class IssuanceService {
             log.warn("Journey {} already had a different issuance process: the new one is not recorded", journeyId);
             throw new ProblemException(ProblemCode.ONBOARDING_UNAVAILABLE);
         }
+        if (ticketNeeded && ticket == null) {
+            if (!journeys.update(tenant, journey, JourneyState.IN_PROGRESS)) {
+                throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
+            }
+            return Optional.empty();
+        }
+        String onboardingUrl = ticket == null ? null : ticket.onboardingUrl();
+        Instant onboardingExpiresAt = ticket == null ? null : ticket.expiresAt();
         sessions.write(tenant, session, Section.ISSUANCE, new IssuanceRecord(key, issued.credentialOfferUri(),
-                issued.offerExpiresAt(), null, null).toJson());
+                issued.offerExpiresAt(), onboardingUrl, onboardingExpiresAt).toJson());
         journey.complete(now);
         if (!journeys.update(tenant, journey, JourneyState.IN_PROGRESS)) {
             throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
         }
         audit(tenant, JourneyAuditTrail.Kind.COMPLETED, journey);
-        return new Offer(issued.credentialOfferUri(), issued.offerExpiresAt());
+        return Optional.of(new Offer(issued.credentialOfferUri(), issued.offerExpiresAt(), onboardingUrl,
+                onboardingExpiresAt));
     }
 
     private Offer storedOffer(TenantId tenant, SessionId session, UUID journeyId) {
@@ -233,7 +293,7 @@ public class IssuanceService {
                 .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
         log.info("Journey {} was completed by a parallel confirmation: answering with its offer", journeyId);
         return new Offer(stored.offerUri().orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED)),
-                stored.offerExpiresAt());
+                stored.offerExpiresAt(), stored.onboarding().orElse(null), stored.onboardingExpiresAt());
     }
 
     private Journey lock(TenantId tenant, UUID journeyId) {
@@ -312,6 +372,15 @@ public class IssuanceService {
                     Optional.ofNullable(processId), clock.instant()));
         } catch (RuntimeException e) {
             log.error("Could not record the issuance request of journey {}", journeyId, e);
+        }
+    }
+
+    private void traceTicket(TenantId tenant, UUID journeyId, JourneyAuditTrail.TicketOutcome outcome) {
+        try {
+            trail.append(tenant, new JourneyAuditTrail.OnboardingTicketRequested(UUID.randomUUID(), journeyId, outcome,
+                    clock.instant()));
+        } catch (RuntimeException e) {
+            log.error("Could not record the onboarding ticket request of journey {}", journeyId, e);
         }
     }
 

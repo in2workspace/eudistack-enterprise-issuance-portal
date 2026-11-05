@@ -6,12 +6,14 @@ import ch.qos.logback.classic.spi.IThrowableProxy;
 import ch.qos.logback.core.read.ListAppender;
 import es.in2.issuanceportal.TestcontainersConfiguration;
 import es.in2.issuanceportal.journey.InMemoryIssuanceApi;
+import es.in2.issuanceportal.journey.InMemoryOnboardingTickets;
 import es.in2.issuanceportal.journey.api.JourneyProgress;
 import es.in2.issuanceportal.journey.application.port.IssuanceApi;
 import es.in2.issuanceportal.journey.application.port.IssuanceRejectedException;
 import es.in2.issuanceportal.journey.application.port.IssuanceRequest;
 import es.in2.issuanceportal.journey.application.port.IssuanceResult;
 import es.in2.issuanceportal.journey.application.port.IssuanceUnavailableException;
+import es.in2.issuanceportal.journey.application.port.OnboardingTicketException;
 import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
@@ -89,6 +91,9 @@ class ConfirmationApiIT {
                "medical_speciality": "authentic_source.medical_speciality",
                "legally_entitled": "authentic_source.legally_entitled"},
              "onboarding": {"enabled": false}}""";
+    private static final String WALLET_UNIT_SERVICE = "https://sandbox.127.0.0.1.nip.io:4443/business-wallet/api/v1";
+    private static final String CONFIG_WITH_ONBOARDING = CONFIG.replace("\"onboarding\": {\"enabled\": false}",
+            "\"onboarding\": {\"enabled\": true, \"wallet_unit_service_url\": \"" + WALLET_UNIT_SERVICE + "\"}");
 
     /** The Issuer: answers like the real one to a repeated key, and can wait for a second request or look at the journey's row. */
     static final class IssuerGate implements IssuanceApi {
@@ -157,6 +162,12 @@ class ConfirmationApiIT {
         IssuerGate issuerGate(Clock clock, JdbcClient jdbc) {
             return new IssuerGate(clock, jdbc);
         }
+
+        @Bean
+        @Primary
+        InMemoryOnboardingTickets inMemoryOnboardingTickets(Clock clock) {
+            return new InMemoryOnboardingTickets(clock);
+        }
     }
 
     @Autowired
@@ -170,6 +181,8 @@ class ConfirmationApiIT {
     @Autowired
     private IssuerGate issuer;
     @Autowired
+    private InMemoryOnboardingTickets tickets;
+    @Autowired
     private Clock clock;
 
     private ListAppender<ILoggingEvent> logs;
@@ -178,6 +191,7 @@ class ConfirmationApiIT {
     @BeforeEach
     void setUp() {
         issuer.reset();
+        tickets.reset();
         configure(CONFIG);
         logs = new ListAppender<>();
         logs.start();
@@ -204,7 +218,9 @@ class ConfirmationApiIT {
                         org.hamcrest.Matchers.startsWith("openid-credential-offer://?credential_offer_uri=")))
                 .andExpect(jsonPath("$.expires_at").isNotEmpty())
                 .andExpect(jsonPath("$.onboarding_url").doesNotExist())
+                .andExpect(jsonPath("$.onboarding_expires_at").doesNotExist())
                 .andReturn();
+        assertThat(tickets.calls()).isEmpty();
 
         UUID process = jdbc.sql("SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
                 .param("id", journeyOf(session)).query(UUID.class).single();
@@ -224,6 +240,126 @@ class ConfirmationApiIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.state").value("completed"))
                 .andExpect(jsonPath("$.step").value("offer_obtained"));
+    }
+
+    @Test
+    @DisplayName("AC-03 — postConfirmation_tenantWithOnboarding_answersTheOfferAndTheOnboardingAddress")
+    void postConfirmation_tenantWithOnboarding_answersTheOfferAndTheOnboardingAddress() throws Exception {
+        configure(CONFIG_WITH_ONBOARDING);
+        SessionId session = entitledJourney();
+
+        MvcResult result = mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.credential_offer_uri").value(
+                        org.hamcrest.Matchers.startsWith("openid-credential-offer://?credential_offer_uri=")))
+                .andExpect(jsonPath("$.expires_at").isNotEmpty())
+                .andExpect(jsonPath("$.onboarding_url").value("https://sandbox.wallet.test/t/ticket-1"))
+                .andExpect(jsonPath("$.onboarding_expires_at").isNotEmpty())
+                .andReturn();
+
+        com.fasterxml.jackson.databind.JsonNode answer = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree(result.getResponse().getContentAsString());
+        assertThat(tickets.calls()).singleElement().satisfies(call -> {
+            assertThat(call.tenant()).isEqualTo(SANDBOX);
+            assertThat(call.walletUnitServiceUrl()).isEqualTo(WALLET_UNIT_SERVICE);
+            assertThat(call.email()).isEqualTo(EMAIL);
+            assertThat(call.credentialOffer()).isEqualTo(answer.get("credential_offer_uri").asText());
+        });
+        UUID process = processOf(session);
+        assertThat(result.getResponse().getContentAsString()).doesNotContain(process.toString());
+        IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, session, Section.ISSUANCE).orElseThrow());
+        assertThat(stored.onboarding()).contains("https://sandbox.wallet.test/t/ticket-1");
+        assertThat(stored.offerUri()).contains(answer.get("credential_offer_uri").asText());
+        mvc.perform(MockMvcRequestBuilders.get(CONTEXT + "/api/v1/journey").contextPath(CONTEXT).with(host())
+                        .cookie(new Cookie("journey_session", session.value())))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("completed"))
+                .andExpect(jsonPath("$.step").value("offer_obtained"));
+    }
+
+    @Test
+    @DisplayName("AC-11 — postConfirmation_tenantWithOnboarding_theAddressExpiresSixtySecondsBeforeTheOffer")
+    void postConfirmation_tenantWithOnboarding_theAddressExpiresSixtySecondsBeforeTheOffer() throws Exception {
+        configure(CONFIG_WITH_ONBOARDING);
+        SessionId session = entitledJourney();
+
+        MvcResult result = mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}"))
+                .andExpect(status().isOk()).andReturn();
+
+        com.fasterxml.jackson.databind.JsonNode answer = new com.fasterxml.jackson.databind.ObjectMapper()
+                .readTree(result.getResponse().getContentAsString());
+        java.time.Instant offerExpiresAt = java.time.Instant.parse(answer.get("expires_at").asText());
+        java.time.Instant onboardingExpiresAt = java.time.Instant.parse(answer.get("onboarding_expires_at").asText());
+        assertThat(onboardingExpiresAt).isBefore(offerExpiresAt);
+        // The clock is the real one here: the exact figure is checked in IssuanceServiceTest.
+        assertThat(tickets.calls().getFirst().expiresIn())
+                .isBetween(java.time.Duration.ofSeconds(530), java.time.Duration.ofSeconds(540));
+    }
+
+    @Test
+    @DisplayName("AC-12 — postConfirmation_ticketNotCreated_isOnboardingUnavailableWithoutOfferAndKeepsTheProcess")
+    void postConfirmation_ticketNotCreated_isOnboardingUnavailableWithoutOfferAndKeepsTheProcess() throws Exception {
+        configure(CONFIG_WITH_ONBOARDING);
+        SessionId session = entitledJourney();
+        tickets.failWith(OnboardingTicketException.Reason.UNAVAILABLE);
+
+        MvcResult result = mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.type").value("onboarding_unavailable"))
+                .andExpect(jsonPath("$.credential_offer_uri").doesNotExist())
+                .andExpect(jsonPath("$.onboarding_url").doesNotExist())
+                .andReturn();
+
+        UUID process = processOf(session);
+        assertThat(process).isNotNull();
+        assertThat(result.getResponse().getContentAsString()).doesNotContain("openid-credential-offer");
+        Map<String, Object> row = jdbc.sql("SELECT state, step FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
+                .param("id", journeyOf(session)).query().singleRow();
+        assertThat(row.get("state")).isEqualTo("in_progress");
+        assertThat(row.get("step")).isEqualTo("entitlement_confirmed");
+        IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, session, Section.ISSUANCE).orElseThrow());
+        assertThat(stored.offerUri()).isEmpty();
+        assertThat(stored.offerExpiresAt()).isNull();
+        assertThat(stored.onboarding()).isEmpty();
+        assertThat(stored.onboardingExpiresAt()).isNull();
+        String everything = logs.list.stream().map(ConfirmationApiIT::describe).collect(Collectors.joining("\n"));
+        assertThat(everything).contains("ISSUANCE_REQUESTED", "result=onboarding_failed",
+                "ONBOARDING_TICKET_REQUESTED", "result=failed");
+        assertThat(everything).doesNotContain("result=issued", EMAIL, "openid-credential-offer");
+    }
+
+    @Test
+    @DisplayName("AC-12 — postConfirmation_afterTheTicketFailed_isOnboardingUnavailableUntilTheRenewalExists")
+    void postConfirmation_afterTheTicketFailed_isOnboardingUnavailableUntilTheRenewalExists() throws Exception {
+        configure(CONFIG_WITH_ONBOARDING);
+        SessionId session = entitledJourney();
+        tickets.failWith(OnboardingTicketException.Reason.REJECTED);
+        mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}")).andExpect(status().isServiceUnavailable());
+        tickets.recover();
+
+        mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
+
+        assertThat(issuer.api().calls()).hasSize(1);
+        assertThat(tickets.calls()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("NFR-3 — postConfirmation_ticketSuccessAndFailure_leaveNoAddressOrPersonalDataInLogs")
+    void postConfirmation_ticketSuccessAndFailure_leaveNoAddressOrPersonalDataInLogs() throws Exception {
+        configure(CONFIG_WITH_ONBOARDING);
+        String body = "{\"email\":\"" + EMAIL + "\"}";
+        SessionId failing = entitledJourney();
+        tickets.failWith(OnboardingTicketException.Reason.NOT_AUTHORIZED);
+        mvc.perform(confirmation(failing, body)).andExpect(status().isServiceUnavailable());
+        tickets.recover();
+        mvc.perform(confirmation(entitledJourney(), body)).andExpect(status().isOk());
+
+        String everything = logs.list.stream().map(ConfirmationApiIT::describe).collect(Collectors.joining("\n"));
+        assertThat(everything).contains("ONBOARDING_TICKET_REQUESTED", "result=created", "result=failed");
+        assertThat(everything).doesNotContain(EMAIL, "ticket-1", "wallet.test", "openid-credential-offer");
     }
 
     @Test

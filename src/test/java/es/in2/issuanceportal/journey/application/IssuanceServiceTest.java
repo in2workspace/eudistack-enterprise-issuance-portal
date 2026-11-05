@@ -3,12 +3,15 @@ package es.in2.issuanceportal.journey.application;
 import es.in2.issuanceportal.MutableClock;
 import es.in2.issuanceportal.journey.InMemoryIssuanceApi;
 import es.in2.issuanceportal.journey.InMemoryJourneyRepository;
+import es.in2.issuanceportal.journey.InMemoryOnboardingTickets;
 import es.in2.issuanceportal.journey.RecordingJourneyAuditTrail;
 import es.in2.issuanceportal.journey.api.JourneyProgress;
 import es.in2.issuanceportal.journey.application.port.IssuanceApi;
 import es.in2.issuanceportal.journey.application.port.IssuanceRejectedException;
 import es.in2.issuanceportal.journey.application.port.IssuanceUnavailableException;
+import es.in2.issuanceportal.journey.application.port.IssuanceResult;
 import es.in2.issuanceportal.journey.application.port.JourneyAuditTrail;
+import es.in2.issuanceportal.journey.application.port.OnboardingTicketException;
 import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
 import es.in2.issuanceportal.journey.domain.Journey;
 import es.in2.issuanceportal.journey.domain.JourneyClosedException;
@@ -81,12 +84,18 @@ class IssuanceServiceTest {
     private final Map<TenantId, PortalConfig> configs = new HashMap<>();
     private final AtomicBoolean inTransaction = new AtomicBoolean();
     private final AtomicBoolean askedInsideTransaction = new AtomicBoolean();
+    private final AtomicBoolean ticketAskedInsideTransaction = new AtomicBoolean();
+    private final InMemoryOnboardingTickets tickets = new InMemoryOnboardingTickets(clock);
     private IssuanceApi issuer = api;
     private final IssuanceService service = new IssuanceService(journey, journeys, sessions,
             new PortalConfigService(tenant -> Optional.ofNullable(configs.get(tenant))),
             (tenant, key, request) -> {
                 askedInsideTransaction.compareAndSet(false, inTransaction.get());
                 return issuer.issue(tenant, key, request);
+            },
+            (tenant, url, email, offer, expiresIn) -> {
+                ticketAskedInsideTransaction.compareAndSet(false, inTransaction.get());
+                return tickets.request(tenant, url, email, offer, expiresIn);
             },
             trail, new TrackedTransactions(), clock);
 
@@ -541,6 +550,165 @@ class IssuanceServiceTest {
                 ProblemCode.JOURNEY_CLOSED));
 
         assertThat(journeys.findById(CGCOM, journeyOf(session)).orElseThrow().issuanceProcessId()).isEmpty();
+    }
+
+    // --- AC-03 (ticket), AC-10, AC-11, AC-12 ---
+
+    private static final String WALLET_UNIT_SERVICE = "https://cgcom.wallet.test/business-wallet/api/v1";
+
+    private void withOnboarding() {
+        configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, new Onboarding(true, WALLET_UNIT_SERVICE)));
+    }
+
+    @Test
+    @DisplayName("AC-03 — confirm_tenantWithOnboarding_requestsTheTicketWithTheOfferAsIsAndAnswersTheAddress")
+    void confirm_tenantWithOnboarding_requestsTheTicketWithTheOfferAsIsAndAnswersTheAddress() {
+        withOnboarding();
+        SessionId session = entitledJourney();
+
+        IssuanceService.Offer offer = service.confirm(CGCOM, session, EMAIL);
+
+        assertThat(tickets.calls()).singleElement().satisfies(call -> {
+            assertThat(call.tenant()).isEqualTo(CGCOM);
+            assertThat(call.walletUnitServiceUrl()).isEqualTo(WALLET_UNIT_SERVICE);
+            assertThat(call.email()).isEqualTo(EMAIL);
+            assertThat(call.credentialOffer()).isEqualTo(offer.credentialOfferUri());
+        });
+        assertThat(offer.onboardingUrl()).isEqualTo("https://cgcom.wallet.test/t/ticket-1");
+        Journey stored = journeys.findById(CGCOM, journeyOf(session)).orElseThrow();
+        assertThat(stored.state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(stored.step()).isEqualTo(JourneyStep.OFFER_OBTAINED);
+        IssuanceRecord issuance = IssuanceRecord.fromJson(sessions.read(CGCOM, session, Section.ISSUANCE).orElseThrow());
+        assertThat(issuance.credentialOfferUri()).isEqualTo(offer.credentialOfferUri());
+        assertThat(issuance.offerExpiresAt()).isEqualTo(offer.expiresAt());
+        assertThat(issuance.onboarding()).contains(offer.onboardingUrl());
+        assertThat(issuance.onboardingExpiresAt()).isEqualTo(offer.onboardingExpiresAt());
+        assertThat(offer.toString()).doesNotContain("openid-credential-offer", "ticket-1");
+        assertThat(ticketAskedInsideTransaction).isFalse();
+    }
+
+    @Test
+    @DisplayName("AC-03 — confirm_tenantWithOnboarding_tracesTheTicketRequestAndTheIssuanceWithoutPersonalData")
+    void confirm_tenantWithOnboarding_tracesTheTicketRequestAndTheIssuanceWithoutPersonalData() {
+        withOnboarding();
+        SessionId session = entitledJourney();
+
+        IssuanceService.Offer offer = service.confirm(CGCOM, session, EMAIL);
+
+        assertThat(trail.ticketRequests()).singleElement().satisfies(event -> {
+            assertThat(event.result()).isEqualTo(JourneyAuditTrail.TicketOutcome.CREATED);
+            assertThat(event.journeyId()).isEqualTo(journeyOf(session));
+            assertThat(event.toString()).doesNotContain(EMAIL, "openid-credential-offer", offer.onboardingUrl());
+        });
+        assertThat(trail.issuanceRequests()).singleElement()
+                .satisfies(event -> assertThat(event.result()).isEqualTo(JourneyAuditTrail.IssuanceOutcome.ISSUED));
+    }
+
+    @Test
+    @DisplayName("AC-11 — confirm_tenantWithOnboarding_asksATicketThatExpiresSixtySecondsBeforeTheOffer")
+    void confirm_tenantWithOnboarding_asksATicketThatExpiresSixtySecondsBeforeTheOffer() {
+        withOnboarding();
+        SessionId session = entitledJourney();
+
+        IssuanceService.Offer offer = service.confirm(CGCOM, session, EMAIL);
+
+        assertThat(tickets.calls().getFirst().expiresIn())
+                .isEqualTo(Duration.between(clock.instant(), offer.expiresAt()).minusSeconds(60))
+                .isEqualTo(Duration.ofSeconds(540));
+        assertThat(offer.onboardingExpiresAt()).isBefore(offer.expiresAt());
+    }
+
+    @Test
+    @DisplayName("AC-10 — confirm_tenantWithoutOnboarding_doesNotCallTheWalletUnitServiceAndAnswersOnlyTheOffer")
+    void confirm_tenantWithoutOnboarding_doesNotCallTheWalletUnitServiceAndAnswersOnlyTheOffer() {
+        configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
+        SessionId session = entitledJourney();
+
+        IssuanceService.Offer offer = service.confirm(CGCOM, session, EMAIL);
+
+        assertThat(tickets.calls()).isEmpty();
+        assertThat(trail.ticketRequests()).isEmpty();
+        assertThat(offer.onboardingUrl()).isNull();
+        assertThat(offer.onboardingExpiresAt()).isNull();
+        assertThat(journeys.findById(CGCOM, journeyOf(session)).orElseThrow().state()).isEqualTo(JourneyState.COMPLETED);
+    }
+
+    @ParameterizedTest
+    @EnumSource(OnboardingTicketException.Reason.class)
+    @DisplayName("AC-12 — confirm_ticketNotCreated_isOnboardingUnavailableWithoutOfferAndKeepsOnlyTheProcess")
+    void confirm_ticketNotCreated_isOnboardingUnavailableWithoutOfferAndKeepsOnlyTheProcess(
+            OnboardingTicketException.Reason reason) {
+        withOnboarding();
+        SessionId session = entitledJourney();
+        tickets.failWith(reason);
+
+        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+                ProblemCode.ONBOARDING_UNAVAILABLE));
+
+        Journey stored = journeys.findById(CGCOM, journeyOf(session)).orElseThrow();
+        assertThat(stored.state()).isEqualTo(JourneyState.IN_PROGRESS);
+        assertThat(stored.step()).isEqualTo(JourneyStep.ENTITLEMENT_CONFIRMED);
+        assertThat(stored.issuanceProcessId()).isPresent();
+        IssuanceRecord issuance = IssuanceRecord.fromJson(sessions.read(CGCOM, session, Section.ISSUANCE).orElseThrow());
+        assertThat(issuance.offerUri()).isEmpty();
+        assertThat(issuance.offerExpiresAt()).isNull();
+        assertThat(issuance.onboarding()).isEmpty();
+        assertThat(issuance.onboardingExpiresAt()).isNull();
+        assertThat(trail.issuanceRequests()).singleElement().satisfies(event -> {
+            assertThat(event.result()).isEqualTo(JourneyAuditTrail.IssuanceOutcome.ONBOARDING_FAILED);
+            assertThat(event.issuanceProcessId()).contains(stored.issuanceProcessId().orElseThrow());
+        });
+        assertThat(trail.ticketRequests()).singleElement()
+                .satisfies(event -> assertThat(event.result()).isEqualTo(JourneyAuditTrail.TicketOutcome.FAILED));
+        assertThat(trail.events().stream().filter(e -> e.kind() == JourneyAuditTrail.Kind.COMPLETED)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("AC-12 — confirm_afterTheTicketFailed_isOnboardingUnavailableWithoutAskingAnySystemAgain")
+    void confirm_afterTheTicketFailed_isOnboardingUnavailableWithoutAskingAnySystemAgain() {
+        withOnboarding();
+        SessionId session = entitledJourney();
+        tickets.failWith(OnboardingTicketException.Reason.UNAVAILABLE);
+        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+                ProblemCode.ONBOARDING_UNAVAILABLE));
+        tickets.recover();
+
+        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+                ProblemCode.ONBOARDING_UNAVAILABLE));
+
+        assertThat(api.calls()).hasSize(1);
+        assertThat(tickets.calls()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("AC-11 — confirm_offerWithTooLittleLife_requestsNoTicketAndIsOnboardingUnavailable")
+    void confirm_offerWithTooLittleLife_requestsNoTicketAndIsOnboardingUnavailable() {
+        withOnboarding();
+        SessionId session = entitledJourney();
+        issuer = (tenant, key, request) -> new IssuanceResult(UUID.randomUUID(), "openid-credential-offer://?x=1",
+                clock.instant().plusSeconds(60));
+
+        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+                ProblemCode.ONBOARDING_UNAVAILABLE));
+
+        assertThat(tickets.calls()).isEmpty();
+        assertThat(trail.ticketRequests()).singleElement()
+                .satisfies(event -> assertThat(event.result()).isEqualTo(JourneyAuditTrail.TicketOutcome.FAILED));
+        assertThat(trail.issuanceRequests()).singleElement().satisfies(event ->
+                assertThat(event.result()).isEqualTo(JourneyAuditTrail.IssuanceOutcome.ONBOARDING_FAILED));
+        assertThat(journeys.findById(CGCOM, journeyOf(session)).orElseThrow().state())
+                .isEqualTo(JourneyState.IN_PROGRESS);
+    }
+
+    @Test
+    void confirm_ticketFailsAndAuditTrailFails_stillAnswersOnboardingUnavailable() {
+        withOnboarding();
+        SessionId session = entitledJourney();
+        tickets.failWith(OnboardingTicketException.Reason.REJECTED);
+        trail.failFromNowOn();
+
+        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+                ProblemCode.ONBOARDING_UNAVAILABLE));
     }
 
     // --- helpers ---

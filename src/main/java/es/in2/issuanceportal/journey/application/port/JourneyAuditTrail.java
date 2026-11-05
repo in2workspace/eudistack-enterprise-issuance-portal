@@ -37,7 +37,9 @@ public interface JourneyAuditTrail {
         /** The Issuer did not answer, also after the retries. */
         UNAVAILABLE("unavailable"),
         /** The tenant has no system token, so the Issuer was not asked. */
-        SYSTEM_TOKEN_UNAVAILABLE("system_token_unavailable");
+        SYSTEM_TOKEN_UNAVAILABLE("system_token_unavailable"),
+        /** The Issuer created the process, but the onboarding ticket for its offer was not created (AC-12). */
+        ONBOARDING_FAILED("onboarding_failed");
 
         private final String code;
 
@@ -58,7 +60,33 @@ public interface JourneyAuditTrail {
                              Instant occurredAt) {
     }
 
+    /** What came of a request to the Wallet Unit Service for an onboarding ticket. */
+    enum TicketOutcome {
+
+        CREATED("created"),
+        FAILED("failed");
+
+        private final String code;
+
+        TicketOutcome(String code) {
+            this.code = code;
+        }
+
+        public String code() {
+            return code;
+        }
+    }
+
+    /**
+     * A request to the Wallet Unit Service for an onboarding ticket (design.md §3.5): the result only. No email,
+     * offer, onboarding address or token.
+     */
+    record OnboardingTicketRequested(UUID eventId, UUID journeyId, TicketOutcome result, Instant occurredAt) {
+    }
+
     void append(TenantId tenant, Event event);
 
     void append(TenantId tenant, IssuanceRequested event);
+
+    void append(TenantId tenant, OnboardingTicketRequested event);
 }
