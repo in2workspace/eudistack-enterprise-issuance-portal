@@ -6,6 +6,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Health y métricas en la raíz del servicio, como en el resto de servicios de la plataforma (`management.endpoints.web.base-path: /`): `/issuance-portal/health`, `/issuance-portal/health/liveness`, `/issuance-portal/health/readiness` y `/issuance-portal/prometheus`, en lugar de `/issuance-portal/actuator/...`. Los filtros de la cabecera `X-Requested-With` y del tenant dejan pasar solo esas rutas.
+
 ## [0.2.0] - 2026-10-27
 
 ### Added
