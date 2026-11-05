@@ -57,8 +57,8 @@ class RequestedWithFilterTest {
     @ParameterizedTest
     @ValueSource(strings = {"/issuance-portal/%61pi/v1/journey", "/issuance-portal/api;x/v1/journey",
             "/issuance-portal/api/v1/journey;jsessionid=1", "/issuance-portal/new-endpoint",
-            "/issuance-portal/actuator/../api/v1/journey", "/issuance-portal/actuator/%2e%2e/api/v1/journey",
-            "/issuance-portal/actuator/./health"})
+            "/issuance-portal/health/../api/v1/journey", "/issuance-portal/health/%2e%2e/api/v1/journey",
+            "/issuance-portal/./health", "/issuance-portal/actuator/health"})
     void doFilter_encodedPathOrNewEndpoint_returns403(String path) throws Exception {
         MockHttpServletResponse response = new MockHttpServletResponse();
         MockFilterChain chain = new MockFilterChain();
@@ -70,8 +70,8 @@ class RequestedWithFilterTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"/issuance-portal/actuator/health", "/issuance-portal/actuator"})
-    void doFilter_actuatorPath_passesThrough(String path) throws Exception {
+    @ValueSource(strings = {"/issuance-portal/health", "/issuance-portal/health/readiness", "/issuance-portal/prometheus"})
+    void doFilter_operationalPath_passesThrough(String path) throws Exception {
         MockFilterChain chain = new MockFilterChain();
 
         filter.doFilter(request("POST", path), new MockHttpServletResponse(), chain);

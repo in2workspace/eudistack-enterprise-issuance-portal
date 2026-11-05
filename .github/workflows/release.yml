@@ -1,0 +1,34 @@
+name: release
+
+on:
+  push:
+    branches:
+      - 'release/v*'
+
+permissions:
+  contents: write
+  packages: read
+  pull-requests: write
+  id-token: write
+  attestations: write
+
+jobs:
+  release:
+    uses: in2workspace/eudistack-devops-workflows/.github/workflows/ecs-api-release.yml@1335d59e67ca288d91b407996a2e4bf5bb4b092b
+    with:
+      project_name: 'eudistack'
+      app_name: 'issuance-portal'
+      region_code: 'ew1'
+      staging_smoke_url: 'https://sandbox.stg.eudistack.net/issuance-portal/health'
+      production_smoke_url: 'https://sandbox.eudistack.net/issuance-portal/health'
+      staging_concurrency_group: ${{ vars.STAGING_CONCURRENCY_GROUP || format('{0}-staging', github.repository) }}
+      production_concurrency_group: ${{ vars.PRODUCTION_CONCURRENCY_GROUP || format('{0}-production', github.repository) }}
+      production_monitor_minutes: ${{ vars.PRO_MONITOR_MINUTES || '30' }}
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      PACKAGES_READ_TOKEN: ${{ secrets.PACKAGES_READ_TOKEN }}
+      AWS_ACCESS_KEY_ID_STG: ${{ secrets.AWS_ACCESS_KEY_ID_STG }}
+      AWS_SECRET_ACCESS_KEY_STG: ${{ secrets.AWS_SECRET_ACCESS_KEY_STG }}
+      AWS_ACCESS_KEY_ID_PRO: ${{ secrets.AWS_ACCESS_KEY_ID_PRO }}
+      AWS_SECRET_ACCESS_KEY_PRO: ${{ secrets.AWS_SECRET_ACCESS_KEY_PRO }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
