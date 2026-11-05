@@ -1,6 +1,7 @@
 package es.in2.issuanceportal.journey.infrastructure.systemtoken;
 
 import es.in2.issuanceportal.journey.application.port.SystemTokenProvider;
+import es.in2.issuanceportal.shared.tenant.PublicHostProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,10 +21,11 @@ import java.util.function.Supplier;
 class SystemTokenConfiguration {
 
     @Bean
-    SystemTokenProvider systemTokenProvider(SystemTokenProperties properties, Clock clock) {
+    SystemTokenProvider systemTokenProvider(SystemTokenProperties properties, PublicHostProperties publicHosts,
+                                            Clock clock) {
         log.info("System token requested from {} with the {} machine credential provider",
                 properties.verifierInternalUrl(), properties.provider());
-        return providerFor(properties, clock, () -> SecretsManagerClient.builder()
+        return providerFor(properties, publicHosts, clock, () -> SecretsManagerClient.builder()
                 // Region and credentials come from the ECS task environment (AWS_REGION, the task role).
                 .region(new DefaultAwsRegionProviderChain().getRegion())
                 .credentialsProvider(DefaultCredentialsProvider.builder().build())
@@ -31,8 +33,8 @@ class SystemTokenConfiguration {
                 .build());
     }
 
-    static SystemTokenProvider providerFor(SystemTokenProperties properties, Clock clock,
-                                           Supplier<SecretsManagerClient> secretsManager) {
+    static SystemTokenProvider providerFor(SystemTokenProperties properties, PublicHostProperties publicHosts,
+                                           Clock clock, Supplier<SecretsManagerClient> secretsManager) {
         MachineCredentialSource source = switch (properties.provider()) {
             case SECRETS_MANAGER -> new SecretsManagerMachineCredentialSource(
                     secretsManager.get(), properties.secretNameTemplate());
@@ -40,7 +42,7 @@ class SystemTokenConfiguration {
         };
         TokenGrant grant = new VerifierTokenGrant(source, new ClientAssertionFactory(clock),
                 restClient(properties.requestTimeout()), clock,
-                properties.verifierInternalUrl(), properties.publicHostTemplate());
+                properties.verifierInternalUrl(), publicHosts);
         return new CachingSystemTokenProvider(grant, clock);
     }
 

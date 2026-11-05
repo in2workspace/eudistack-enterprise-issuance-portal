@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import es.in2.issuanceportal.journey.application.port.SystemToken;
 import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
 import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException.Reason;
+import es.in2.issuanceportal.shared.tenant.PublicHostProperties;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
@@ -37,16 +38,16 @@ final class VerifierTokenGrant implements TokenGrant {
     private final RestClient http;
     private final Clock clock;
     private final String verifierInternalUrl;
-    private final String publicHostTemplate;
+    private final PublicHostProperties publicHosts;
 
     VerifierTokenGrant(MachineCredentialSource credentials, ClientAssertionFactory assertions, RestClient http,
-                       Clock clock, String verifierInternalUrl, String publicHostTemplate) {
+                       Clock clock, String verifierInternalUrl, PublicHostProperties publicHosts) {
         this.credentials = credentials;
         this.assertions = assertions;
         this.http = http;
         this.clock = clock;
         this.verifierInternalUrl = stripTrailingSlash(verifierInternalUrl);
-        this.publicHostTemplate = publicHostTemplate;
+        this.publicHosts = publicHosts;
     }
 
     @Override
@@ -55,7 +56,7 @@ final class VerifierTokenGrant implements TokenGrant {
             log.warn("No usable machine credential for tenant {}", tenant);
             return new SystemTokenUnavailableException(Reason.NO_MACHINE_CREDENTIAL);
         });
-        String publicHost = publicHostTemplate.replace(SystemTokenProperties.TENANT_PLACEHOLDER, tenant.value());
+        String publicHost = publicHosts.hostOf(tenant);
         String publicVerifierUrl = "https://" + publicHost + URI.create(verifierInternalUrl).getPath();
 
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();

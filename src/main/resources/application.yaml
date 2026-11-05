@@ -46,6 +46,11 @@ issuance-portal:
     # answers 503 at once. Both at least 1, or the service does not start.
     max-concurrent-lookups: ${PORTAL_AUTHENTIC_SOURCE_MAX_LOOKUPS:100}
     max-concurrent-lookups-per-tenant: ${PORTAL_AUTHENTIC_SOURCE_MAX_LOOKUPS_PER_TENANT:20}
+  public-host:
+    # The tenant's public host, {tenant} replaced by the tenant, e.g. {tenant}.127.0.0.1.nip.io:4443 locally.
+    # Sent as X-Forwarded-Host (with X-Forwarded-Proto https) to the Verifier and the Issuer, so each resolves
+    # its public address: the token's iss and the Location of an issuance are built from it.
+    template: ${PORTAL_PUBLIC_HOST_TEMPLATE:}
   system-token:
     # How the portal asks the tenant's Verifier for its token as a system (design.md AD-5).
     # secrets-manager in AWS environments, file in Docker Compose. Empty: the service does not start.
@@ -57,11 +62,18 @@ issuance-portal:
     directory: ${PORTAL_SYSTEM_TOKEN_DIRECTORY:}
     # The Verifier on the internal network, with its context path, e.g. http://verifier:8082/verifier.
     verifier-internal-url: ${PORTAL_VERIFIER_INTERNAL_URL:}
-    # The tenant's public host, {tenant} replaced by the tenant, e.g. {tenant}.127.0.0.1.nip.io:4443 locally.
-    # Sent as X-Forwarded-Host (with X-Forwarded-Proto https) so the Verifier resolves its public address.
-    public-host-template: ${PORTAL_PUBLIC_HOST_TEMPLATE:}
     # How long the Verifier gets to answer.
     request-timeout: 5s
+  issuance-api:
+    # The Issuer on the internal network, with its context path, e.g. http://issuer-service:8080/issuer.
+    issuer-internal-url: ${PORTAL_ISSUER_INTERNAL_URL:}
+    # How long the Issuer gets to answer each call (EC-07).
+    request-timeout: 10s
+    # Wait before the first retry when the Issuer sends no Retry-After; it doubles on each retry (1, 2, 4 s).
+    retry-initial-wait: 1s
+    # A 503 is retried only when this is on: until the Issuer shares its idempotency between instances
+    # (EUD-254) a retry may create another process. Network errors and timeouts are always retried.
+    retry-on-503: ${PORTAL_ISSUANCE_RETRY_ON_503:false}
   incidents:
     mail:
       # ses in AWS environments, local in Docker Compose. Empty: the service does not start.

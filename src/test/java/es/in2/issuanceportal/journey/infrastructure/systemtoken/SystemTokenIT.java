@@ -18,6 +18,7 @@ import es.in2.issuanceportal.journey.application.port.SystemTokenProvider;
 import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
 import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException.Reason;
 import es.in2.issuanceportal.journey.infrastructure.systemtoken.SystemTokenProperties.Provider;
+import es.in2.issuanceportal.shared.tenant.PublicHostProperties;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -65,7 +66,8 @@ class SystemTokenIT {
 
     private static final String TOKEN_PATH = "/verifier/oidc/token";
     private static final String ACCESS_TOKEN = "access-token-9f3c1d7a-system";
-    private static final String PUBLIC_HOST_TEMPLATE = "{tenant}.127.0.0.1.nip.io:4443";
+    private static final PublicHostProperties PUBLIC_HOSTS =
+            new PublicHostProperties("{tenant}.127.0.0.1.nip.io:4443");
     private static final TenantId SANDBOX = new TenantId("sandbox");
     private static final TenantId KPMG = new TenantId("kpmg");
     private static final ObjectMapper JSON = new ObjectMapper();
@@ -98,8 +100,8 @@ class SystemTokenIT {
     private SystemTokenProvider provider(Duration timeout) {
         return SystemTokenConfiguration.providerFor(
                 new SystemTokenProperties(Provider.FILE, null, secrets,
-                        "http://localhost:" + verifier.port() + "/verifier", PUBLIC_HOST_TEMPLATE, timeout),
-                clock, () -> mock(SecretsManagerClient.class));
+                        "http://localhost:" + verifier.port() + "/verifier", timeout),
+                PUBLIC_HOSTS, clock, () -> mock(SecretsManagerClient.class));
     }
 
     private void verifierGrants() {
@@ -300,9 +302,9 @@ class SystemTokenIT {
         when(store.getSecretValue(anyRequest())).thenThrow(ResourceNotFoundException.builder().build());
         SystemTokenProperties properties = new SystemTokenProperties(Provider.SECRETS_MANAGER,
                 "eudistack/{tenant}/portal", null, "http://localhost:" + verifier.port() + "/verifier",
-                PUBLIC_HOST_TEMPLATE, Duration.ofSeconds(5));
+                Duration.ofSeconds(5));
 
-        SystemTokenProvider provider = SystemTokenConfiguration.providerFor(properties, clock, () -> store);
+        SystemTokenProvider provider = SystemTokenConfiguration.providerFor(properties, PUBLIC_HOSTS, clock, () -> store);
 
         assertThatThrownBy(() -> provider.tokenFor(SANDBOX))
                 .isInstanceOfSatisfying(SystemTokenUnavailableException.class,
@@ -314,9 +316,9 @@ class SystemTokenIT {
     @DisplayName("File provider — the Secrets Manager client is never created")
     void providerFor_file_doesNotCreateSecretsManagerClient() {
         SystemTokenProperties properties = new SystemTokenProperties(Provider.FILE, null, secrets,
-                "http://localhost:" + verifier.port() + "/verifier", PUBLIC_HOST_TEMPLATE, Duration.ofSeconds(5));
+                "http://localhost:" + verifier.port() + "/verifier", Duration.ofSeconds(5));
 
-        SystemTokenConfiguration.providerFor(properties, clock, () -> {
+        SystemTokenConfiguration.providerFor(properties, PUBLIC_HOSTS, clock, () -> {
             throw new AssertionError("No Secrets Manager client with the file provider");
         });
     }

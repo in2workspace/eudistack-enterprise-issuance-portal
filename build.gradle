@@ -63,6 +63,10 @@ dependencies {
     implementation 'software.amazon.awssdk:secretsmanager:2.31.78'
     implementation 'com.nimbusds:nimbus-jose-jwt:10.9.1'
 
+    // --- Issuance API client ---
+    // Bounded retries with Retry-After towards the Issuer (design.md AD-6): the core module only, no AOP.
+    implementation 'io.github.resilience4j:resilience4j-retry:2.3.0'
+
     // --- Scheduling ---
     // The expiry job runs on one instance per tenant at a time (design.md AD-4).
     implementation 'net.javacrumbs.shedlock:shedlock-provider-jdbc-template:6.0.2'

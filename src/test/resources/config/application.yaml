@@ -16,11 +16,15 @@ issuance-portal:
   portal-config:
     cache-ttl: 0s
   # No machine credential is mounted and no Verifier listens: the system token has its own tests.
+  public-host:
+    template: "{tenant}.127.0.0.1.nip.io:4443"
   system-token:
     provider: file
     directory: build/tmp/system-token-test
     verifier-internal-url: http://localhost:9/verifier
-    public-host-template: "{tenant}.127.0.0.1.nip.io:4443"
+  # No Issuer listens: the issuance API client has its own tests.
+  issuance-api:
+    issuer-internal-url: http://localhost:9/issuer
   incidents:
     mail:
       provider: local
