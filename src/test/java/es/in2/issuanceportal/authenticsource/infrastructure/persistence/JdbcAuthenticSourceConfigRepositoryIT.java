@@ -109,6 +109,15 @@ class JdbcAuthenticSourceConfigRepositoryIT {
         assertThat(repository.find(SANDBOX)).isEmpty();
     }
 
+    /** A misspelled key would otherwise leave the type without a source, which confirms every holder. */
+    @Test
+    @DisplayName("ES-03 — find_sourceUnderAnotherAttestationType_returnsEmpty")
+    void find_sourceUnderAnotherAttestationType_returnsEmpty() {
+        save(SANDBOX, VALID.replace("\"doctorid.sd.1\": {", "\"doctorid.sd1\": {"));
+
+        assertThat(repository.find(SANDBOX)).isEmpty();
+    }
+
     @Test
     @DisplayName("ES-03 — find_unknownIdentifierType_returnsEmpty")
     void find_unknownIdentifierType_returnsEmpty() {

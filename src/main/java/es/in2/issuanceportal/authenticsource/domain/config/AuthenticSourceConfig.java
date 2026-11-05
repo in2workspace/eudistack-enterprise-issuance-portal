@@ -31,6 +31,11 @@ public record AuthenticSourceConfig(String attestationType, Set<IdentifierType> 
         }
         loginIdentifierTypes = Collections.unmodifiableSet(types);
         sources = sources == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(sources));
+        // A tenant issues one attestation type, so any other key is a mistake. Accepting it would leave the
+        // type without a source, and a type without a source confirms every holder (FR-06).
+        if (!sources.keySet().stream().allMatch(attestationType::equals)) {
+            throw new InvalidSourceConfigException("authentic_source has an entry for another attestation type");
+        }
     }
 
     /** The source of the journey's attestation type; none means the identity alone is enough (FR-06). */

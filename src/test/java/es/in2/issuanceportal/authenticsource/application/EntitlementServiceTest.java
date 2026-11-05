@@ -370,6 +370,19 @@ class EntitlementServiceTest {
     }
 
     @Test
+    @DisplayName("AC-10 — check_withoutSource_warnsWithoutPersonalData")
+    void check_withoutSource_warnsWithoutPersonalData(CapturedOutput output) {
+        SessionId session = journeyWithDni("00000001R");
+        rows.put(CGCOM, new AuthenticSourceConfig("employee.sd.1", Set.of(), Map.of()));
+
+        service.check(CGCOM, session);
+
+        assertThat(output.getAll())
+                .contains("confirmed for employee.sd.1 without an authentic source")
+                .doesNotContain("00000001R");
+    }
+
+    @Test
     @DisplayName("AC-10, AC-11 — check_withoutSource_tracesNoAdapter")
     void check_withoutSource_tracesNoAdapter() {
         SessionId session = journeyWithDni("00000001R");

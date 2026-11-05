@@ -101,6 +101,9 @@ public class EntitlementService implements AutoCloseable {
         AuthenticSourceConfigs.Current current = configs.current(tenant);
         Trace trace = new Trace(tenant, journeyId, current, searched.type(), started);
         if (!current.hasSource()) {
+            // Allowed by FR-06, but it also happens when the source was left out by mistake: make it visible.
+            log.warn("Entitlement of tenant {} confirmed for {} without an authentic source: identity only",
+                    tenant, current.attestationType());
             AttestationPreview preview = AttestationPreview.of(current.attestationType(), identity.givenName(),
                     identity.familyName(), List.of(), Map.of(), identity.email(), null);
             trace.write(AuthenticSourceAuditTrail.Result.CONFIRMED, null);
