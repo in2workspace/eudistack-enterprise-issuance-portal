@@ -21,7 +21,7 @@ server:
   # first, then the public host (the tenant comes from it) and scheme.
   forward-headers-strategy: none
   servlet:
-    # The API lives under /issuance-portal/api/v1; health and metrics under /issuance-portal/actuator.
+    # The API lives under /issuance-portal/api/v1; health and metrics at /issuance-portal/health and /issuance-portal/prometheus.
     context-path: /issuance-portal
 
 issuance-portal:
@@ -56,6 +56,8 @@ issuance-portal:
 management:
   endpoints:
     web:
+      # At the root of the service, as in the other platform services: /issuance-portal/health.
+      base-path: /
       exposure:
         include: health,info,prometheus
   endpoint:

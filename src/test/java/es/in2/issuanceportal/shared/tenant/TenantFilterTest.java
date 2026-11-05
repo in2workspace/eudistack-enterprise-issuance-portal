@@ -117,8 +117,8 @@ class TenantFilterTest {
     }
 
     @Test
-    void doFilter_actuatorPath_passesThrough() throws Exception {
-        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/issuance-portal/actuator/health");
+    void doFilter_healthPath_passesThrough() throws Exception {
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/issuance-portal/health");
         request.setContextPath("/issuance-portal");
         request.setServerName("localhost");
         MockFilterChain chain = new MockFilterChain();
