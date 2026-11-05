@@ -47,6 +47,23 @@ class LogJourneyAuditTrail implements JourneyAuditTrail {
         }
     }
 
+    @Override
+    public void append(TenantId tenant, IssuanceRequested event) {
+        try {
+            audit.info("issuance {} {} {} {} {} {} {}",
+                    kv("event", "ISSUANCE_REQUESTED"),
+                    kv("journey_id", event.journeyId()),
+                    kv("event_id", event.eventId()),
+                    kv("tenant", tenant.value()),
+                    kv("result", event.result().code()),
+                    kv("issuance_process_id", event.issuanceProcessId().orElse(null)),
+                    kv("occurred_at", event.occurredAt()));
+        } catch (RuntimeException e) {
+            audit.error("Could not record the issuance request {} of journey {}",
+                    event.eventId(), event.journeyId(), e);
+        }
+    }
+
     /**
      * After commit the journey has already changed: a failure here must never reach the caller
      * (ES-06), so it is only logged, without personal data.

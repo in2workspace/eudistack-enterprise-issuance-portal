@@ -6,6 +6,7 @@ import es.in2.issuanceportal.journey.domain.JourneyStep;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.slf4j.Logger;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionSynchronizationUtils;
@@ -14,6 +15,7 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -61,6 +63,29 @@ class LogJourneyAuditTrailTest {
         doThrow(new IllegalStateException("log sink down")).when(audit).info(anyString(), any(Object[].class));
 
         assertThatNoException().isThrownBy(() -> trail.append(SANDBOX, event()));
+    }
+
+    @Test
+    void append_issuanceRequest_writesResultAndProcessAtOnce() {
+        UUID process = UUID.randomUUID();
+
+        trail.append(SANDBOX, new JourneyAuditTrail.IssuanceRequested(UUID.randomUUID(), UUID.randomUUID(),
+                JourneyAuditTrail.IssuanceOutcome.ISSUED, Optional.of(process), Instant.now()));
+
+        ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
+        verify(audit).info(anyString(), arguments.capture());
+        assertThat(java.util.Arrays.stream(arguments.getValue()).map(Object::toString))
+                .contains("result=issued", "issuance_process_id=" + process, "event=ISSUANCE_REQUESTED",
+                        "tenant=sandbox");
+    }
+
+    @Test
+    void append_issuanceRequestWriteFails_doesNotThrow() {
+        doThrow(new IllegalStateException("log sink down")).when(audit).info(anyString(), any(Object[].class));
+
+        assertThatNoException().isThrownBy(() -> trail.append(SANDBOX, new JourneyAuditTrail.IssuanceRequested(
+                UUID.randomUUID(), UUID.randomUUID(), JourneyAuditTrail.IssuanceOutcome.UNAVAILABLE,
+                Optional.empty(), Instant.now())));
     }
 
     private static JourneyAuditTrail.Event event() {

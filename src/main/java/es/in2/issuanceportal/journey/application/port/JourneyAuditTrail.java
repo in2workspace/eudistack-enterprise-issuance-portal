@@ -27,5 +27,38 @@ public interface JourneyAuditTrail {
             Instant occurredAt) {
     }
 
+    /** What came of a request to the issuance API. */
+    enum IssuanceOutcome {
+
+        /** The Issuer created the process and gave the offer. */
+        ISSUED("issued"),
+        /** The Issuer refused the request or answered without what the portal needs. */
+        REJECTED("rejected"),
+        /** The Issuer did not answer, also after the retries. */
+        UNAVAILABLE("unavailable"),
+        /** The tenant has no system token, so the Issuer was not asked. */
+        SYSTEM_TOKEN_UNAVAILABLE("system_token_unavailable");
+
+        private final String code;
+
+        IssuanceOutcome(String code) {
+            this.code = code;
+        }
+
+        public String code() {
+            return code;
+        }
+    }
+
+    /**
+     * A request to the issuance API (design.md §3.5): the result and, when there was one, the process. No
+     * email, attestation data, offer or token.
+     */
+    record IssuanceRequested(UUID eventId, UUID journeyId, IssuanceOutcome result, Optional<UUID> issuanceProcessId,
+                             Instant occurredAt) {
+    }
+
     void append(TenantId tenant, Event event);
+
+    void append(TenantId tenant, IssuanceRequested event);
 }

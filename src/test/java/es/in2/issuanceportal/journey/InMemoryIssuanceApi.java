@@ -16,7 +16,7 @@ import java.util.UUID;
 /**
  * An {@link IssuanceApi} for the tests of the use cases that request an issuance. Like the Issuer, it answers
  * the same process and offer to a repeated idempotency key, and an offer lasts ten minutes, unless the API was
- * told to fail.
+ * told to fail. Safe to call from several threads.
  */
 public final class InMemoryIssuanceApi implements IssuanceApi {
 
@@ -44,7 +44,7 @@ public final class InMemoryIssuanceApi implements IssuanceApi {
     }
 
     @Override
-    public IssuanceResult issue(TenantId tenant, UUID idempotencyKey, IssuanceRequest request) {
+    public synchronized IssuanceResult issue(TenantId tenant, UUID idempotencyKey, IssuanceRequest request) {
         calls.add(new Call(tenant, idempotencyKey, request));
         if (failure != null) {
             throw failure;
@@ -54,12 +54,12 @@ public final class InMemoryIssuanceApi implements IssuanceApi {
                 clock.instant().plus(Duration.ofMinutes(10))));
     }
 
-    public List<Call> calls() {
+    public synchronized List<Call> calls() {
         return List.copyOf(calls);
     }
 
     /** The processes created: one per idempotency key. */
-    public int processes() {
+    public synchronized int processes() {
         return issued.size();
     }
 }
