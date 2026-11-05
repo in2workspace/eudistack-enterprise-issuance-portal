@@ -6,12 +6,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Changed
-
-- Health y métricas en la raíz del servicio, como en el resto de servicios de la plataforma (`management.endpoints.web.base-path: /`): `/issuance-portal/health`, `/issuance-portal/health/liveness`, `/issuance-portal/health/readiness` y `/issuance-portal/prometheus`, en lugar de `/issuance-portal/actuator/...`. Los filtros de la cabecera `X-Requested-With` y del tenant dejan pasar solo esas rutas.
-
-## [0.3.0] - 2026-10-28
-
 ### Added
 
 - **EUD-281 — módulo de fuente auténtica con adaptador simulado**: `POST /entitlement` bajo `/issuance-portal/api/v1`, sin cuerpo: cualquier dato que envíe la interfaz se ignora. Toma el identificador personal y su tipo (`dni` o `colegiado`) solo de la identidad del recorrido y busca en la fuente siempre por ese tipo. Responde `confirmed` con la vista previa del paso Datos, o `not_confirmed` con el motivo (`not_found`, `not_entitled` o `identifier_mismatch`).
@@ -23,6 +17,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Adaptador `simulated` con registros sintéticos en la configuración del tenant. Cada registro se encuentra por DNI o NIE y por número de colegiado, y puede tener un retardo o un fallo forzado.
 - Traza de cada comprobación (`audit.authentic_source`: recorrido, tenant, tipo de atestación, adaptador, tipo de identificador, resultado, motivo, duración y momento), sin identificador personal ni datos de la fuente.
 - `JourneyAccess.requireInProgress`: un recorrido completado responde 410 `journey_closed` antes de consultar la fuente.
+
+### Changed
+
+- Health y métricas en la raíz del servicio, como en el resto de servicios de la plataforma (`management.endpoints.web.base-path: /`): `/issuance-portal/health`, `/issuance-portal/health/liveness`, `/issuance-portal/health/readiness` y `/issuance-portal/prometheus`, en lugar de `/issuance-portal/actuator/...`. Los filtros de la cabecera `X-Requested-With` y del tenant dejan pasar solo esas rutas.
 
 ### Fixed
 
