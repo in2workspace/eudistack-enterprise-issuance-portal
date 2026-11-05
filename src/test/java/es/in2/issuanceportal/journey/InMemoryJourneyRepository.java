@@ -47,6 +47,11 @@ public class InMemoryJourneyRepository implements JourneyRepository {
     }
 
     @Override
+    public Optional<Journey> findByIdForUpdate(TenantId tenant, UUID id) {
+        return findById(tenant, id);
+    }
+
+    @Override
     public List<UUID> findExpiryCandidates(TenantId tenant, Instant cutoff, UUID afterId, int limit) {
         // Text order is PostgreSQL's uuid order; UUID.compareTo is signed and would differ.
         return sessions.openJourneys(tenant).stream()
@@ -88,7 +93,7 @@ public class InMemoryJourneyRepository implements JourneyRepository {
 
     private static Journey copy(Journey j) {
         return Journey.restore(j.id(), j.state(), j.step(), j.withdrawalReason().orElse(null),
-                j.identificationMethod().orElse(null), j.issuanceProcessIds(),
+                j.identificationMethod().orElse(null), j.issuanceProcessId().orElse(null),
                 j.createdAt(), j.lastActivity(), j.endedAt().orElse(null));
     }
 }

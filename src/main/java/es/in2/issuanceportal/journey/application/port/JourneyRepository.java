@@ -22,6 +22,13 @@ public interface JourneyRepository {
 
     Optional<Journey> findById(TenantId tenant, UUID id);
 
+    /**
+     * Like {@link #findById} but locks the journey's row until the transaction ends, so a second
+     * confirmation of the same journey waits for the first (design.md AD-12). Outside a transaction the
+     * lock is released at once and protects nothing: call it inside one.
+     */
+    Optional<Journey> findByIdForUpdate(TenantId tenant, UUID id);
+
     // --- Expiry (design.md AD-4). These read and write the journey and its session in one statement,
     // so a request that renews the activity in between is never overwritten by the sweep.
 

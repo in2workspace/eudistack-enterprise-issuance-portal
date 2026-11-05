@@ -2,7 +2,6 @@ package es.in2.issuanceportal.journey.domain;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -18,7 +17,7 @@ public final class Journey {
     private final UUID id;
     private final Instant createdAt;
     private final String identificationMethod;
-    private final List<String> issuanceProcessIds;
+    private UUID issuanceProcessId;
     private JourneyState state;
     private JourneyStep step;
     private WithdrawalReason withdrawalReason;
@@ -27,29 +26,29 @@ public final class Journey {
 
     @SuppressWarnings("java:S107") // Mirrors the persisted record one to one.
     private Journey(UUID id, JourneyState state, JourneyStep step, WithdrawalReason withdrawalReason,
-                    String identificationMethod, List<String> issuanceProcessIds,
+                    String identificationMethod, UUID issuanceProcessId,
                     Instant createdAt, Instant lastActivity, Instant endedAt) {
         this.id = id;
         this.state = state;
         this.step = step;
         this.withdrawalReason = withdrawalReason;
         this.identificationMethod = identificationMethod;
-        this.issuanceProcessIds = List.copyOf(issuanceProcessIds);
+        this.issuanceProcessId = issuanceProcessId;
         this.createdAt = createdAt;
         this.lastActivity = lastActivity;
         this.endedAt = endedAt;
     }
 
     public static Journey start(UUID id, Instant now) {
-        return new Journey(id, JourneyState.IN_PROGRESS, JourneyStep.STARTED, null, null, List.of(), now, now, null);
+        return new Journey(id, JourneyState.IN_PROGRESS, JourneyStep.STARTED, null, null, null, now, now, null);
     }
 
     /** Rebuilds a journey from storage. */
     @SuppressWarnings("java:S107")
     public static Journey restore(UUID id, JourneyState state, JourneyStep step, WithdrawalReason withdrawalReason,
-                                  String identificationMethod, List<String> issuanceProcessIds,
+                                  String identificationMethod, UUID issuanceProcessId,
                                   Instant createdAt, Instant lastActivity, Instant endedAt) {
-        return new Journey(id, state, step, withdrawalReason, identificationMethod, issuanceProcessIds,
+        return new Journey(id, state, step, withdrawalReason, identificationMethod, issuanceProcessId,
                 createdAt, lastActivity, endedAt);
     }
 
@@ -70,6 +69,19 @@ public final class Journey {
         if (reached.compareTo(step) > 0) {
             step = reached;
         }
+        lastActivity = now;
+    }
+
+    /**
+     * Records the issuance process created for this journey (design.md AD-12). A journey has a single
+     * process: recording the same one again changes nothing, a different one is rejected.
+     */
+    public void recordIssuanceProcess(UUID processId, Instant now) {
+        requireInProgress();
+        if (issuanceProcessId != null && !issuanceProcessId.equals(processId)) {
+            throw new IssuanceProcessAlreadyRecordedException();
+        }
+        issuanceProcessId = processId;
         lastActivity = now;
     }
 
@@ -127,8 +139,8 @@ public final class Journey {
         return Optional.ofNullable(identificationMethod);
     }
 
-    public List<String> issuanceProcessIds() {
-        return issuanceProcessIds;
+    public Optional<UUID> issuanceProcessId() {
+        return Optional.ofNullable(issuanceProcessId);
     }
 
     public Instant createdAt() {

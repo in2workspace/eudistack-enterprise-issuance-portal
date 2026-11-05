@@ -10,10 +10,8 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-import java.sql.Array;
 import java.sql.Timestamp;
 import java.time.Instant;
-import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -28,19 +26,18 @@ class JdbcJourneyRepository implements JourneyRepository {
     private static final String CUTOFF = "cutoff";
 
     private static final String COLUMNS =
-            "id, state, step, withdrawal_reason, identification_method, issuance_process_ids, created_at, last_activity, ended_at";
+            "id, state, step, withdrawal_reason, identification_method, issuance_process_id, created_at, last_activity, ended_at";
 
     private static final RowMapper<Journey> ROW = (rs, row) -> {
         String reason = rs.getString("withdrawal_reason");
         Timestamp endedAt = rs.getTimestamp("ended_at");
-        Array processIds = rs.getArray("issuance_process_ids");
         return Journey.restore(
                 rs.getObject("id", UUID.class),
                 JourneyState.fromCode(rs.getString(STATE)),
                 JourneyStep.fromCode(rs.getString(STEP)),
                 reason == null ? null : WithdrawalReason.fromCode(reason),
                 rs.getString("identification_method"),
-                processIds == null ? List.of() : Arrays.asList((String[]) processIds.getArray()),
+                rs.getObject("issuance_process_id", UUID.class),
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("last_activity").toInstant(),
                 endedAt == null ? null : endedAt.toInstant());
@@ -67,7 +64,9 @@ class JdbcJourneyRepository implements JourneyRepository {
     @Override
     public boolean update(TenantId tenant, Journey journey, JourneyState readInState) {
         return jdbc.sql("UPDATE " + table(tenant) + " SET state = :state, step = :step, withdrawal_reason = :reason, "
-                        + "last_activity = :lastActivity, ended_at = :endedAt WHERE id = :id AND state = :readInState")
+                        + "issuance_process_id = :processId, last_activity = :lastActivity, ended_at = :endedAt "
+                        + "WHERE id = :id AND state = :readInState")
+                .param("processId", journey.issuanceProcessId().orElse(null))
                 .param(STATE, journey.state().code())
                 .param(STEP, journey.step().code())
                 .param("reason", journey.withdrawalReason().map(WithdrawalReason::code).orElse(null))
@@ -81,6 +80,14 @@ class JdbcJourneyRepository implements JourneyRepository {
     @Override
     public Optional<Journey> findById(TenantId tenant, UUID id) {
         return jdbc.sql("SELECT " + COLUMNS + " FROM " + table(tenant) + " WHERE id = :id")
+                .param("id", id)
+                .query(ROW)
+                .optional();
+    }
+
+    @Override
+    public Optional<Journey> findByIdForUpdate(TenantId tenant, UUID id) {
+        return jdbc.sql("SELECT " + COLUMNS + " FROM " + table(tenant) + " WHERE id = :id FOR UPDATE")
                 .param("id", id)
                 .query(ROW)
                 .optional();
