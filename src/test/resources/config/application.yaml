@@ -15,6 +15,12 @@ issuance-portal:
   # JdbcPortalConfigRepositoryIT checks the five-minute cache on its own instance.
   portal-config:
     cache-ttl: 0s
+  # No machine credential is mounted and no Verifier listens: the system token has its own tests.
+  system-token:
+    provider: file
+    directory: build/tmp/system-token-test
+    verifier-internal-url: http://localhost:9/verifier
+    public-host-template: "{tenant}.127.0.0.1.nip.io:4443"
   incidents:
     mail:
       provider: local

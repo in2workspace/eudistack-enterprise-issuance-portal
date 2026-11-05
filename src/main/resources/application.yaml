@@ -46,6 +46,22 @@ issuance-portal:
     # answers 503 at once. Both at least 1, or the service does not start.
     max-concurrent-lookups: ${PORTAL_AUTHENTIC_SOURCE_MAX_LOOKUPS:100}
     max-concurrent-lookups-per-tenant: ${PORTAL_AUTHENTIC_SOURCE_MAX_LOOKUPS_PER_TENANT:20}
+  system-token:
+    # How the portal asks the tenant's Verifier for its token as a system (design.md AD-5).
+    # secrets-manager in AWS environments, file in Docker Compose. Empty: the service does not start.
+    provider: ${PORTAL_SYSTEM_TOKEN_PROVIDER:}
+    # Secrets Manager provider: the tenant's secret, {tenant} replaced by the tenant. The secret is JSON with
+    # clientId (the machine credential's did:key), credential (its JWT) and privateKey (the mandatee's P-256 JWK).
+    secret-name-template: ${PORTAL_SYSTEM_TOKEN_SECRET_TEMPLATE:}
+    # File provider: folder with one <tenant>.json per tenant, with the same content.
+    directory: ${PORTAL_SYSTEM_TOKEN_DIRECTORY:}
+    # The Verifier on the internal network, with its context path, e.g. http://verifier:8082/verifier.
+    verifier-internal-url: ${PORTAL_VERIFIER_INTERNAL_URL:}
+    # The tenant's public host, {tenant} replaced by the tenant, e.g. {tenant}.127.0.0.1.nip.io:4443 locally.
+    # Sent as X-Forwarded-Host (with X-Forwarded-Proto https) so the Verifier resolves its public address.
+    public-host-template: ${PORTAL_PUBLIC_HOST_TEMPLATE:}
+    # How long the Verifier gets to answer.
+    request-timeout: 5s
   incidents:
     mail:
       # ses in AWS environments, local in Docker Compose. Empty: the service does not start.
