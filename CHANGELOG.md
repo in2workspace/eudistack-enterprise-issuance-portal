@@ -6,9 +6,32 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **EUD-281 — módulo de fuente auténtica con adaptador simulado**: `POST /entitlement` bajo `/issuance-portal/api/v1`, sin cuerpo: cualquier dato que envíe la interfaz se ignora. Toma el identificador personal y su tipo (`dni` o `colegiado`) solo de la identidad del recorrido y busca en la fuente siempre por ese tipo. Responde `confirmed` con la vista previa del paso Datos, o `not_confirmed` con el motivo (`not_found`, `not_entitled` o `identifier_mismatch`).
+- Contratos publicados en `session.api` para las secciones `identity` (nombre, apellidos, identificador personal con su tipo y correo opcional del Access Token) y `entitlement` (resultado confirmado, tipo de identificador, datos de la atestación, vista previa y momento), con su forma JSON. Un contenido no válido nombra el campo, nunca su valor.
+- Reglas de la comprobación: sin fuente para el tipo de atestación, `confirmed` solo con la identidad; persona no encontrada, `not_found`; identificador del tipo buscado distinto o ausente, `identifier_mismatch` (sin distinguir mayúsculas ni espacios); sin derecho, `not_entitled`. Con `not_confirmed` el recorrido se retira con `not_entitled` y sus datos se borran. Con `confirmed`, la sección `entitlement` y el paso `entitlement_confirmed` se guardan en la misma transacción.
+- La fuente se consulta en un hilo virtual, sin transacción abierta y con una espera máxima de 10 s. Si falla, no responde o tarda, 503 `authentic_source_unavailable` con `Retry-After: 30`, y el recorrido sigue en curso.
+- Sección `authentic_source` de `portal_config`, una entrada por tipo de atestación: adaptador, dirección, referencia al secreto, espera (1 a 10 s), tipos de identificador por los que busca, traducción de atributos a claims con su etiqueta y ajustes del adaptador. Antes de consultar se comprueba que el adaptador existe en el entorno, que admite esos tipos y que cubren los que puede dar el login del tenant. Si no, 503 `config_unavailable`.
+- Registro de adaptadores por nombre, adaptado de `eudistack-enterprise-backend`. Un nombre repetido impide arrancar. Con `PORTAL_ENV=pro` el adaptador simulado no se registra.
+- Adaptador `simulated` con registros sintéticos en la configuración del tenant. Cada registro se encuentra por DNI o NIE y por número de colegiado, y puede tener un retardo o un fallo forzado.
+- Traza de cada comprobación (`audit.authentic_source`: recorrido, tenant, tipo de atestación, adaptador, tipo de identificador, resultado, motivo, duración y momento), sin identificador personal ni datos de la fuente.
+- `JourneyAccess.requireInProgress`: un recorrido completado responde 410 `journey_closed` antes de consultar la fuente.
+
 ### Changed
 
 - Health y métricas en la raíz del servicio, como en el resto de servicios de la plataforma (`management.endpoints.web.base-path: /`): `/issuance-portal/health`, `/issuance-portal/health/liveness`, `/issuance-portal/health/readiness` y `/issuance-portal/prometheus`, en lugar de `/issuance-portal/actuator/...`. Los filtros de la cabecera `X-Requested-With` y del tenant dejan pasar solo esas rutas.
+
+### Fixed
+
+Revisión de la orden:
+
+- El adaptador simulado solo se registra con `PORTAL_ENV` `local`, `test`, `dev` o `stg` (DEV usa `dev` en la IaC). Con cualquier otro valor (`pro`, `PRO`, `prod`, vacío…) queda fuera, aunque un tenant lo configure.
+- Si el tipo de identificador de la identidad no está entre los que admite la fuente del tenant, 503 `config_unavailable` sin consultarla. El adaptador simulado comprueba que la entrada del tenant sigue eligiéndolo.
+- Como mucho 100 búsquedas en la fuente a la vez por instancia (`PORTAL_AUTHENTIC_SOURCE_MAX_LOOKUPS`) y 20 por tenant (`PORTAL_AUTHENTIC_SOURCE_MAX_LOOKUPS_PER_TENANT`), para que la fuente lenta de un tenant no deje sin búsquedas a los demás. Por encima, 503 `authentic_source_unavailable` sin esperar. Un valor menor que 1 impide arrancar. Una búsqueda cancelada antes de empezar (por la espera máxima o por una petición interrumpida) devuelve su plaza.
+- Una entrada de `authentic_source` con una clave distinta de `attestation_type` (por ejemplo, una errata) es una configuración no válida (503 `config_unavailable`, con el campo en el log). Antes dejaba el tipo sin fuente y se confirmaba a cualquier titular. Cada confirmación sin fuente deja un aviso en el log con el tenant y el tipo de atestación.
+- Un elemento vacío en la traducción de la configuración (`"mapping": [null]`) es una configuración no válida (503 `config_unavailable`, con el campo en el log), no un error 500.
+- La respuesta de `POST /entitlement` y los documentos JSON de la configuración y de las secciones `identity` y `entitlement` no muestran datos personales, direcciones ni secretos en su representación de texto.
 
 ## [0.2.0] - 2026-10-27
 

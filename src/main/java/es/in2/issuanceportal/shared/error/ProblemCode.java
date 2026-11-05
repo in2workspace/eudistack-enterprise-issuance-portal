@@ -13,7 +13,8 @@ public enum ProblemCode {
     JOURNEY_CLOSED("journey_closed", "Journey closed", 410),
     TOO_MANY_REQUESTS("too_many_requests", "Too many requests", 429),
     SERVICE_UNAVAILABLE("service_unavailable", "Service unavailable", 503),
-    CONFIG_UNAVAILABLE("config_unavailable", "Portal configuration unavailable", 503);
+    CONFIG_UNAVAILABLE("config_unavailable", "Portal configuration unavailable", 503),
+    AUTHENTIC_SOURCE_UNAVAILABLE("authentic_source_unavailable", "Authentic source unavailable", 503);
 
     private final String code;
     private final String title;

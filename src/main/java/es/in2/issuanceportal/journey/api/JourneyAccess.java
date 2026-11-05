@@ -11,4 +11,10 @@ import es.in2.issuanceportal.shared.tenant.TenantId;
 public interface JourneyAccess {
 
     void requireActive(TenantId tenant, SessionId session);
+
+    /**
+     * Same check, for a step that only makes sense before the journey has an offer: a completed journey
+     * also answers {@code journey_closed}.
+     */
+    void requireInProgress(TenantId tenant, SessionId session);
 }

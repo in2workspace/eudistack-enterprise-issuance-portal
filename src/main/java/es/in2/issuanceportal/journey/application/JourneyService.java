@@ -103,6 +103,11 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
     }
 
     @Override
+    public void requireInProgress(TenantId tenant, SessionId session) {
+        activeInProgress(tenant, session);
+    }
+
+    @Override
     public void reach(TenantId tenant, SessionId session, JourneyProgress.Step step) {
         Journey journey = activeInProgress(tenant, session);
         JourneyStep before = journey.step();

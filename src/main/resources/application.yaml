@@ -27,7 +27,7 @@ server:
 issuance-portal:
   # Filled in from build.gradle when the resources are processed.
   version: "@version@"
-  # local, test, stg or pro. No default: the service does not start without it.
+  # local, test, dev, stg or pro. No default: the service does not start without it.
   env: ${PORTAL_ENV}
   crypto:
     # kms in AWS environments, local in Docker Compose. Empty: the service does not start.
@@ -41,6 +41,11 @@ issuance-portal:
   portal-config:
     # How long a valid portal configuration is cached (design.md AD-7).
     cache-ttl: 5m
+  authentic-source:
+    # Searches of the authentic source in flight per instance and per tenant; beyond either a check
+    # answers 503 at once. Both at least 1, or the service does not start.
+    max-concurrent-lookups: ${PORTAL_AUTHENTIC_SOURCE_MAX_LOOKUPS:100}
+    max-concurrent-lookups-per-tenant: ${PORTAL_AUTHENTIC_SOURCE_MAX_LOOKUPS_PER_TENANT:20}
   incidents:
     mail:
       # ses in AWS environments, local in Docker Compose. Empty: the service does not start.
