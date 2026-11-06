@@ -512,6 +512,17 @@ class EntitlementServiceTest {
                 clock, new LookupSlots(1, 1));
         SessionId interrupted = journeyWithDni("00000001R");
         SessionId next = journeyWithDni("00000001R");
+        // The source does not answer until the test lets it: a source that answered before the request
+        // started to wait would let the wait return its answer, and the interruption would go unnoticed.
+        CountDownLatch sourceMayAnswer = new CountDownLatch(1);
+        adapter.answering(searched -> {
+            try {
+                sourceMayAnswer.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+            return source(searched);
+        });
         AtomicReference<Throwable> failure = new AtomicReference<>();
         Thread request = Thread.ofVirtual().unstarted(() -> {
             // The wait for the source fails at once, whether or not the search has started.
@@ -522,13 +533,19 @@ class EntitlementServiceTest {
                 failure.set(e);
             }
         });
-        request.start();
-        request.join(5_000);
-        assertThat(failure.get()).isInstanceOfSatisfying(ProblemException.class,
-                e -> assertThat(e.problem()).isEqualTo(ProblemCode.AUTHENTIC_SOURCE_UNAVAILABLE));
+        try {
+            request.start();
+            request.join(5_000);
+            assertThat(failure.get()).isInstanceOfSatisfying(ProblemException.class,
+                    e -> assertThat(e.problem()).isEqualTo(ProblemCode.AUTHENTIC_SOURCE_UNAVAILABLE));
 
-        assertThat(oneAtATime.check(CGCOM, next)).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
-        oneAtATime.close();
+            // The slot is back while the interrupted search is still pending.
+            adapter.answering(EntitlementServiceTest::source);
+            assertThat(oneAtATime.check(CGCOM, next)).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
+        } finally {
+            sourceMayAnswer.countDown();
+            oneAtATime.close();
+        }
     }
 
     @Test
