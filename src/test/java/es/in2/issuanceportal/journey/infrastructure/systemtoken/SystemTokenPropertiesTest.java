@@ -15,14 +15,14 @@ class SystemTokenPropertiesTest {
     private static final Duration TIMEOUT = Duration.ofSeconds(5);
 
     @Test
-    void new_secretsManagerWithTemplate_isValid() {
-        assertThat(new SystemTokenProperties(Provider.SECRETS_MANAGER, "eudistack/{tenant}/portal", null,
-                VERIFIER, TIMEOUT).provider()).isEqualTo(Provider.SECRETS_MANAGER);
+    void new_ssmWithTemplate_isValid() {
+        assertThat(new SystemTokenProperties(Provider.SSM, "/eudistack/dev/{tenant}/machine-credential", null,
+                VERIFIER, TIMEOUT).provider()).isEqualTo(Provider.SSM);
     }
 
     @Test
-    void new_secretsManagerWithoutTenantInTemplate_isRejected() {
-        assertThatThrownBy(() -> new SystemTokenProperties(Provider.SECRETS_MANAGER, "eudistack/portal", null,
+    void new_ssmWithoutTenantInTemplate_isRejected() {
+        assertThatThrownBy(() -> new SystemTokenProperties(Provider.SSM, "/eudistack/dev/machine-credential", null,
                 VERIFIER, TIMEOUT)).isInstanceOf(IllegalArgumentException.class);
     }
 

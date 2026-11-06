@@ -10,13 +10,16 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.ArgumentCaptor;
 import software.amazon.awssdk.core.exception.SdkClientException;
-import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
-import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueRequest;
-import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueResponse;
-import software.amazon.awssdk.services.secretsmanager.model.ResourceNotFoundException;
+import software.amazon.awssdk.services.ssm.SsmClient;
+import software.amazon.awssdk.services.ssm.model.GetParameterRequest;
+import software.amazon.awssdk.services.ssm.model.GetParameterResponse;
+import software.amazon.awssdk.services.ssm.model.Parameter;
+import software.amazon.awssdk.services.ssm.model.ParameterNotFoundException;
 
 import java.io.IOException;
+import java.math.BigInteger;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.function.Consumer;
@@ -25,25 +28,51 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class MachineCredentialSourceTest {
 
     private static final TenantId SANDBOX = new TenantId("sandbox");
+    private static final String TEMPLATE = "/eudistack/dev/{tenant}/machine-credential";
 
     @TempDir
     Path directory;
 
     @Test
-    @DisplayName("Parser — a secret with clientId, credential and a private P-256 key is read")
-    void parse_validSecret_returnsCredential() {
+    @DisplayName("Parser — a secret with a credential and a JWK private key is read")
+    void parse_validSecret_returnsIdentity() {
         MachineCredentialFixture fixture = MachineCredentialFixture.create("sandbox");
 
-        MachineCredential credential = MachineCredentialParser.parse(fixture.secretJson()).orElseThrow();
+        MachineIdentity identity = MachineCredentialParser.parse(fixture.secretJson()).orElseThrow();
 
-        assertThat(credential.clientId()).isEqualTo(fixture.clientId());
-        assertThat(credential.credentialJwt()).isEqualTo(fixture.credentialJwt());
-        assertThat(credential.privateKey().isPrivate()).isTrue();
+        assertThat(identity.credential().clientId()).isEqualTo(fixture.clientId());
+        assertThat(identity.credential().tenant()).isEqualTo("sandbox");
+        assertThat(identity.credential().compactJwt()).isEqualTo(fixture.credentialJwt());
+        assertThat(identity.privateKey().isPrivate()).isTrue();
+    }
+
+    @Test
+    @DisplayName("Parser — the private key may be a hex scalar")
+    void parse_hexPrivateKey_returnsIdentity() {
+        MachineCredentialFixture fixture = MachineCredentialFixture.create("sandbox");
+        String hex = new BigInteger(1, fixture.key().getD().decode()).toString(16);
+        String secret = "{\"credential\":\"" + fixture.credentialJwt() + "\",\"privateKey\":\"0x" + hex + "\"}";
+
+        MachineIdentity identity = MachineCredentialParser.parse(secret).orElseThrow();
+
+        assertThat(identity.privateKey().toPublicJWK()).isEqualTo(fixture.key().toPublicJWK());
+    }
+
+    @Test
+    @DisplayName("Parser — a clientId in the secret is accepted and ignored")
+    void parse_secretWithClientId_clientIdComesFromCredential() {
+        MachineCredentialFixture fixture = MachineCredentialFixture.create("sandbox");
+        String secret = "{\"clientId\":\"did:key:other\",\"credential\":\"" + fixture.credentialJwt()
+                + "\",\"privateKey\":" + fixture.key().toJSONString() + "}";
+
+        assertThat(MachineCredentialParser.parse(secret).orElseThrow().credential().clientId())
+                .isEqualTo(fixture.clientId());
     }
 
     @ParameterizedTest
@@ -51,9 +80,10 @@ class MachineCredentialSourceTest {
             "",
             "not json",
             "{}",
-            "{\"clientId\":\"did:key:z\",\"credential\":\"jwt\"}",
-            "{\"clientId\":\"did:key:z\",\"credential\":\"jwt\",\"privateKey\":\"not an object\"}",
-            "{\"clientId\":\" \",\"credential\":\"jwt\",\"privateKey\":{}}"
+            "{\"credential\":\"jwt\"}",
+            "{\"credential\":\"not-a-jwt\",\"privateKey\":\"abc123\"}",
+            "{\"credential\":\" \",\"privateKey\":{}}",
+            "{\"credential\":\"jwt\",\"privateKey\":5}"
     })
     @DisplayName("Parser — a secret that is not usable gives no credential")
     void parse_unusableSecret_returnsEmpty(String content) {
@@ -64,7 +94,7 @@ class MachineCredentialSourceTest {
     @DisplayName("Parser — a public key without the private part gives no credential")
     void parse_publicKeyOnly_returnsEmpty() {
         MachineCredentialFixture fixture = MachineCredentialFixture.create("sandbox");
-        String secret = "{\"clientId\":\"c\",\"credential\":\"jwt\",\"privateKey\":"
+        String secret = "{\"credential\":\"" + fixture.credentialJwt() + "\",\"privateKey\":"
                 + fixture.key().toPublicJWK().toJSONString() + "}";
 
         assertThat(MachineCredentialParser.parse(secret)).isEmpty();
@@ -73,18 +103,19 @@ class MachineCredentialSourceTest {
     @Test
     @DisplayName("Parser — a key of another curve gives no credential")
     void parse_otherCurve_returnsEmpty() throws Exception {
-        String secret = "{\"clientId\":\"c\",\"credential\":\"jwt\",\"privateKey\":"
+        MachineCredentialFixture fixture = MachineCredentialFixture.create("sandbox");
+        String secret = "{\"credential\":\"" + fixture.credentialJwt() + "\",\"privateKey\":"
                 + new ECKeyGenerator(Curve.P_384).generate().toJSONString() + "}";
 
         assertThat(MachineCredentialParser.parse(secret)).isEmpty();
     }
 
     @Test
-    @DisplayName("NFR-3 — the credential does not show in toString")
-    void toString_machineCredential_showsNothing() {
+    @DisplayName("NFR-3 — the identity does not show in toString")
+    void toString_machineIdentity_showsNothing() {
         MachineCredentialFixture fixture = MachineCredentialFixture.create("sandbox");
 
-        assertThat(fixture.credential().toString())
+        assertThat(MachineCredentialParser.parse(fixture.secretJson()).orElseThrow().toString())
                 .doesNotContain(fixture.credentialJwt())
                 .doesNotContain(fixture.clientId());
     }
@@ -116,50 +147,56 @@ class MachineCredentialSourceTest {
     }
 
     @Test
-    @DisplayName("Secrets Manager — reads the secret named from the template with the tenant")
-    void find_secretOfTenant_returnsCredential() {
+    @DisplayName("SSM — reads, decrypted, the parameter named from the template with the tenant")
+    void find_parameterOfTenant_returnsIdentity() {
         MachineCredentialFixture fixture = MachineCredentialFixture.create("sandbox");
-        SecretsManagerClient secrets = mock(SecretsManagerClient.class);
-        when(secrets.getSecretValue(anyRequest()))
-                .thenAnswer(invocation -> {
-                    GetSecretValueRequest.Builder request = GetSecretValueRequest.builder();
-                    invocation.<Consumer<GetSecretValueRequest.Builder>>getArgument(0).accept(request);
-                    return "eudistack/sandbox/portal".equals(request.build().secretId())
-                            ? GetSecretValueResponse.builder().secretString(fixture.secretJson()).build()
-                            : GetSecretValueResponse.builder().build();
-                });
+        SsmClient ssm = mock(SsmClient.class);
+        when(ssm.getParameter(anyRequest())).thenReturn(GetParameterResponse.builder()
+                .parameter(Parameter.builder().value(fixture.secretJson()).build()).build());
 
-        assertThat(new SecretsManagerMachineCredentialSource(secrets, "eudistack/{tenant}/portal").find(SANDBOX))
-                .isPresent();
+        assertThat(new SsmMachineCredentialSource(ssm, TEMPLATE).find(SANDBOX)).isPresent();
+
+        GetParameterRequest.Builder request = GetParameterRequest.builder();
+        ArgumentCaptor<Consumer<GetParameterRequest.Builder>> captor = ArgumentCaptor.captor();
+        verify(ssm).getParameter(captor.capture());
+        captor.getValue().accept(request);
+        assertThat(request.build().name()).isEqualTo("/eudistack/dev/sandbox/machine-credential");
+        assertThat(request.build().withDecryption()).isTrue();
     }
 
     @Test
-    @DisplayName("AC-05 — Secrets Manager: a tenant without secret has no credential")
-    void find_secretNotFound_returnsEmpty() {
-        SecretsManagerClient secrets = mock(SecretsManagerClient.class);
-        when(secrets.getSecretValue(anyRequest()))
-                .thenThrow(ResourceNotFoundException.builder().message("not found").build());
+    @DisplayName("AC-05 — SSM: a tenant without parameter has no credential")
+    void find_parameterNotFound_returnsEmpty() {
+        SsmClient ssm = mock(SsmClient.class);
+        when(ssm.getParameter(anyRequest())).thenThrow(ParameterNotFoundException.builder().message("nope").build());
 
-        assertThat(new SecretsManagerMachineCredentialSource(secrets, "eudistack/{tenant}/portal").find(SANDBOX))
-                .isEmpty();
+        assertThat(new SsmMachineCredentialSource(ssm, TEMPLATE).find(SANDBOX)).isEmpty();
     }
 
     @Test
-    @DisplayName("ES-05 — Secrets Manager: a failure of the store is reported without its message")
+    @DisplayName("SSM — a parameter that is not a usable secret has no credential")
+    void find_parameterNotUsable_returnsEmpty() {
+        SsmClient ssm = mock(SsmClient.class);
+        when(ssm.getParameter(anyRequest())).thenReturn(GetParameterResponse.builder()
+                .parameter(Parameter.builder().value("not json").build()).build());
+
+        assertThat(new SsmMachineCredentialSource(ssm, TEMPLATE).find(SANDBOX)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("ES-05 — SSM: a failure of the store is reported without its message")
     void find_storeFails_storeUnavailable() {
-        SecretsManagerClient secrets = mock(SecretsManagerClient.class);
-        when(secrets.getSecretValue(anyRequest()))
-                .thenThrow(SdkClientException.create("connection reset"));
+        SsmClient ssm = mock(SsmClient.class);
+        when(ssm.getParameter(anyRequest())).thenThrow(SdkClientException.create("connection reset"));
 
-        assertThatThrownBy(() -> new SecretsManagerMachineCredentialSource(secrets, "eudistack/{tenant}/portal")
-                .find(SANDBOX))
+        assertThatThrownBy(() -> new SsmMachineCredentialSource(ssm, TEMPLATE).find(SANDBOX))
                 .isInstanceOfSatisfying(SystemTokenUnavailableException.class, e -> {
                     assertThat(e.reason()).isEqualTo(Reason.SECRET_STORE_UNAVAILABLE);
                     assertThat(e.getCause()).isNull();
                 });
     }
 
-    private static Consumer<GetSecretValueRequest.Builder> anyRequest() {
+    private static Consumer<GetParameterRequest.Builder> anyRequest() {
         return any();
     }
 }

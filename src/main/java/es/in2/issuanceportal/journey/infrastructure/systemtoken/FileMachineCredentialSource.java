@@ -19,7 +19,7 @@ final class FileMachineCredentialSource implements MachineCredentialSource {
     }
 
     @Override
-    public Optional<MachineCredential> find(TenantId tenant) {
+    public Optional<MachineIdentity> find(TenantId tenant) {
         // A TenantId only has [a-z0-9_-], so it cannot leave the directory.
         Path file = directory.resolve(tenant.value() + ".json");
         if (!Files.isRegularFile(file)) {

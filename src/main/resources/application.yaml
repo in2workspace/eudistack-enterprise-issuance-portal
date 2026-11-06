@@ -53,12 +53,13 @@ issuance-portal:
     template: ${PORTAL_PUBLIC_HOST_TEMPLATE:}
   system-token:
     # How the portal asks the tenant's Verifier for its token as a system (design.md AD-5).
-    # secrets-manager in AWS environments, file in Docker Compose. Empty: the service does not start.
+    # ssm in AWS environments, file in Docker Compose. Empty: the service does not start.
     provider: ${PORTAL_SYSTEM_TOKEN_PROVIDER:}
-    # Secrets Manager provider: the tenant's secret, {tenant} replaced by the tenant. The secret is JSON with
-    # clientId (the machine credential's did:key), credential (its JWT) and privateKey (the mandatee's P-256 JWK).
-    secret-name-template: ${PORTAL_SYSTEM_TOKEN_SECRET_TEMPLATE:}
-    # File provider: folder with one <tenant>.json per tenant, with the same content.
+    # ssm provider: the tenant's SecureString parameter in SSM Parameter Store, {tenant} replaced by the tenant,
+    # e.g. /eudistack/dev/config/apps/issuance-portal/machine-credential/{tenant}. Its value is JSON with
+    # credential (the machine credential's JWT) and privateKey (the mandatee's P-256 key, as a JWK or hex).
+    parameter-template: ${PORTAL_SYSTEM_TOKEN_PARAMETER_TEMPLATE:}
+    # file provider: folder with one <tenant>.json per tenant, with the same content.
     directory: ${PORTAL_SYSTEM_TOKEN_DIRECTORY:}
     # The Verifier on the internal network, with its context path, e.g. http://verifier:8082/verifier.
     verifier-internal-url: ${PORTAL_VERIFIER_INTERNAL_URL:}

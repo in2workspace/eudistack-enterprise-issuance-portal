@@ -52,7 +52,7 @@ final class VerifierTokenGrant implements TokenGrant {
 
     @Override
     public SystemToken request(TenantId tenant) {
-        MachineCredential credential = credentials.find(tenant).orElseThrow(() -> {
+        MachineIdentity identity = credentials.find(tenant).orElseThrow(() -> {
             log.warn("No usable machine credential for tenant {}", tenant);
             return new SystemTokenUnavailableException(Reason.NO_MACHINE_CREDENTIAL);
         });
@@ -61,9 +61,9 @@ final class VerifierTokenGrant implements TokenGrant {
 
         MultiValueMap<String, String> form = new LinkedMultiValueMap<>();
         form.add("grant_type", "client_credentials");
-        form.add("client_id", credential.clientId());
+        form.add("client_id", identity.credential().clientId());
         form.add("client_assertion_type", CLIENT_ASSERTION_TYPE);
-        form.add("client_assertion", assertions.build(credential, publicVerifierUrl));
+        form.add("client_assertion", assertions.build(identity, publicVerifierUrl));
 
         TokenResponse response = post(tenant, publicHost, form);
         if (response == null || response.accessToken() == null || response.accessToken().isBlank()

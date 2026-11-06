@@ -12,5 +12,5 @@ interface MachineCredentialSource {
      * @throws es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException
      *         with {@code SECRET_STORE_UNAVAILABLE} when the store does not answer
      */
-    Optional<MachineCredential> find(TenantId tenant);
+    Optional<MachineIdentity> find(TenantId tenant);
 }

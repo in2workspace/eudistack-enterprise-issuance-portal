@@ -15,7 +15,7 @@ import java.time.Duration;
  * does not start.
  *
  * @param provider            where the machine credentials are read from
- * @param secretNameTemplate  name of the tenant's secret in Secrets Manager, with {@code {tenant}}
+ * @param parameterTemplate   name of the tenant's SecureString parameter in SSM, with {@code {tenant}}
  * @param directory           folder with one {@code <tenant>.json} per tenant, for the file provider
  * @param verifierInternalUrl the Verifier as the portal reaches it on the internal network, with its context
  *                            path, e.g. {@code http://verifier:8082/verifier}
@@ -25,20 +25,20 @@ import java.time.Duration;
 @ConfigurationProperties("issuance-portal.system-token")
 public record SystemTokenProperties(
         @NotNull Provider provider,
-        String secretNameTemplate,
+        String parameterTemplate,
         Path directory,
         @NotBlank String verifierInternalUrl,
         @DefaultValue("PT5S") Duration requestTimeout) {
 
     static final String TENANT_PLACEHOLDER = "{tenant}";
 
-    public enum Provider { SECRETS_MANAGER, FILE }
+    public enum Provider { SSM, FILE }
 
     public SystemTokenProperties {
-        if (provider == Provider.SECRETS_MANAGER
-                && (secretNameTemplate == null || !secretNameTemplate.contains(TENANT_PLACEHOLDER))) {
-            throw new IllegalArgumentException("secret-name-template with " + TENANT_PLACEHOLDER
-                    + " is required with the secrets-manager provider");
+        if (provider == Provider.SSM
+                && (parameterTemplate == null || !parameterTemplate.contains(TENANT_PLACEHOLDER))) {
+            throw new IllegalArgumentException("parameter-template with " + TENANT_PLACEHOLDER
+                    + " is required with the ssm provider");
         }
         if (provider == Provider.FILE && (directory == null || directory.toString().isBlank())) {
             throw new IllegalArgumentException("directory is required with the file provider");

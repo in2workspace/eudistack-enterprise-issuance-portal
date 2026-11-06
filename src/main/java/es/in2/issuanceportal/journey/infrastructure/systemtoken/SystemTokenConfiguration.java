@@ -9,7 +9,7 @@ import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.web.client.RestClient;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain;
-import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
+import software.amazon.awssdk.services.ssm.SsmClient;
 
 import java.net.http.HttpClient;
 import java.time.Clock;
@@ -25,7 +25,7 @@ class SystemTokenConfiguration {
                                             Clock clock) {
         log.info("System token requested from {} with the {} machine credential provider",
                 properties.verifierInternalUrl(), properties.provider());
-        return providerFor(properties, publicHosts, clock, () -> SecretsManagerClient.builder()
+        return providerFor(properties, publicHosts, clock, () -> SsmClient.builder()
                 // Region and credentials come from the ECS task environment (AWS_REGION, the task role).
                 .region(new DefaultAwsRegionProviderChain().getRegion())
                 .credentialsProvider(DefaultCredentialsProvider.builder().build())
@@ -34,13 +34,12 @@ class SystemTokenConfiguration {
     }
 
     static SystemTokenProvider providerFor(SystemTokenProperties properties, PublicHostProperties publicHosts,
-                                           Clock clock, Supplier<SecretsManagerClient> secretsManager) {
+                                           Clock clock, Supplier<SsmClient> ssm) {
         MachineCredentialSource source = switch (properties.provider()) {
-            case SECRETS_MANAGER -> new SecretsManagerMachineCredentialSource(
-                    secretsManager.get(), properties.secretNameTemplate());
+            case SSM -> new SsmMachineCredentialSource(ssm.get(), properties.parameterTemplate());
             case FILE -> new FileMachineCredentialSource(properties.directory());
         };
-        TokenGrant grant = new VerifierTokenGrant(source, new ClientAssertionFactory(clock),
+        TokenGrant grant = new VerifierTokenGrant(source, new ClientAssertionFactory(),
                 restClient(properties.requestTimeout()), clock,
                 properties.verifierInternalUrl(), publicHosts);
         return new CachingSystemTokenProvider(grant, clock);

@@ -58,10 +58,12 @@ dependencies {
     implementation 'software.amazon.awssdk:sesv2:2.31.78'
 
     // --- System token ---
-    // The machine credential of each tenant is read from AWS Secrets Manager, and the client assertion
-    // and presentation for the Verifier are JOSE objects (design.md AD-5).
-    implementation 'software.amazon.awssdk:secretsmanager:2.31.78'
-    implementation 'com.nimbusds:nimbus-jose-jwt:10.9.1'
+    // The machine credential of each tenant is read from SSM Parameter Store, and the presentation and client
+    // assertion for the Verifier are built with the public pieces of the verifier client SDK (design.md AD-5).
+    // nimbus-jose-jwt is the SDK's own version, declared here because Spring Boot's BOM manages an older one.
+    implementation 'software.amazon.awssdk:ssm:2.31.78'
+    implementation 'net.eudistack:eudistack-verifier-client-java:0.2.0'
+    implementation 'com.nimbusds:nimbus-jose-jwt:10.10'
 
     // --- Issuance API client ---
     // Bounded retries with Retry-After towards the Issuer (design.md AD-6): the core module only, no AOP.

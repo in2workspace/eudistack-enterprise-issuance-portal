@@ -28,9 +28,9 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
-import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
-import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueRequest;
-import software.amazon.awssdk.services.secretsmanager.model.ResourceNotFoundException;
+import software.amazon.awssdk.services.ssm.SsmClient;
+import software.amazon.awssdk.services.ssm.model.GetParameterRequest;
+import software.amazon.awssdk.services.ssm.model.ParameterNotFoundException;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -101,7 +101,7 @@ class SystemTokenIT {
         return SystemTokenConfiguration.providerFor(
                 new SystemTokenProperties(Provider.FILE, null, secrets,
                         "http://localhost:" + verifier.port() + "/verifier", timeout),
-                PUBLIC_HOSTS, clock, () -> mock(SecretsManagerClient.class));
+                PUBLIC_HOSTS, clock, () -> mock(SsmClient.class));
     }
 
     private void verifierGrants() {
@@ -213,6 +213,24 @@ class SystemTokenIT {
         assertThat(verifier.findAll(anyRequestedFor(anyUrl()))).isEmpty();
     }
 
+    @Test
+    @DisplayName("AC-05 — a key that is not the credential's cnf gives no token and the Verifier is not called")
+    void tokenFor_keyDoesNotMatchCredential_failsWithoutCallingVerifier() throws Exception {
+        MachineCredentialFixture mismatched = MachineCredentialFixture.createMismatched("sandbox");
+        mismatched.writeTo(secrets, "sandbox");
+        verifierGrants();
+
+        Throwable failure = catchThrowable(() -> provider(Duration.ofSeconds(5)).tokenFor(SANDBOX));
+
+        assertThat(failure).isInstanceOfSatisfying(SystemTokenUnavailableException.class,
+                e -> assertThat(e.reason()).isEqualTo(Reason.NO_MACHINE_CREDENTIAL));
+        assertThat(verifier.findAll(anyRequestedFor(anyUrl()))).isEmpty();
+        String everything = logs.list.stream().map(SystemTokenIT::describe).collect(Collectors.joining("\n"))
+                + describe(failure);
+        assertThat(everything).doesNotContain(mismatched.credentialJwt(),
+                (String) mismatched.key().toJSONObject().get("d"));
+    }
+
     @ParameterizedTest
     @ValueSource(ints = {400, 401, 403})
     @DisplayName("ES-05 — the Verifier rejecting the client assertion gives no token")
@@ -296,12 +314,12 @@ class SystemTokenIT {
     }
 
     @Test
-    @DisplayName("Secrets Manager provider — reads the tenant's secret from the store")
-    void providerFor_secretsManager_readsTheTenantSecret() {
-        SecretsManagerClient store = mock(SecretsManagerClient.class);
-        when(store.getSecretValue(anyRequest())).thenThrow(ResourceNotFoundException.builder().build());
-        SystemTokenProperties properties = new SystemTokenProperties(Provider.SECRETS_MANAGER,
-                "eudistack/{tenant}/portal", null, "http://localhost:" + verifier.port() + "/verifier",
+    @DisplayName("SSM provider — reads the tenant's parameter from the store")
+    void providerFor_ssm_readsTheTenantParameter() {
+        SsmClient store = mock(SsmClient.class);
+        when(store.getParameter(anyRequest())).thenThrow(ParameterNotFoundException.builder().build());
+        SystemTokenProperties properties = new SystemTokenProperties(Provider.SSM,
+                "/eudistack/dev/{tenant}/machine-credential", null, "http://localhost:" + verifier.port() + "/verifier",
                 Duration.ofSeconds(5));
 
         SystemTokenProvider provider = SystemTokenConfiguration.providerFor(properties, PUBLIC_HOSTS, clock, () -> store);
@@ -309,17 +327,17 @@ class SystemTokenIT {
         assertThatThrownBy(() -> provider.tokenFor(SANDBOX))
                 .isInstanceOfSatisfying(SystemTokenUnavailableException.class,
                         e -> assertThat(e.reason()).isEqualTo(Reason.NO_MACHINE_CREDENTIAL));
-        verify(store).getSecretValue(anyRequest());
+        verify(store).getParameter(anyRequest());
     }
 
     @Test
-    @DisplayName("File provider — the Secrets Manager client is never created")
-    void providerFor_file_doesNotCreateSecretsManagerClient() {
+    @DisplayName("File provider — the SSM client is never created")
+    void providerFor_file_doesNotCreateSsmClient() {
         SystemTokenProperties properties = new SystemTokenProperties(Provider.FILE, null, secrets,
                 "http://localhost:" + verifier.port() + "/verifier", Duration.ofSeconds(5));
 
         SystemTokenConfiguration.providerFor(properties, PUBLIC_HOSTS, clock, () -> {
-            throw new AssertionError("No Secrets Manager client with the file provider");
+            throw new AssertionError("No SSM client with the file provider");
         });
     }
 
@@ -347,7 +365,7 @@ class SystemTokenIT {
                 + describe(throwable.getCause());
     }
 
-    private static Consumer<GetSecretValueRequest.Builder> anyRequest() {
+    private static Consumer<GetParameterRequest.Builder> anyRequest() {
         return org.mockito.ArgumentMatchers.any();
     }
 }

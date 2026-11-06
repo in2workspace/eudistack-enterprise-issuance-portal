@@ -2,14 +2,15 @@ package es.in2.issuanceportal.journey.infrastructure.systemtoken;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.nimbusds.jose.jwk.Curve;
-import com.nimbusds.jose.jwk.ECKey;
+import net.eudistack.verifierclient.credential.MachineCredential;
+import net.eudistack.verifierclient.jwt.EcKeyLoader;
 
 import java.util.Optional;
 
 /**
  * Reads the content of a tenant's secret:
- * {@code {"clientId": "did:key:...", "credential": "<jwt>", "privateKey": {<JWK, P-256, with d>}}}.
+ * {@code {"credential": "<jwt>", "privateKey": <P-256 JWK object, or hex scalar string>}}. The client is
+ * derived from the credential, so a {@code clientId} in older secrets is ignored.
  * Whatever is wrong with it, the result is only "no usable credential": the reason may quote the secret.
  */
 final class MachineCredentialParser {
@@ -19,27 +20,19 @@ final class MachineCredentialParser {
     private MachineCredentialParser() {
     }
 
-    static Optional<MachineCredential> parse(String content) {
+    static Optional<MachineIdentity> parse(String content) {
         try {
             JsonNode root = JSON.readTree(content);
-            String clientId = text(root, "clientId");
-            String credential = text(root, "credential");
+            JsonNode credential = root.get("credential");
             JsonNode key = root.get("privateKey");
-            if (clientId == null || credential == null || key == null || !key.isObject()) {
+            if (credential == null || !credential.isTextual() || key == null || !(key.isObject() || key.isTextual())) {
                 return Optional.empty();
             }
-            ECKey privateKey = ECKey.parse(key.toString());
-            if (!privateKey.isPrivate() || !Curve.P_256.equals(privateKey.getCurve())) {
-                return Optional.empty();
-            }
-            return Optional.of(new MachineCredential(clientId, credential, privateKey));
+            String privateKey = key.isObject() ? key.toString() : key.asText();
+            return Optional.of(new MachineIdentity(
+                    MachineCredential.parse(credential.asText()), EcKeyLoader.loadPrivateKey(privateKey)));
         } catch (Exception e) {
             return Optional.empty();
         }
-    }
-
-    private static String text(JsonNode root, String field) {
-        JsonNode node = root.get(field);
-        return node != null && node.isTextual() && !node.asText().isBlank() ? node.asText() : null;
     }
 }
