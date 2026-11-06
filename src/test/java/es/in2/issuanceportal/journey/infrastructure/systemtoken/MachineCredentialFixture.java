@@ -21,9 +21,9 @@ import java.util.Map;
  * A machine credential for tests: a LEARCredentialMachine-shaped JWT whose {@code cnf} is a fresh P-256 key,
  * and the key that goes in the secret, which is that same key unless the fixture is a mismatched one.
  */
-record MachineCredentialFixture(String clientId, String credentialJwt, ECKey key) {
+public record MachineCredentialFixture(String clientId, String credentialJwt, ECKey key) {
 
-    static MachineCredentialFixture create(String label) {
+    public static MachineCredentialFixture create(String label) {
         ECKey key = generate();
         return new MachineCredentialFixture("did:key:" + label, credential(label, key), key);
     }
@@ -61,11 +61,11 @@ record MachineCredentialFixture(String clientId, String credentialJwt, ECKey key
     }
 
     /** The content of the tenant's secret. */
-    String secretJson() {
+    public String secretJson() {
         return "{\"credential\":\"" + credentialJwt + "\",\"privateKey\":" + key.toJSONString() + "}";
     }
 
-    void writeTo(Path directory, String tenant) throws IOException {
+    public void writeTo(Path directory, String tenant) throws IOException {
         Files.writeString(directory.resolve(tenant + ".json"), secretJson(), StandardCharsets.UTF_8);
     }
 }
