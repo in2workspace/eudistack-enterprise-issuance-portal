@@ -49,6 +49,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -539,12 +540,32 @@ class EntitlementServiceTest {
             assertThat(failure.get()).isInstanceOfSatisfying(ProblemException.class,
                     e -> assertThat(e.problem()).isEqualTo(ProblemCode.AUTHENTIC_SOURCE_UNAVAILABLE));
 
-            // The slot is back while the interrupted search is still pending.
+            // The slot comes back whether the search never started or was interrupted while it ran; in the
+            // second case it does so as the search ends, on its own thread. The next request is served once
+            // that has happened, never refused for good.
             adapter.answering(EntitlementServiceTest::source);
-            assertThat(oneAtATime.check(CGCOM, next)).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
+            assertThat(checkOnceTheSlotIsBack(oneAtATime, next)).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
         } finally {
             sourceMayAnswer.countDown();
             oneAtATime.close();
+        }
+    }
+
+    /**
+     * Checks again while the only slot is still held by a search that is ending on another thread; gives up
+     * after five seconds, so a slot that never comes back still fails the test.
+     */
+    private static EntitlementService.Outcome checkOnceTheSlotIsBack(EntitlementService service, SessionId session) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (true) {
+            try {
+                return service.check(CGCOM, session);
+            } catch (ProblemException e) {
+                if (e.problem() != ProblemCode.AUTHENTIC_SOURCE_UNAVAILABLE || System.nanoTime() > deadline) {
+                    throw e;
+                }
+                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
+            }
         }
     }
 
