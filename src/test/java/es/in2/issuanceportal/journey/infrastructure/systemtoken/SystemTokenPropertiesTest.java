@@ -28,13 +28,17 @@ class SystemTokenPropertiesTest {
 
     @Test
     void new_fileWithoutDirectory_isRejected() {
-        assertThatThrownBy(() -> new SystemTokenProperties(Provider.FILE, null, Path.of(""), VERIFIER, TIMEOUT))
+        Path noDirectory = Path.of("");
+
+        assertThatThrownBy(() -> new SystemTokenProperties(Provider.FILE, null, noDirectory, VERIFIER, TIMEOUT))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void new_verifierUrlNotAbsolute_isRejected() {
-        assertThatThrownBy(() -> new SystemTokenProperties(Provider.FILE, null, Path.of("/run/secrets"), "/verifier",
+        Path secrets = Path.of("/run/secrets");
+
+        assertThatThrownBy(() -> new SystemTokenProperties(Provider.FILE, null, secrets, "/verifier",
                 TIMEOUT)).isInstanceOf(IllegalArgumentException.class);
     }
 }

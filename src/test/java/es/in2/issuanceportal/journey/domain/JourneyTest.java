@@ -153,7 +153,10 @@ class JourneyTest {
         UUID first = UUID.randomUUID();
         journey.recordIssuanceProcess(first, T0);
 
-        assertThatThrownBy(() -> journey.recordIssuanceProcess(UUID.randomUUID(), T0.plusSeconds(5)))
+        UUID other = UUID.randomUUID();
+        Instant later = T0.plusSeconds(5);
+
+        assertThatThrownBy(() -> journey.recordIssuanceProcess(other, later))
                 .isInstanceOf(IssuanceProcessAlreadyRecordedException.class);
         assertThat(journey.issuanceProcessId()).contains(first);
     }

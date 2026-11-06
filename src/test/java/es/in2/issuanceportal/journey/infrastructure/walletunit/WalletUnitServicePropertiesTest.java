@@ -23,9 +23,11 @@ class WalletUnitServicePropertiesTest {
 
     @Test
     void new_zeroOrNegativeTimeout_isRejected() {
+        Duration negative = Duration.ofSeconds(-1);
+
         assertThatThrownBy(() -> new WalletUnitServiceProperties(Duration.ZERO))
                 .isInstanceOf(IllegalArgumentException.class);
-        assertThatThrownBy(() -> new WalletUnitServiceProperties(Duration.ofSeconds(-1)))
+        assertThatThrownBy(() -> new WalletUnitServiceProperties(negative))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

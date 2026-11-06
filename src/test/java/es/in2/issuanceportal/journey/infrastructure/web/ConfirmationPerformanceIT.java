@@ -6,7 +6,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
-import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
@@ -50,7 +50,7 @@ class ConfirmationPerformanceIT extends SystemIssuanceITSupport {
             nanos.add(System.nanoTime() - start);
         }
 
-        Collections.sort(nanos);
+        nanos.sort(Comparator.naturalOrder());
         double p50 = nanos.get(MEASURED / 2 - 1) / 1_000_000.0;
         double p95 = nanos.get((int) Math.ceil(MEASURED * 0.95) - 1) / 1_000_000.0;
         double max = nanos.getLast() / 1_000_000.0;

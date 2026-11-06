@@ -232,13 +232,15 @@ class IssuanceApiIT {
         answers(networkError());
         IssuanceApi api = api(false, Duration.ofSeconds(5), Duration.ofMillis(60));
 
+        IssuanceRequest request = request();
+
         long start = System.nanoTime();
-        assertThatThrownBy(() -> api.issue(SANDBOX, KEY, request())).isInstanceOf(IssuanceUnavailableException.class);
+        assertThatThrownBy(() -> api.issue(SANDBOX, KEY, request)).isInstanceOf(IssuanceUnavailableException.class);
         long elapsedMillis = Duration.ofNanos(System.nanoTime() - start).toMillis();
 
         // Waits of 60, 120 and 240 ms, each between half and one and a half times: 210 to 630 ms in all.
-        assertThat(elapsedMillis).isGreaterThanOrEqualTo(210 - 20);
-        assertThat(elapsedMillis).isLessThan(630 + 3_000);
+        assertThat(elapsedMillis).isGreaterThanOrEqualTo(210 - 20)
+                .isLessThan(630 + 3_000);
     }
 
     @Test
@@ -372,7 +374,7 @@ class IssuanceApiIT {
         waitUntil(() -> {
             try {
                 return api.issue(SANDBOX, UUID.randomUUID(), request()).processId().equals(PROCESS);
-            } catch (IssuanceUnavailableException e) {
+            } catch (IssuanceUnavailableException _) {
                 return false;
             }
         });
@@ -505,7 +507,10 @@ class IssuanceApiIT {
         answers(issued());
         tokens.failWith(SystemTokenUnavailableException.Reason.NO_MACHINE_CREDENTIAL);
 
-        assertThatThrownBy(() -> api().issue(SANDBOX, KEY, request()))
+        IssuanceApi api = api();
+        IssuanceRequest request = request();
+
+        assertThatThrownBy(() -> api.issue(SANDBOX, KEY, request))
                 .isInstanceOf(SystemTokenUnavailableException.class);
 
         assertThat(issuer.findAll(anyRequestedFor(anyUrl()))).isEmpty();

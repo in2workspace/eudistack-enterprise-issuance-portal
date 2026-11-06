@@ -109,7 +109,7 @@ final class RestClientIssuanceApi implements IssuanceApi {
         try {
             return retry.executeSupplier(() -> circuit.executeSupplier(
                     () -> attempt(tenant, idempotencyKey, token, body)));
-        } catch (CallNotPermittedException e) {
+        } catch (CallNotPermittedException _) {
             log.warn("The circuit of the issuance API of tenant {} is {}: not called", tenant, circuit.getState());
             throw new IssuanceUnavailableException(IssuanceUnavailableException.Reason.CIRCUIT_OPEN);
         } catch (RetryableFailure e) {
@@ -133,7 +133,7 @@ final class RestClientIssuanceApi implements IssuanceApi {
                 .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
                 .slidingWindowSize(properties.circuitMinimumCalls())
                 .minimumNumberOfCalls(properties.circuitMinimumCalls())
-                .failureRateThreshold(properties.circuitFailureRatePercent())
+                .failureRateThreshold((float) properties.circuitFailureRatePercent())
                 .waitDurationInOpenState(properties.circuitWaitInOpenState())
                 .permittedNumberOfCallsInHalfOpenState(1)
                 .recordException(e -> e instanceof RetryableFailure || e instanceof IssuanceUnavailableException)
@@ -160,7 +160,7 @@ final class RestClientIssuanceApi implements IssuanceApi {
             log.warn("The issuance API of tenant {} did not answer: {}", tenant,
                     e.getCause() == null ? "I/O error" : e.getCause().getClass().getSimpleName());
             throw new RetryableFailure(IssuanceUnavailableException.Reason.NETWORK, null);
-        } catch (RestClientException e) {
+        } catch (RestClientException _) {
             log.warn("The issuance API of tenant {} sent a response that cannot be read", tenant);
             throw new IssuanceRejectedException(Reason.UNEXPECTED_RESPONSE);
         }
@@ -220,7 +220,7 @@ final class RestClientIssuanceApi implements IssuanceApi {
             String segment = path.substring(path.lastIndexOf('/') + 1);
             UUID id = UUID.fromString(segment);
             return id.toString().equalsIgnoreCase(segment) ? Optional.of(id) : Optional.empty();
-        } catch (IllegalArgumentException | NullPointerException e) {
+        } catch (IllegalArgumentException | NullPointerException _) {
             return Optional.empty();
         }
     }

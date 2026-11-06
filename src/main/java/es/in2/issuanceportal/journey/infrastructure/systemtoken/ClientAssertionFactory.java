@@ -26,7 +26,7 @@ final class ClientAssertionFactory {
         String clientId = identity.credential().clientId();
         try {
             CnfBindingValidator.validate(identity.privateKey(), identity.credential());
-        } catch (CredentialKeyMismatchException e) {
+        } catch (CredentialKeyMismatchException _) {
             // Only the fact is logged: the exception message is for the SDK's callers, not for the logs.
             log.warn("The private key of tenant {} machine credential does not match the credential's cnf key",
                     identity.credential().tenant());

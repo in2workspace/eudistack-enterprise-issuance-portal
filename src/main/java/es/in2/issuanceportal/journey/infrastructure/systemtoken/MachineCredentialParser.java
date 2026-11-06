@@ -31,7 +31,7 @@ final class MachineCredentialParser {
             String privateKey = key.isObject() ? key.toString() : key.asText();
             return Optional.of(new MachineIdentity(
                     MachineCredential.parse(credential.asText()), EcKeyLoader.loadPrivateKey(privateKey)));
-        } catch (Exception e) {
+        } catch (Exception _) {
             return Optional.empty();
         }
     }

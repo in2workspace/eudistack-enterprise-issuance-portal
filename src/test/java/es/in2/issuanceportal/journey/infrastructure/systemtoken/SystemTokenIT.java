@@ -42,6 +42,7 @@ import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -336,9 +337,15 @@ class SystemTokenIT {
         SystemTokenProperties properties = new SystemTokenProperties(Provider.FILE, null, secrets,
                 "http://localhost:" + verifier.port() + "/verifier", Duration.ofSeconds(5));
 
-        SystemTokenConfiguration.providerFor(properties, PUBLIC_HOSTS, clock, () -> {
+        AtomicBoolean ssmClientRequested = new AtomicBoolean();
+
+        SystemTokenProvider provider = SystemTokenConfiguration.providerFor(properties, PUBLIC_HOSTS, clock, () -> {
+            ssmClientRequested.set(true);
             throw new AssertionError("No SSM client with the file provider");
         });
+
+        assertThat(provider).isNotNull();
+        assertThat(ssmClientRequested).isFalse();
     }
 
     private static Map<String, String> form(String body) {

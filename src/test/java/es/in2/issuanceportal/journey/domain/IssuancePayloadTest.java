@@ -35,8 +35,8 @@ class IssuancePayloadTest {
         Map<String, Object> payload = IssuancePayload.build(DOCTORID, IDENTITY, CLAIMS);
 
         assertThat(payload).containsOnlyKeys("givenName", "familyName", "personal_administrative_number",
-                "medical_board", "medical_speciality", "legally_entitled");
-        assertThat(payload).containsEntry("givenName", "Elena")
+                "medical_board", "medical_speciality", "legally_entitled")
+                .containsEntry("givenName", "Elena")
                 .containsEntry("familyName", "Ruiz Prieto")
                 .containsEntry("personal_administrative_number", "280000001")
                 .containsEntry("medical_board", List.of("Colegio de Medicos de Prueba"))
@@ -80,14 +80,18 @@ class IssuancePayloadTest {
     void build_identityFieldWithoutValue_isIncomplete() {
         Map<String, String> noEmail = Map.of("given_name", "Elena", "family_name", "Ruiz");
 
-        assertThatThrownBy(() -> IssuancePayload.build(Map.of("email", "identity.email"), noEmail, CLAIMS))
+        Map<String, String> placement = Map.of("email", "identity.email");
+
+        assertThatThrownBy(() -> IssuancePayload.build(placement, noEmail, CLAIMS))
                 .isInstanceOf(IncompletePlacementException.class);
     }
 
     @Test
     void build_unknownOriginOrShape_isIncomplete() {
         for (String origin : new String[] {"wallet.given_name", "given_name", "identity.", ".given_name", ""}) {
-            assertThatThrownBy(() -> IssuancePayload.build(Map.of("givenName", origin), IDENTITY, CLAIMS))
+            Map<String, String> placement = Map.of("givenName", origin);
+
+            assertThatThrownBy(() -> IssuancePayload.build(placement, IDENTITY, CLAIMS))
                     .as(origin)
                     .isInstanceOf(IncompletePlacementException.class);
         }

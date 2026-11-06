@@ -27,11 +27,11 @@ class IssuanceRecordTest {
 
     @Test
     void fromJson_keyOnly_readsTheSameWithoutOfferNorOnboarding() {
-        IssuanceRecord record = IssuanceRecord.fromJson(IssuanceRecord.withKey(KEY).toJson());
+        IssuanceRecord issuanceRecord = IssuanceRecord.fromJson(IssuanceRecord.withKey(KEY).toJson());
 
-        assertThat(record).isEqualTo(IssuanceRecord.withKey(KEY));
-        assertThat(record.offerUri()).isEmpty();
-        assertThat(record.onboarding()).isEmpty();
+        assertThat(issuanceRecord).isEqualTo(IssuanceRecord.withKey(KEY));
+        assertThat(issuanceRecord.offerUri()).isEmpty();
+        assertThat(issuanceRecord.onboarding()).isEmpty();
     }
 
     @Test

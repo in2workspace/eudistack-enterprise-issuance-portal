@@ -25,9 +25,9 @@ final class SsmMachineCredentialSource implements MachineCredentialSource {
         try {
             String content = ssm.getParameter(request -> request.name(name).withDecryption(true)).parameter().value();
             return content == null ? Optional.empty() : MachineCredentialParser.parse(content);
-        } catch (ParameterNotFoundException e) {
+        } catch (ParameterNotFoundException _) {
             return Optional.empty();
-        } catch (SdkException e) {
+        } catch (SdkException _) {
             throw new SystemTokenUnavailableException(SystemTokenUnavailableException.Reason.SECRET_STORE_UNAVAILABLE);
         }
     }

@@ -326,7 +326,9 @@ class IssuanceServiceTest {
     void confirm_sessionWithoutJourney_isJourneyClosed() {
         configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, SessionId.generate(), EMAIL))
+        SessionId unknown = SessionId.generate();
+
+        assertThatThrownBy(() -> service.confirm(CGCOM, unknown, EMAIL))
                 .isInstanceOf(JourneyClosedException.class);
 
         assertThat(api.calls()).isEmpty();

@@ -147,7 +147,7 @@ class ConfirmationApiIT {
                 try {
                     jdbc.sql("SELECT id FROM " + tenant.schema() + ".journey WHERE id = :id FOR UPDATE NOWAIT")
                             .param("id", probedJourney).query(UUID.class).optional();
-                } catch (DataAccessException e) {
+                } catch (DataAccessException _) {
                     rowLockedWhileAsked.set(true);
                 }
             }
@@ -316,8 +316,8 @@ class ConfirmationApiIT {
         assertThat(result.getResponse().getContentAsString()).doesNotContain("openid-credential-offer");
         Map<String, Object> row = jdbc.sql("SELECT state, step FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
                 .param("id", journeyOf(session)).query().singleRow();
-        assertThat(row.get("state")).isEqualTo("in_progress");
-        assertThat(row.get("step")).isEqualTo("entitlement_confirmed");
+        assertThat(row).containsEntry("state", "in_progress")
+                .containsEntry("step", "entitlement_confirmed");
         IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, session, Section.ISSUANCE).orElseThrow());
         assertThat(stored.offerUri()).isEmpty();
         assertThat(stored.offerExpiresAt()).isNull();
@@ -325,8 +325,8 @@ class ConfirmationApiIT {
         assertThat(stored.onboardingExpiresAt()).isNull();
         String everything = logs.list.stream().map(ConfirmationApiIT::describe).collect(Collectors.joining("\n"));
         assertThat(everything).contains("ISSUANCE_REQUESTED", "result=onboarding_failed",
-                "ONBOARDING_TICKET_REQUESTED", "result=failed");
-        assertThat(everything).doesNotContain("result=issued", EMAIL, "openid-credential-offer");
+                "ONBOARDING_TICKET_REQUESTED", "result=failed")
+                .doesNotContain("result=issued", EMAIL, "openid-credential-offer");
     }
 
     @Test
@@ -358,8 +358,8 @@ class ConfirmationApiIT {
         mvc.perform(confirmation(entitledJourney(), body)).andExpect(status().isOk());
 
         String everything = logs.list.stream().map(ConfirmationApiIT::describe).collect(Collectors.joining("\n"));
-        assertThat(everything).contains("ONBOARDING_TICKET_REQUESTED", "result=created", "result=failed");
-        assertThat(everything).doesNotContain(EMAIL, "ticket-1", "wallet.test", "openid-credential-offer");
+        assertThat(everything).contains("ONBOARDING_TICKET_REQUESTED", "result=created", "result=failed")
+                .doesNotContain(EMAIL, "ticket-1", "wallet.test", "openid-credential-offer");
     }
 
     @Test
@@ -597,8 +597,8 @@ class ConfirmationApiIT {
         String everything = logs.list.stream().map(ConfirmationApiIT::describe).collect(Collectors.joining("\n"));
         assertThat(logs.list).isNotEmpty();
         assertThat(everything).contains("ISSUANCE_REQUESTED", "result=issued", "result=unavailable",
-                "result=rejected", "result=system_token_unavailable", "COMPLETED");
-        assertThat(everything).doesNotContain(EMAIL, "not-an-email", GIVEN_NAME, FAMILY_NAME, DNI, ADMINISTRATIVE_NUMBER,
+                "result=rejected", "result=system_token_unavailable", "COMPLETED")
+                .doesNotContain(EMAIL, "not-an-email", GIVEN_NAME, FAMILY_NAME, DNI, ADMINISTRATIVE_NUMBER,
                 "openid-credential-offer", "credential_offer_uri");
     }
 
@@ -614,8 +614,8 @@ class ConfirmationApiIT {
     private void assertInProgressWithEntitlement(SessionId session) {
         Map<String, Object> row = jdbc.sql("SELECT state, step, issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
                 .param("id", journeyOf(session)).query().singleRow();
-        assertThat(row.get("state")).isEqualTo("in_progress");
-        assertThat(row.get("step")).isEqualTo("entitlement_confirmed");
+        assertThat(row).containsEntry("state", "in_progress")
+                .containsEntry("step", "entitlement_confirmed");
         assertThat(row.get("issuance_process_id")).isNull();
         assertThat(sessions.read(SANDBOX, session, Section.ENTITLEMENT)).isPresent();
         assertThat(IssuanceRecord.fromJson(sessions.read(SANDBOX, session, Section.ISSUANCE).orElseThrow()).offerUri())

@@ -73,7 +73,7 @@ final class RestClientOnboardingTickets implements OnboardingTickets {
             log.warn("The Wallet Unit Service of tenant {} did not answer: {}", tenant,
                     e.getCause() == null ? "I/O error" : e.getCause().getClass().getSimpleName());
             throw new OnboardingTicketException(Reason.UNAVAILABLE);
-        } catch (RestClientException e) {
+        } catch (RestClientException _) {
             log.warn("The Wallet Unit Service of tenant {} sent a response that cannot be read", tenant);
             throw new OnboardingTicketException(Reason.UNEXPECTED_RESPONSE);
         }

@@ -80,19 +80,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         assertThat(issuance.getHeader("Authorization")).isEqualTo("Bearer " + ACCESS_TOKEN);
         assertThat(issuance.getHeader("X-Idempotency-Key")).isEqualTo(key.toString());
         JsonNode body = JSON.readTree(issuance.getBodyAsString());
-        assertThat(body.get("credential_configuration_id").asText()).isEqualTo("doctorid.sd.1");
-        assertThat(body.get("email").asText()).isEqualTo(EMAIL);
-        assertThat(body.get("delivery").asText()).isEqualTo("ui");
-        assertThat(body.get("grant_type").asText()).isEqualTo("authorization_code");
-        JsonNode payload = body.get("payload");
-        assertThat(payload.get("givenName").asText()).isEqualTo(GIVEN_NAME);
-        assertThat(payload.get("familyName").asText()).isEqualTo(FAMILY_NAME);
-        assertThat(payload.get("personal_administrative_number").asText()).isEqualTo(ADMINISTRATIVE_NUMBER);
-        assertThat(payload.get("medical_board").toString()).contains(MEDICAL_BOARD);
-        assertThat(payload.get("medical_speciality").toString()).contains(SPECIALITY);
-        assertThat(payload.get("legally_entitled").asBoolean()).isTrue();
-        assertThat(payload.fieldNames()).toIterable().containsExactlyInAnyOrder("givenName", "familyName",
-                "personal_administrative_number", "medical_board", "medical_speciality", "legally_entitled");
+        assertIssuanceBody(body);
         List<LoggedRequest> tickets = requestsTo(TICKETS_PATH);
         assertThat(tickets).hasSize(1);
         assertThat(tickets.getFirst().getHeader("Authorization")).isEqualTo("Bearer " + ACCESS_TOKEN);
@@ -101,9 +89,9 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         assertThat(ticket.get("credentialOffer").asText()).isEqualTo(OFFER);
         assertThat(ticket.get("expiresIn").asLong()).isBetween(530L, 540L);
         Map<String, Object> row = rowOf(session);
-        assertThat(row.get("state")).isEqualTo("completed");
-        assertThat(row.get("step")).isEqualTo("offer_obtained");
-        assertThat(row.get("issuance_process_id")).isEqualTo(key);
+        assertThat(row).containsEntry("state", "completed")
+                .containsEntry("step", "offer_obtained")
+                .containsEntry("issuance_process_id", key);
         assertHolderTokenNeverSent();
     }
 
@@ -121,7 +109,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
                 .andExpect(jsonPath("$.onboarding_expires_at").doesNotExist());
 
         assertThat(requestsTo(TICKETS_PATH)).isEmpty();
-        assertThat(rowOf(session).get("state")).isEqualTo("completed");
+        assertThat(rowOf(session)).containsEntry("state", "completed");
         assertHolderTokenNeverSent();
     }
 
@@ -350,9 +338,9 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
 
         assertThat(result.getResponse().getContentAsString()).doesNotContain("openid-credential-offer");
         Map<String, Object> row = rowOf(session);
-        assertThat(row.get("state")).isEqualTo("in_progress");
-        assertThat(row.get("step")).isEqualTo("entitlement_confirmed");
-        assertThat(row.get("issuance_process_id")).isEqualTo(keyOf(session));
+        assertThat(row).containsEntry("state", "in_progress")
+                .containsEntry("step", "entitlement_confirmed")
+                .containsEntry("issuance_process_id", keyOf(session));
         IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, session, Section.ISSUANCE).orElseThrow());
         assertThat(stored.offerUri()).isEmpty();
         assertThat(stored.onboarding()).isEmpty();
@@ -394,7 +382,9 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
                     .withBody("{\"error\":\"invalid_client\"}")));
             case TICKET_FAILS -> WIRE.stubFor(post(urlEqualTo(TICKETS_PATH)).willReturn(aResponse().withStatus(500)
                     .withBody("{\"detail\":\"" + EMAIL + " " + OFFER + "\"}")));
-            default -> { }
+            default -> {
+                // everything works: already stubbed by everythingWorks()
+            }
         }
         SessionId session = entitledJourney();
 
@@ -429,10 +419,26 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
                 .param("id", journeyOf(session)).query(Long.class).single();
     }
 
+    private static void assertIssuanceBody(JsonNode body) {
+        assertThat(body.get("credential_configuration_id").asText()).isEqualTo("doctorid.sd.1");
+        assertThat(body.get("email").asText()).isEqualTo(EMAIL);
+        assertThat(body.get("delivery").asText()).isEqualTo("ui");
+        assertThat(body.get("grant_type").asText()).isEqualTo("authorization_code");
+        JsonNode payload = body.get("payload");
+        assertThat(payload.get("givenName").asText()).isEqualTo(GIVEN_NAME);
+        assertThat(payload.get("familyName").asText()).isEqualTo(FAMILY_NAME);
+        assertThat(payload.get("personal_administrative_number").asText()).isEqualTo(ADMINISTRATIVE_NUMBER);
+        assertThat(payload.get("medical_board").toString()).contains(MEDICAL_BOARD);
+        assertThat(payload.get("medical_speciality").toString()).contains(SPECIALITY);
+        assertThat(payload.get("legally_entitled").asBoolean()).isTrue();
+        assertThat(payload.fieldNames()).toIterable().containsExactlyInAnyOrder("givenName", "familyName",
+                "personal_administrative_number", "medical_board", "medical_speciality", "legally_entitled");
+    }
+
     private void assertStillInProgressWithEntitlement(SessionId session) {
         Map<String, Object> row = rowOf(session);
-        assertThat(row.get("state")).isEqualTo("in_progress");
-        assertThat(row.get("step")).isEqualTo("entitlement_confirmed");
+        assertThat(row).containsEntry("state", "in_progress")
+                .containsEntry("step", "entitlement_confirmed");
         assertThat(row.get("issuance_process_id")).isNull();
         assertThat(sessions.read(SANDBOX, session, Section.ENTITLEMENT)).isPresent();
     }

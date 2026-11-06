@@ -27,7 +27,7 @@ final class FileMachineCredentialSource implements MachineCredentialSource {
         }
         try {
             return MachineCredentialParser.parse(Files.readString(file, StandardCharsets.UTF_8));
-        } catch (IOException e) {
+        } catch (IOException _) {
             throw new SystemTokenUnavailableException(SystemTokenUnavailableException.Reason.SECRET_STORE_UNAVAILABLE);
         }
     }

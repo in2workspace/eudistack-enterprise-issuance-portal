@@ -95,7 +95,7 @@ final class VerifierTokenGrant implements TokenGrant {
             log.warn("The Verifier of tenant {} did not answer the token request: {}", tenant,
                     e.getCause() == null ? "I/O error" : e.getCause().getClass().getSimpleName());
             throw new SystemTokenUnavailableException(Reason.VERIFIER_UNREACHABLE);
-        } catch (RestClientException e) {
+        } catch (RestClientException _) {
             log.warn("The Verifier of tenant {} sent a token response that cannot be read", tenant);
             throw new SystemTokenUnavailableException(Reason.VERIFIER_REJECTED);
         }

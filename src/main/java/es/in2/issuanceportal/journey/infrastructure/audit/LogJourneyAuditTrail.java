@@ -22,6 +22,13 @@ import static net.logstash.logback.argument.StructuredArguments.kv;
 @Component
 class LogJourneyAuditTrail implements JourneyAuditTrail {
 
+    private static final String EVENT = "event";
+    private static final String JOURNEY_ID = "journey_id";
+    private static final String EVENT_ID = "event_id";
+    private static final String TENANT = "tenant";
+    private static final String RESULT = "result";
+    private static final String OCCURRED_AT = "occurred_at";
+
     private final Logger audit;
 
     @Autowired
@@ -51,13 +58,13 @@ class LogJourneyAuditTrail implements JourneyAuditTrail {
     public void append(TenantId tenant, IssuanceRequested event) {
         try {
             audit.info("issuance {} {} {} {} {} {} {}",
-                    kv("event", "ISSUANCE_REQUESTED"),
-                    kv("journey_id", event.journeyId()),
-                    kv("event_id", event.eventId()),
-                    kv("tenant", tenant.value()),
-                    kv("result", event.result().code()),
+                    kv(EVENT, "ISSUANCE_REQUESTED"),
+                    kv(JOURNEY_ID, event.journeyId()),
+                    kv(EVENT_ID, event.eventId()),
+                    kv(TENANT, tenant.value()),
+                    kv(RESULT, event.result().code()),
                     kv("issuance_process_id", event.issuanceProcessId().orElse(null)),
-                    kv("occurred_at", event.occurredAt()));
+                    kv(OCCURRED_AT, event.occurredAt()));
         } catch (RuntimeException e) {
             audit.error("Could not record the issuance request {} of journey {}",
                     event.eventId(), event.journeyId(), e);
@@ -67,13 +74,13 @@ class LogJourneyAuditTrail implements JourneyAuditTrail {
     @Override
     public void append(TenantId tenant, OnboardingTicketRequested event) {
         try {
-            audit.info("onboarding ticket {} {} {} {} {}",
-                    kv("event", "ONBOARDING_TICKET_REQUESTED"),
-                    kv("journey_id", event.journeyId()),
-                    kv("event_id", event.eventId()),
-                    kv("tenant", tenant.value()),
-                    kv("result", event.result().code()),
-                    kv("occurred_at", event.occurredAt()));
+            audit.info("onboarding ticket {} {} {} {} {} {}",
+                    kv(EVENT, "ONBOARDING_TICKET_REQUESTED"),
+                    kv(JOURNEY_ID, event.journeyId()),
+                    kv(EVENT_ID, event.eventId()),
+                    kv(TENANT, tenant.value()),
+                    kv(RESULT, event.result().code()),
+                    kv(OCCURRED_AT, event.occurredAt()));
         } catch (RuntimeException e) {
             audit.error("Could not record the onboarding ticket request {} of journey {}",
                     event.eventId(), event.journeyId(), e);
@@ -87,14 +94,14 @@ class LogJourneyAuditTrail implements JourneyAuditTrail {
     private void write(TenantId tenant, Event event) {
         try {
             audit.info("journey {} {} {} {} {} {} {} {}",
-                    kv("event", event.kind().name()),
-                    kv("journey_id", event.journeyId()),
-                    kv("event_id", event.eventId()),
-                    kv("tenant", tenant.value()),
+                    kv(EVENT, event.kind().name()),
+                    kv(JOURNEY_ID, event.journeyId()),
+                    kv(EVENT_ID, event.eventId()),
+                    kv(TENANT, tenant.value()),
                     kv("state", event.state().code()),
                     kv("step", event.step().code()),
                     kv("withdrawal_reason", event.withdrawalReason().map(WithdrawalReason::code).orElse(null)),
-                    kv("occurred_at", event.occurredAt()));
+                    kv(OCCURRED_AT, event.occurredAt()));
         } catch (RuntimeException e) {
             audit.error("Could not record the {} event {} of journey {}",
                     event.kind(), event.eventId(), event.journeyId(), e);

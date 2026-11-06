@@ -22,7 +22,7 @@ final class RetryAfter {
         if (value.chars().allMatch(Character::isDigit)) {
             try {
                 return Optional.of(Duration.ofSeconds(Long.parseLong(value)));
-            } catch (NumberFormatException e) {
+            } catch (NumberFormatException _) {
                 return Optional.empty();
             }
         }
@@ -30,7 +30,7 @@ final class RetryAfter {
             Instant date = ZonedDateTime.parse(value, DateTimeFormatter.RFC_1123_DATE_TIME).toInstant();
             Duration wait = Duration.between(now, date);
             return Optional.of(wait.isNegative() ? Duration.ZERO : wait);
-        } catch (DateTimeParseException e) {
+        } catch (DateTimeParseException _) {
             return Optional.empty();
         }
     }
