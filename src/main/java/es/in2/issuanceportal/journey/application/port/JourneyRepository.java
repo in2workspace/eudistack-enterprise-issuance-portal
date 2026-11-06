@@ -20,7 +20,21 @@ public interface JourneyRepository {
      */
     boolean update(TenantId tenant, Journey journey, JourneyState readInState);
 
+    /**
+     * Stores the issuance process of the journey on its own, so that a journey read earlier without the
+     * process can never erase it when it is saved with {@link #update}, which does not write it. A journey has
+     * a single process: false when it already has a different one, and nothing was written.
+     */
+    boolean recordIssuanceProcess(TenantId tenant, UUID journeyId, UUID processId);
+
     Optional<Journey> findById(TenantId tenant, UUID id);
+
+    /**
+     * Like {@link #findById} but locks the journey's row until the transaction ends, so a second
+     * confirmation of the same journey waits for the first (design.md AD-12). Outside a transaction the
+     * lock is released at once and protects nothing: call it inside one.
+     */
+    Optional<Journey> findByIdForUpdate(TenantId tenant, UUID id);
 
     // --- Expiry (design.md AD-4). These read and write the journey and its session in one statement,
     // so a request that renews the activity in between is never overwritten by the sweep.

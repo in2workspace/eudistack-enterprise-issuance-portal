@@ -46,6 +46,49 @@ issuance-portal:
     # answers 503 at once. Both at least 1, or the service does not start.
     max-concurrent-lookups: ${PORTAL_AUTHENTIC_SOURCE_MAX_LOOKUPS:100}
     max-concurrent-lookups-per-tenant: ${PORTAL_AUTHENTIC_SOURCE_MAX_LOOKUPS_PER_TENANT:20}
+  public-host:
+    # The tenant's public host, {tenant} replaced by the tenant, e.g. {tenant}.127.0.0.1.nip.io:4443 locally.
+    # Sent as X-Forwarded-Host (with X-Forwarded-Proto https) to the Verifier and the Issuer, so each resolves
+    # its public address: the token's iss and the Location of an issuance are built from it.
+    template: ${PORTAL_PUBLIC_HOST_TEMPLATE:}
+  system-token:
+    # How the portal asks the tenant's Verifier for its token as a system (design.md AD-5).
+    # ssm in AWS environments, file in Docker Compose. Empty: the service does not start.
+    provider: ${PORTAL_SYSTEM_TOKEN_PROVIDER:}
+    # ssm provider: the tenant's SecureString parameter in SSM Parameter Store, {tenant} replaced by the tenant,
+    # e.g. /eudistack/dev/config/apps/issuance-portal/machine-credential/{tenant}. Its value is JSON with
+    # credential (the machine credential's JWT) and privateKey (the mandatee's P-256 key, as a JWK or hex).
+    parameter-template: ${PORTAL_SYSTEM_TOKEN_PARAMETER_TEMPLATE:}
+    # file provider: folder with one <tenant>.json per tenant, with the same content.
+    directory: ${PORTAL_SYSTEM_TOKEN_DIRECTORY:}
+    # The Verifier on the internal network, with its context path, e.g. http://verifier:8082/verifier.
+    verifier-internal-url: ${PORTAL_VERIFIER_INTERNAL_URL:}
+    # How long the Verifier gets to answer.
+    request-timeout: 5s
+  issuance-api:
+    # The Issuer on the internal network, with its context path, e.g. http://issuer-service:8080/issuer.
+    issuer-internal-url: ${PORTAL_ISSUER_INTERNAL_URL:}
+    # How long the Issuer gets to answer each call (EC-07).
+    request-timeout: 10s
+    # Wait before the first retry when the Issuer sends no Retry-After; it doubles on each retry (1, 2, 4 s).
+    retry-initial-wait: 1s
+    # A 503 is retried only when this is on: until the Issuer shares its idempotency between instances
+    # (EUD-254) a retry may create another process. Network errors and timeouts are always retried.
+    retry-on-503: ${PORTAL_ISSUANCE_RETRY_ON_503:false}
+    # Resilience towards the Issuer, each tenant on its own (SEC-25, SEC-27). The waits between retries
+    # carry a random variation of up to 50 % so that parallel confirmations do not retry together.
+    # Issuance calls of a tenant in progress at once, retries included; another one gets 503 issuance_unavailable
+    # without a request to the Issuer.
+    max-concurrent-per-tenant: ${PORTAL_ISSUANCE_MAX_CONCURRENT_PER_TENANT:20}
+    # The circuit opens when this percentage of the last circuit-minimum-calls attempts failed (network
+    # errors, timeouts and 5xx; a 4xx is not a failure). While open, the Issuer is not called.
+    circuit-failure-rate-percent: 50
+    circuit-minimum-calls: 10
+    # After this wait one call goes through to the Issuer: if it succeeds the circuit closes.
+    circuit-wait-in-open-state: 30s
+  wallet-unit-service:
+    # How long the tenant's Wallet Unit Service gets to answer the onboarding ticket; never retried (design.md §3.4).
+    request-timeout: 5s
   incidents:
     mail:
       # ses in AWS environments, local in Docker Compose. Empty: the service does not start.

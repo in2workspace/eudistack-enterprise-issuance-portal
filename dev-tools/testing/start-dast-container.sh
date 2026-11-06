@@ -10,6 +10,7 @@ for variable in CONTAINER_IMAGE CONTAINER_NAME DAST_DB_HOST DAST_DB_PORT \
 done
 
 # Same settings as local-env/compose.yaml in eudistack-platform-dev: local crypto and mail, one proxy in front.
+# No machine credential (EUD-277): a confirmation answers 503 and no Verifier or Issuer is ever called.
 docker run -d --name "${CONTAINER_NAME}" \
   --network host \
   -e SERVER_PORT=8080 \
@@ -22,6 +23,11 @@ docker run -d --name "${CONTAINER_NAME}" \
   -e PORTAL_MAIL_PROVIDER=local \
   -e PORTAL_MAIL_FROM=noreply@mail.local.eudistack.net \
   -e PORTAL_TRUSTED_PROXIES=1 \
+  -e PORTAL_SYSTEM_TOKEN_PROVIDER=file \
+  -e PORTAL_SYSTEM_TOKEN_DIRECTORY=/nonexistent/machine-credentials \
+  -e PORTAL_VERIFIER_INTERNAL_URL=http://localhost:1/verifier \
+  -e PORTAL_ISSUER_INTERNAL_URL=http://localhost:1/issuer \
+  -e PORTAL_PUBLIC_HOST_TEMPLATE='{tenant}.localhost' \
   "${CONTAINER_IMAGE}"
 
 # The service creates the sandbox schema at startup; its portal configuration is loaded at tenant creation,

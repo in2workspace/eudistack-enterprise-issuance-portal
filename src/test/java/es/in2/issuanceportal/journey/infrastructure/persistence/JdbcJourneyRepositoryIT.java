@@ -13,14 +13,24 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -33,6 +43,8 @@ class JdbcJourneyRepositoryIT {
     private JourneyRepository repository;
     @Autowired
     private JdbcClient jdbc;
+    @Autowired
+    private PlatformTransactionManager transactionManager;
 
     @Test
     void findById_insertedJourney_returnsIt() {
@@ -44,7 +56,87 @@ class JdbcJourneyRepositoryIT {
         assertThat(read.state()).isEqualTo(JourneyState.IN_PROGRESS);
         assertThat(read.step()).isEqualTo(JourneyStep.STARTED);
         assertThat(read.createdAt()).isEqualTo(journey.createdAt());
-        assertThat(read.issuanceProcessIds()).isEmpty();
+        assertThat(read.issuanceProcessId()).isEmpty();
+    }
+
+    @Test
+    void recordIssuanceProcess_journeyWithoutProcess_isReadBack() {
+        Journey journey = Journey.start(UUID.randomUUID(), now());
+        repository.insert(SANDBOX, journey);
+        UUID process = UUID.randomUUID();
+
+        assertThat(repository.recordIssuanceProcess(SANDBOX, journey.id(), process)).isTrue();
+
+        assertThat(repository.findById(SANDBOX, journey.id()).orElseThrow().issuanceProcessId()).contains(process);
+    }
+
+    @Test
+    void recordIssuanceProcess_sameProcessAgain_isRecordedAndADifferentOneIsNot() {
+        Journey journey = Journey.start(UUID.randomUUID(), now());
+        repository.insert(SANDBOX, journey);
+        UUID process = UUID.randomUUID();
+        repository.recordIssuanceProcess(SANDBOX, journey.id(), process);
+
+        assertThat(repository.recordIssuanceProcess(SANDBOX, journey.id(), process)).isTrue();
+        assertThat(repository.recordIssuanceProcess(SANDBOX, journey.id(), UUID.randomUUID())).isFalse();
+
+        assertThat(repository.findById(SANDBOX, journey.id()).orElseThrow().issuanceProcessId()).contains(process);
+    }
+
+    @Test
+    void update_journeyReadBeforeTheProcessWasRecorded_keepsTheProcess() {
+        Journey journey = Journey.start(UUID.randomUUID(), now());
+        repository.insert(SANDBOX, journey);
+        Journey readWithoutProcess = repository.findById(SANDBOX, journey.id()).orElseThrow();
+        UUID process = UUID.randomUUID();
+        repository.recordIssuanceProcess(SANDBOX, journey.id(), process);
+        readWithoutProcess.reach(JourneyStep.IDENTIFIED, now());
+
+        assertThat(repository.update(SANDBOX, readWithoutProcess, JourneyState.IN_PROGRESS)).isTrue();
+
+        Journey read = repository.findById(SANDBOX, journey.id()).orElseThrow();
+        assertThat(read.issuanceProcessId()).contains(process);
+        assertThat(read.step()).isEqualTo(JourneyStep.IDENTIFIED);
+    }
+
+    @Test
+    void findByIdForUpdate_lockedByAnotherTransaction_waitsUntilItCommits() throws Exception {
+        Journey journey = Journey.start(UUID.randomUUID(), now());
+        repository.insert(SANDBOX, journey);
+        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+        CountDownLatch firstHoldsLock = new CountDownLatch(1);
+        CountDownLatch releaseFirst = new CountDownLatch(1);
+        AtomicBoolean secondGotLock = new AtomicBoolean();
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> first = executor.submit(() -> transaction.executeWithoutResult(status -> {
+                repository.findByIdForUpdate(SANDBOX, journey.id());
+                firstHoldsLock.countDown();
+                await(releaseFirst);
+            }));
+            assertThat(firstHoldsLock.await(10, TimeUnit.SECONDS)).isTrue();
+            Future<?> second = executor.submit(() -> transaction.executeWithoutResult(status -> {
+                repository.findByIdForUpdate(SANDBOX, journey.id());
+                secondGotLock.set(true);
+            }));
+
+            // The second reader is blocked while the first transaction is open.
+            assertThatThrownBy(() -> second.get(1, TimeUnit.SECONDS)).isInstanceOf(TimeoutException.class);
+            assertThat(secondGotLock).isFalse();
+
+            releaseFirst.countDown();
+            first.get(10, TimeUnit.SECONDS);
+            second.get(10, TimeUnit.SECONDS);
+            assertThat(secondGotLock).isTrue();
+        } finally {
+            releaseFirst.countDown();
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void findByIdForUpdate_unknownJourney_returnsEmpty() {
+        assertThat(repository.findByIdForUpdate(SANDBOX, UUID.randomUUID())).isEmpty();
     }
 
     @Test
@@ -160,6 +252,14 @@ class JdbcJourneyRepositoryIT {
     private long sessionRows(UUID journeyId) {
         return jdbc.sql("SELECT count(*) FROM \"sandbox_issuance_portal\".journey_session WHERE journey_id = :j")
                 .param("j", journeyId).query(Long.class).single();
+    }
+
+    private static void await(CountDownLatch latch) {
+        try {
+            latch.await(30, TimeUnit.SECONDS);
+        } catch (InterruptedException _) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private static Instant now() {

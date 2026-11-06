@@ -162,7 +162,7 @@ class JourneyServiceTest {
         used.touch(clock.instant());
         journeys.update(SANDBOX, used, JourneyState.IN_PROGRESS);
         Journey staleRead = Journey.restore(used.id(), JourneyState.IN_PROGRESS, JourneyStep.STARTED, null, null,
-                List.of(), used.createdAt(), used.createdAt(), null);
+                null, used.createdAt(), used.createdAt(), null);
         staleRead.withdraw(WithdrawalReason.EXPIRED, clock.instant());
 
         assertThat(journeys.updateIfInactive(SANDBOX, staleRead, clock.instant().minus(Journey.INACTIVITY_LIMIT)))
