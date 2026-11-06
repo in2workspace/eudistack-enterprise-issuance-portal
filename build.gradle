@@ -68,6 +68,8 @@ dependencies {
     // --- Issuance API client ---
     // Bounded retries with Retry-After towards the Issuer (design.md AD-6): the core module only, no AOP.
     implementation 'io.github.resilience4j:resilience4j-retry:2.3.0'
+    implementation 'io.github.resilience4j:resilience4j-bulkhead:2.3.0'
+    implementation 'io.github.resilience4j:resilience4j-circuitbreaker:2.3.0'
 
     // --- Scheduling ---
     // The expiry job runs on one instance per tenant at a time (design.md AD-4).

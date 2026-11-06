@@ -20,6 +20,13 @@ public interface JourneyRepository {
      */
     boolean update(TenantId tenant, Journey journey, JourneyState readInState);
 
+    /**
+     * Stores the issuance process of the journey on its own, so that a journey read earlier without the
+     * process can never erase it when it is saved with {@link #update}, which does not write it. A journey has
+     * a single process: false when it already has a different one, and nothing was written.
+     */
+    boolean recordIssuanceProcess(TenantId tenant, UUID journeyId, UUID processId);
+
     Optional<Journey> findById(TenantId tenant, UUID id);
 
     /**

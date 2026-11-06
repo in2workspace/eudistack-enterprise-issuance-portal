@@ -75,6 +75,17 @@ issuance-portal:
     # A 503 is retried only when this is on: until the Issuer shares its idempotency between instances
     # (EUD-254) a retry may create another process. Network errors and timeouts are always retried.
     retry-on-503: ${PORTAL_ISSUANCE_RETRY_ON_503:false}
+    # Resilience towards the Issuer, each tenant on its own (SEC-25, SEC-27). The waits between retries
+    # carry a random variation of up to 50 % so that parallel confirmations do not retry together.
+    # Issuance calls of a tenant in progress at once, retries included; another one gets 503 issuance_unavailable
+    # without a request to the Issuer.
+    max-concurrent-per-tenant: ${PORTAL_ISSUANCE_MAX_CONCURRENT_PER_TENANT:20}
+    # The circuit opens when this percentage of the last circuit-minimum-calls attempts failed (network
+    # errors, timeouts and 5xx; a 4xx is not a failure). While open, the Issuer is not called.
+    circuit-failure-rate-percent: 50
+    circuit-minimum-calls: 10
+    # After this wait one call goes through to the Issuer: if it succeeds the circuit closes.
+    circuit-wait-in-open-state: 30s
   wallet-unit-service:
     # How long the tenant's Wallet Unit Service gets to answer the onboarding ticket; never retried (design.md §3.4).
     request-timeout: 5s

@@ -38,6 +38,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
+import java.util.function.BooleanSupplier;
 import java.util.stream.Collectors;
 
 import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
@@ -92,8 +98,14 @@ class IssuanceApiIT {
     }
 
     private IssuanceApi api(boolean retryOn503, Duration timeout, Duration initialWait) {
+        return api(retryOn503, timeout, initialWait, 20, 10, Duration.ofSeconds(30));
+    }
+
+    private IssuanceApi api(boolean retryOn503, Duration timeout, Duration initialWait, int maxConcurrentPerTenant,
+                            int circuitMinimumCalls, Duration circuitWait) {
         IssuerApiProperties properties = new IssuerApiProperties(
-                "http://localhost:" + issuer.port() + "/issuer", timeout, initialWait, retryOn503);
+                "http://localhost:" + issuer.port() + "/issuer", timeout, initialWait, retryOn503,
+                maxConcurrentPerTenant, 50, circuitMinimumCalls, circuitWait);
         return new IssuerApiConfiguration().issuanceApi(properties,
                 new PublicHostProperties("{tenant}.127.0.0.1.nip.io:4443"), tokens, clock);
     }
@@ -215,8 +227,8 @@ class IssuanceApiIT {
     }
 
     @Test
-    @DisplayName("EC-07 — without Retry-After the waits are 1, 2 and 4 times the initial wait")
-    void issue_noRetryAfter_waitsDouble() {
+    @DisplayName("EC-07, SEC-25 — without Retry-After the waits are 1, 2 and 4 times the initial wait, each varied by up to half")
+    void issue_noRetryAfter_waitsDoubleWithJitter() {
         answers(networkError());
         IssuanceApi api = api(false, Duration.ofSeconds(5), Duration.ofMillis(60));
 
@@ -224,7 +236,156 @@ class IssuanceApiIT {
         assertThatThrownBy(() -> api.issue(SANDBOX, KEY, request())).isInstanceOf(IssuanceUnavailableException.class);
         long elapsedMillis = Duration.ofNanos(System.nanoTime() - start).toMillis();
 
-        assertThat(elapsedMillis).isGreaterThanOrEqualTo(60 + 120 + 240 - 20);
+        // Waits of 60, 120 and 240 ms, each between half and one and a half times: 210 to 630 ms in all.
+        assertThat(elapsedMillis).isGreaterThanOrEqualTo(210 - 20);
+        assertThat(elapsedMillis).isLessThan(630 + 3_000);
+    }
+
+    @Test
+    @DisplayName("SEC-25 — the wait before a retry is within half and one and a half times its base, and it varies")
+    void withJitter_manyWaits_stayWithinBoundsAndVary() {
+        List<Long> waits = new ArrayList<>();
+        for (int i = 0; i < 500; i++) {
+            waits.add(RestClientIssuanceApi.withJitter(4_000));
+        }
+
+        assertThat(waits).allSatisfy(wait -> assertThat(wait).isBetween(2_000L, 6_000L));
+        assertThat(waits.stream().distinct().count()).isGreaterThan(50);
+    }
+
+    @Test
+    @DisplayName("SEC-27 — with the tenant's issuances at the limit another fails at once, without calling the Issuer")
+    void issue_tenantAtItsLimit_isUnavailableWithoutCallingTheIssuer() throws Exception {
+        answers(issued().withFixedDelay(1_500), issued());
+        IssuanceApi api = api(false, Duration.ofSeconds(5), Duration.ofMillis(1), 1, 10, Duration.ofSeconds(30));
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<IssuanceResult> slow = pool.submit(() -> api.issue(SANDBOX, KEY, request()));
+            waitUntil(() -> requests().size() == 1);
+
+            Throwable thrown = thrownBy(() -> api.issue(SANDBOX, UUID.randomUUID(), request()));
+
+            assertThat(thrown).isInstanceOfSatisfying(IssuanceUnavailableException.class,
+                    e -> assertThat(e.reason()).isEqualTo(IssuanceUnavailableException.Reason.TOO_MANY_CALLS));
+            assertThat(requests()).hasSize(1);
+            assertThat(slow.get(10, TimeUnit.SECONDS).processId()).isEqualTo(PROCESS);
+            assertThat(api.issue(SANDBOX, UUID.randomUUID(), request()).processId()).isEqualTo(PROCESS);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("SEC-27 — the limit is the tenant's: another tenant is still served")
+    void issue_otherTenantWhileOneIsAtItsLimit_isServed() throws Exception {
+        answers(issued().withFixedDelay(1_500), issued());
+        IssuanceApi api = api(false, Duration.ofSeconds(5), Duration.ofMillis(1), 1, 10, Duration.ofSeconds(30));
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        try {
+            Future<IssuanceResult> slow = pool.submit(() -> api.issue(SANDBOX, KEY, request()));
+            waitUntil(() -> requests().size() == 1);
+
+            IssuanceResult other = api.issue(new TenantId("kpmg"), UUID.randomUUID(), request());
+
+            assertThat(other.processId()).isEqualTo(PROCESS);
+            slow.get(10, TimeUnit.SECONDS);
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    @DisplayName("SEC-25 — after repeated 5xx the circuit opens and the Issuer is no longer called")
+    void issue_repeatedServerErrors_openTheCircuit() {
+        answers(status(500));
+        IssuanceApi api = api(false, Duration.ofSeconds(5), Duration.ofMillis(1), 20, 3, Duration.ofSeconds(30));
+        for (int i = 0; i < 3; i++) {
+            assertThat(thrownBy(() -> api.issue(SANDBOX, UUID.randomUUID(), request())))
+                    .isInstanceOfSatisfying(IssuanceUnavailableException.class,
+                            e -> assertThat(e.reason()).isEqualTo(IssuanceUnavailableException.Reason.SERVER_ERROR));
+        }
+
+        Throwable thrown = thrownBy(() -> api.issue(SANDBOX, UUID.randomUUID(), request()));
+
+        assertThat(thrown).isInstanceOfSatisfying(IssuanceUnavailableException.class,
+                e -> assertThat(e.reason()).isEqualTo(IssuanceUnavailableException.Reason.CIRCUIT_OPEN));
+        assertThat(requests()).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("SEC-25 — the circuit is the tenant's: another tenant still reaches the Issuer")
+    void issue_circuitOpenForOneTenant_otherTenantStillCalls() {
+        answers(status(500), status(500), status(500), issued());
+        IssuanceApi api = api(false, Duration.ofSeconds(5), Duration.ofMillis(1), 20, 3, Duration.ofSeconds(30));
+        for (int i = 0; i < 3; i++) {
+            thrownBy(() -> api.issue(SANDBOX, UUID.randomUUID(), request()));
+        }
+
+        IssuanceResult other = api.issue(new TenantId("kpmg"), UUID.randomUUID(), request());
+
+        assertThat(other.processId()).isEqualTo(PROCESS);
+        assertThat(requests()).hasSize(4);
+    }
+
+    @Test
+    @DisplayName("SEC-25 — network errors, also after their retries, open the circuit")
+    void issue_networkErrors_openTheCircuit() {
+        answers(networkError());
+        IssuanceApi api = api(false, Duration.ofSeconds(5), Duration.ofMillis(1), 20, 4, Duration.ofSeconds(30));
+
+        // One issuance is four attempts, which fill the window.
+        assertThat(thrownBy(() -> api.issue(SANDBOX, KEY, request()))).isInstanceOf(IssuanceUnavailableException.class);
+        Throwable thrown = thrownBy(() -> api.issue(SANDBOX, KEY, request()));
+
+        assertThat(thrown).isInstanceOfSatisfying(IssuanceUnavailableException.class,
+                e -> assertThat(e.reason()).isEqualTo(IssuanceUnavailableException.Reason.CIRCUIT_OPEN));
+        assertThat(requests()).hasSize(4);
+    }
+
+    @Test
+    @DisplayName("SEC-25 — a 4xx is not a failure: the circuit stays closed however many there are")
+    void issue_clientErrors_doNotOpenTheCircuit() {
+        answers(status(400));
+        IssuanceApi api = api(false, Duration.ofSeconds(5), Duration.ofMillis(1), 20, 3, Duration.ofSeconds(30));
+
+        for (int i = 0; i < 8; i++) {
+            assertThat(thrownBy(() -> api.issue(SANDBOX, UUID.randomUUID(), request())))
+                    .isInstanceOfSatisfying(IssuanceRejectedException.class,
+                            e -> assertThat(e.reason()).isEqualTo(Reason.REQUEST_REJECTED));
+        }
+
+        assertThat(requests()).hasSize(8);
+    }
+
+    @Test
+    @DisplayName("SEC-25 — once the wait in open state has passed, a call goes through and a success closes the circuit")
+    void issue_afterTheWaitInOpenState_recovers() {
+        answers(status(500), status(500), status(500), issued());
+        IssuanceApi api = api(false, Duration.ofSeconds(5), Duration.ofMillis(1), 20, 3, Duration.ofMillis(300));
+        for (int i = 0; i < 3; i++) {
+            thrownBy(() -> api.issue(SANDBOX, UUID.randomUUID(), request()));
+        }
+        assertThat(thrownBy(() -> api.issue(SANDBOX, UUID.randomUUID(), request())))
+                .isInstanceOfSatisfying(IssuanceUnavailableException.class,
+                        e -> assertThat(e.reason()).isEqualTo(IssuanceUnavailableException.Reason.CIRCUIT_OPEN));
+
+        waitUntil(() -> {
+            try {
+                return api.issue(SANDBOX, UUID.randomUUID(), request()).processId().equals(PROCESS);
+            } catch (IssuanceUnavailableException e) {
+                return false;
+            }
+        });
+
+        assertThat(api.issue(SANDBOX, UUID.randomUUID(), request()).processId()).isEqualTo(PROCESS);
+    }
+
+    private static void waitUntil(BooleanSupplier condition) {
+        long deadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        while (!condition.getAsBoolean()) {
+            assertThat(System.nanoTime()).as("condition not met in time").isLessThan(deadline);
+            LockSupport.parkNanos(Duration.ofMillis(20).toNanos());
+        }
     }
 
     @Test

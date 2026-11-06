@@ -64,9 +64,8 @@ class JdbcJourneyRepository implements JourneyRepository {
     @Override
     public boolean update(TenantId tenant, Journey journey, JourneyState readInState) {
         return jdbc.sql("UPDATE " + table(tenant) + " SET state = :state, step = :step, withdrawal_reason = :reason, "
-                        + "issuance_process_id = :processId, last_activity = :lastActivity, ended_at = :endedAt "
+                        + "last_activity = :lastActivity, ended_at = :endedAt "
                         + "WHERE id = :id AND state = :readInState")
-                .param("processId", journey.issuanceProcessId().orElse(null))
                 .param(STATE, journey.state().code())
                 .param(STEP, journey.step().code())
                 .param("reason", journey.withdrawalReason().map(WithdrawalReason::code).orElse(null))
@@ -74,6 +73,15 @@ class JdbcJourneyRepository implements JourneyRepository {
                 .param("endedAt", journey.endedAt().map(Timestamp::from).orElse(null))
                 .param("id", journey.id())
                 .param("readInState", readInState.code())
+                .update() == 1;
+    }
+
+    @Override
+    public boolean recordIssuanceProcess(TenantId tenant, UUID journeyId, UUID processId) {
+        return jdbc.sql("UPDATE " + table(tenant) + " SET issuance_process_id = :processId "
+                        + "WHERE id = :id AND (issuance_process_id IS NULL OR issuance_process_id = :processId)")
+                .param("processId", processId)
+                .param("id", journeyId)
                 .update() == 1;
     }
 

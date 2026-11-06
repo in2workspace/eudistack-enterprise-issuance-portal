@@ -60,15 +60,43 @@ class JdbcJourneyRepositoryIT {
     }
 
     @Test
-    void update_recordedIssuanceProcess_isReadBack() {
+    void recordIssuanceProcess_journeyWithoutProcess_isReadBack() {
         Journey journey = Journey.start(UUID.randomUUID(), now());
         repository.insert(SANDBOX, journey);
         UUID process = UUID.randomUUID();
-        journey.recordIssuanceProcess(process, now());
 
-        assertThat(repository.update(SANDBOX, journey, JourneyState.IN_PROGRESS)).isTrue();
+        assertThat(repository.recordIssuanceProcess(SANDBOX, journey.id(), process)).isTrue();
 
         assertThat(repository.findById(SANDBOX, journey.id()).orElseThrow().issuanceProcessId()).contains(process);
+    }
+
+    @Test
+    void recordIssuanceProcess_sameProcessAgain_isRecordedAndADifferentOneIsNot() {
+        Journey journey = Journey.start(UUID.randomUUID(), now());
+        repository.insert(SANDBOX, journey);
+        UUID process = UUID.randomUUID();
+        repository.recordIssuanceProcess(SANDBOX, journey.id(), process);
+
+        assertThat(repository.recordIssuanceProcess(SANDBOX, journey.id(), process)).isTrue();
+        assertThat(repository.recordIssuanceProcess(SANDBOX, journey.id(), UUID.randomUUID())).isFalse();
+
+        assertThat(repository.findById(SANDBOX, journey.id()).orElseThrow().issuanceProcessId()).contains(process);
+    }
+
+    @Test
+    void update_journeyReadBeforeTheProcessWasRecorded_keepsTheProcess() {
+        Journey journey = Journey.start(UUID.randomUUID(), now());
+        repository.insert(SANDBOX, journey);
+        Journey readWithoutProcess = repository.findById(SANDBOX, journey.id()).orElseThrow();
+        UUID process = UUID.randomUUID();
+        repository.recordIssuanceProcess(SANDBOX, journey.id(), process);
+        readWithoutProcess.reach(JourneyStep.IDENTIFIED, now());
+
+        assertThat(repository.update(SANDBOX, readWithoutProcess, JourneyState.IN_PROGRESS)).isTrue();
+
+        Journey read = repository.findById(SANDBOX, journey.id()).orElseThrow();
+        assertThat(read.issuanceProcessId()).contains(process);
+        assertThat(read.step()).isEqualTo(JourneyStep.IDENTIFIED);
     }
 
     @Test

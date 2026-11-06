@@ -269,6 +269,11 @@ public class IssuanceService {
             log.warn("Journey {} already had a different issuance process: the new one is not recorded", journeyId);
             throw new ProblemException(ProblemCode.ONBOARDING_UNAVAILABLE);
         }
+        // On its own and conditional: the generic update of the journey does not write the process (NFR-2).
+        if (!journeys.recordIssuanceProcess(tenant, journeyId, issued.processId())) {
+            log.warn("Journey {} already had a different issuance process: the new one is not recorded", journeyId);
+            throw new ProblemException(ProblemCode.ONBOARDING_UNAVAILABLE);
+        }
         if (ticketNeeded && ticket == null) {
             if (!journeys.update(tenant, journey, JourneyState.IN_PROGRESS)) {
                 throw new ProblemException(ProblemCode.JOURNEY_CLOSED);

@@ -12,6 +12,11 @@ import es.in2.issuanceportal.journey.application.port.SystemToken;
 import es.in2.issuanceportal.journey.application.port.SystemTokenProvider;
 import es.in2.issuanceportal.shared.tenant.PublicHostProperties;
 import es.in2.issuanceportal.shared.tenant.TenantId;
+import io.github.resilience4j.bulkhead.Bulkhead;
+import io.github.resilience4j.bulkhead.BulkheadConfig;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerConfig;
 import io.github.resilience4j.core.IntervalBiFunction;
 import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryConfig;
@@ -31,6 +36,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * {@code POST /api/v1/issuances} of the tenant's Issuer, over the internal network (design.md §3.3, AD-6).
@@ -39,6 +46,10 @@ import java.util.UUID;
  * the idempotency key and the tenant's public host and scheme as forwarded headers, so the Issuer resolves its
  * public origin: the token's {@code iss} must be that of the Verifier at the same origin, and the
  * {@code Location} of the issuance is built from it.
+ *
+ * <p>Each tenant has its own bulkhead (a bound on the issuances in progress) and circuit breaker (opened by
+ * network errors, timeouts and 5xx, never by a 4xx): when either refuses, the Issuer is not called and the
+ * answer is unavailable (SEC-25, SEC-27). The waits between retries vary at random.
  *
  * <p>A network error or timeout is retried up to {@value #MAX_RETRIES} times, and so is a 503 if the service
  * is set to; every attempt carries the same idempotency key. A 4xx is never retried, and neither is a 503 that asks to wait more than {@link #MAX_RETRY_AFTER}. Nothing of the request, the
@@ -52,6 +63,8 @@ final class RestClientIssuanceApi implements IssuanceApi {
     static final Duration DEFAULT_OFFER_VALIDITY = Duration.ofMinutes(10);
     /** The longest wait the Issuer may ask for with {@code Retry-After}; a longer one ends the retries. */
     static final Duration MAX_RETRY_AFTER = Duration.ofSeconds(10);
+    /** The waits between retries vary by up to this fraction either way, so parallel retries spread out. */
+    static final double JITTER = 0.5;
     private static final String ISSUANCES_PATH = "/api/v1/issuances";
 
     private final RestClient http;
@@ -61,10 +74,14 @@ final class RestClientIssuanceApi implements IssuanceApi {
     private final SystemTokenProvider systemTokens;
     private final Clock clock;
     private final Retry retry;
+    private final IssuerApiProperties properties;
+    private final Map<TenantId, Bulkhead> bulkheads = new ConcurrentHashMap<>();
+    private final Map<TenantId, CircuitBreaker> circuitBreakers = new ConcurrentHashMap<>();
 
     RestClientIssuanceApi(RestClient http, IssuerApiProperties properties, PublicHostProperties publicHosts,
                           SystemTokenProvider systemTokens, Clock clock) {
         this.http = http;
+        this.properties = properties;
         this.issuancesUrl = stripTrailingSlash(properties.issuerInternalUrl()) + ISSUANCES_PATH;
         this.retryOn503 = properties.retryOn503();
         this.publicHosts = publicHosts;
@@ -82,12 +99,45 @@ final class RestClientIssuanceApi implements IssuanceApi {
     public IssuanceResult issue(TenantId tenant, UUID idempotencyKey, IssuanceRequest request) {
         SystemToken token = systemTokens.tokenFor(tenant);
         RequestBody body = RequestBody.of(request);
+        Bulkhead bulkhead = bulkheads.computeIfAbsent(tenant, this::newBulkhead);
+        if (!bulkhead.tryAcquirePermission()) {
+            log.warn("The issuance API of tenant {} has {} issuances in progress: not called", tenant,
+                    properties.maxConcurrentPerTenant());
+            throw new IssuanceUnavailableException(IssuanceUnavailableException.Reason.TOO_MANY_CALLS);
+        }
+        CircuitBreaker circuit = circuitBreakers.computeIfAbsent(tenant, this::newCircuitBreaker);
         try {
-            return retry.executeSupplier(() -> attempt(tenant, idempotencyKey, token, body));
+            return retry.executeSupplier(() -> circuit.executeSupplier(
+                    () -> attempt(tenant, idempotencyKey, token, body)));
+        } catch (CallNotPermittedException e) {
+            log.warn("The circuit of the issuance API of tenant {} is {}: not called", tenant, circuit.getState());
+            throw new IssuanceUnavailableException(IssuanceUnavailableException.Reason.CIRCUIT_OPEN);
         } catch (RetryableFailure e) {
             log.warn("The issuance API of tenant {} did not answer after {} retries ({})", tenant, MAX_RETRIES, e.reason);
             throw new IssuanceUnavailableException(e.reason);
+        } finally {
+            bulkhead.onComplete();
         }
+    }
+
+    private Bulkhead newBulkhead(TenantId tenant) {
+        return Bulkhead.of("issuance-api-" + tenant.value(), BulkheadConfig.custom()
+                .maxConcurrentCalls(properties.maxConcurrentPerTenant())
+                .maxWaitDuration(Duration.ZERO)
+                .build());
+    }
+
+    /** Only what says the Issuer is unwell counts as a failure: a 4xx and any other rejection do not. */
+    private CircuitBreaker newCircuitBreaker(TenantId tenant) {
+        return CircuitBreaker.of("issuance-api-" + tenant.value(), CircuitBreakerConfig.custom()
+                .slidingWindowType(CircuitBreakerConfig.SlidingWindowType.COUNT_BASED)
+                .slidingWindowSize(properties.circuitMinimumCalls())
+                .minimumNumberOfCalls(properties.circuitMinimumCalls())
+                .failureRateThreshold(properties.circuitFailureRatePercent())
+                .waitDurationInOpenState(properties.circuitWaitInOpenState())
+                .permittedNumberOfCallsInHalfOpenState(1)
+                .recordException(e -> e instanceof RetryableFailure || e instanceof IssuanceUnavailableException)
+                .build());
     }
 
     private IssuanceResult attempt(TenantId tenant, UUID idempotencyKey, SystemToken token, RequestBody body) {
@@ -175,14 +225,22 @@ final class RestClientIssuanceApi implements IssuanceApi {
         }
     }
 
-    /** What the Issuer asked for with {@code Retry-After}, or else 1, 2 and 4 s (EC-07). */
+    /**
+     * What the Issuer asked for with {@code Retry-After}, or else 1, 2 and 4 s (EC-07), each varied at random
+     * by up to {@value #JITTER} either way (SEC-25).
+     */
     private static IntervalBiFunction<Object> waitBeforeRetry(Duration initialWait) {
         return (retries, outcome) -> {
             if (outcome.isLeft() && outcome.getLeft() instanceof RetryableFailure failure && failure.retryAfter != null) {
                 return failure.retryAfter.toMillis();
             }
-            return initialWait.toMillis() << (retries - 1);
+            return withJitter(initialWait.toMillis() << (retries - 1));
         };
+    }
+
+    static long withJitter(long millis) {
+        double factor = 1 + JITTER * (2 * ThreadLocalRandom.current().nextDouble() - 1);
+        return Math.round(millis * factor);
     }
 
     private static String stripTrailingSlash(String url) {

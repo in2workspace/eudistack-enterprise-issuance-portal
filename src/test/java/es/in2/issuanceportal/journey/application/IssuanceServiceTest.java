@@ -472,8 +472,7 @@ class IssuanceServiceTest {
         SessionId session = entitledJourney();
         Journey stored = journeys.findById(CGCOM, journeyOf(session)).orElseThrow();
         UUID process = UUID.randomUUID();
-        stored.recordIssuanceProcess(process, clock.instant());
-        journeys.update(CGCOM, stored, JourneyState.IN_PROGRESS);
+        journeys.recordIssuanceProcess(CGCOM, stored.id(), process);
 
         assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
                 ProblemCode.ONBOARDING_UNAVAILABLE));
@@ -519,9 +518,7 @@ class IssuanceServiceTest {
         SessionId session = entitledJourney();
         UUID stored = UUID.randomUUID();
         issuer = (tenant, key, request) -> {
-            Journey current = journeys.findById(tenant, journeyOf(session)).orElseThrow();
-            current.recordIssuanceProcess(stored, clock.instant());
-            journeys.update(tenant, current, JourneyState.IN_PROGRESS);
+            journeys.recordIssuanceProcess(tenant, journeyOf(session), stored);
             return api.issue(tenant, key, request);
         };
 
