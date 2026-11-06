@@ -21,7 +21,6 @@ import java.util.UUID;
 class JdbcJourneyRepository implements JourneyRepository {
 
     /** Column and parameter names, used by the row mapper and both writes. */
-    private static final String UPDATE = "UPDATE ";
     private static final String STATE = "state";
     private static final String STEP = "step";
     private static final String CUTOFF = "cutoff";
@@ -64,7 +63,7 @@ class JdbcJourneyRepository implements JourneyRepository {
 
     @Override
     public boolean update(TenantId tenant, Journey journey, JourneyState readInState) {
-        return jdbc.sql(UPDATE + table(tenant) + " SET state = :state, step = :step, withdrawal_reason = :reason, "
+        return jdbc.sql("UPDATE " + table(tenant) + " SET state = :state, step = :step, withdrawal_reason = :reason, "
                         + "last_activity = :lastActivity, ended_at = :endedAt "
                         + "WHERE id = :id AND state = :readInState")
                 .param(STATE, journey.state().code())
@@ -79,7 +78,7 @@ class JdbcJourneyRepository implements JourneyRepository {
 
     @Override
     public boolean recordIssuanceProcess(TenantId tenant, UUID journeyId, UUID processId) {
-        return jdbc.sql(UPDATE + table(tenant) + " SET issuance_process_id = :processId "
+        return jdbc.sql("UPDATE " + table(tenant) + " SET issuance_process_id = :processId "
                         + "WHERE id = :id AND (issuance_process_id IS NULL OR issuance_process_id = :processId)")
                 .param("processId", processId)
                 .param("id", journeyId)
@@ -119,7 +118,7 @@ class JdbcJourneyRepository implements JourneyRepository {
 
     @Override
     public boolean updateIfInactive(TenantId tenant, Journey journey, Instant cutoff) {
-        return jdbc.sql(UPDATE + table(tenant) + " SET state = :state, step = :step, withdrawal_reason = :reason, "
+        return jdbc.sql("UPDATE " + table(tenant) + " SET state = :state, step = :step, withdrawal_reason = :reason, "
                         + "ended_at = :endedAt WHERE id = :id AND state = :inProgress AND last_activity <= :cutoff")
                 .param(STATE, journey.state().code())
                 .param(STEP, journey.step().code())
