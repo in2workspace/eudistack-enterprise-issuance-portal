@@ -334,7 +334,8 @@ abstract class SystemIssuanceITSupport {
             assertThat(request.getHeader("Cookie")).isNull();
         });
         for (String path : List.of(ISSUANCES_PATH, TICKETS_PATH)) {
-            assertThat(requestsTo(path)).allSatisfy(request ->
+            // Some outcomes never reach the Issuer or the Wallet Unit Service: each request that did is checked.
+            requestsTo(path).forEach(request ->
                     assertThat(request.getHeaders().getHeader("Authorization").values())
                             .containsExactly("Bearer " + ACCESS_TOKEN));
         }
