@@ -18,6 +18,9 @@ import java.util.UUID;
 
 /** {@code journey} in the tenant's schema. */
 @Repository
+// The SQL keywords are written in each statement on purpose: the statements are reviewed as a whole for the
+// tenant schema they are built with (java:S2077, false positive), and changing them reopens that review.
+@SuppressWarnings("java:S1192")
 class JdbcJourneyRepository implements JourneyRepository {
 
     /** Column and parameter names, used by the row mapper and both writes. */

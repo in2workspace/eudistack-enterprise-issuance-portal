@@ -65,6 +65,8 @@ final class RestClientIssuanceApi implements IssuanceApi {
     static final Duration MAX_RETRY_AFTER = Duration.ofSeconds(10);
     /** The waits between retries vary by up to this fraction either way, so parallel retries spread out. */
     static final double JITTER = 0.5;
+    // The path is part of the issuance API contract; the base URL is the configurable part (issuer-internal-url).
+    @SuppressWarnings("java:S1075")
     private static final String ISSUANCES_PATH = "/api/v1/issuances";
 
     private final RestClient http;
