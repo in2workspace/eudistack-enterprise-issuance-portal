@@ -48,7 +48,7 @@ public class JourneyViewService {
         Optional<EntitlementRecord.Preview> attestation = read(tenant, session, journey.id(), Section.ENTITLEMENT,
                 EntitlementRecord::fromJson).map(EntitlementRecord::preview);
         Optional<IssuanceService.Offer> offer = read(tenant, session, journey.id(), Section.ISSUANCE,
-                IssuanceRecord::fromJson).flatMap(record -> offer(tenant, journey.id(), record));
+                IssuanceRecord::fromJson).flatMap(issuance -> offer(tenant, journey.id(), issuance));
         return new View(journey, attestation, offer);
     }
 
@@ -57,23 +57,23 @@ public class JourneyViewService {
      * tickets an offer without its address is never shown: the interface would build the wallet address
      * with it (EC-10, EUD-286 AC-09). A configuration that cannot be read counts as one with tickets.
      */
-    private Optional<IssuanceService.Offer> offer(TenantId tenant, UUID journeyId, IssuanceRecord record) {
-        if (record.offerUri().isEmpty()) {
+    private Optional<IssuanceService.Offer> offer(TenantId tenant, UUID journeyId, IssuanceRecord issuance) {
+        if (issuance.offerUri().isEmpty()) {
             return Optional.empty();
         }
-        if (record.onboarding().isEmpty() && usesOnboardingTickets(tenant)) {
+        if (issuance.onboarding().isEmpty() && usesOnboardingTickets(tenant)) {
             log.warn("Journey {} has an offer without its onboarding address in a tenant with tickets: not shown",
                     journeyId);
             return Optional.empty();
         }
-        return Optional.of(new IssuanceService.Offer(record.offerUri().get(), record.offerExpiresAt(),
-                record.onboarding().orElse(null), record.onboardingExpiresAt()));
+        return Optional.of(new IssuanceService.Offer(issuance.offerUri().get(), issuance.offerExpiresAt(),
+                issuance.onboarding().orElse(null), issuance.onboardingExpiresAt()));
     }
 
     private boolean usesOnboardingTickets(TenantId tenant) {
         try {
             return configs.current(tenant).settings().onboarding().enabled();
-        } catch (ProblemException e) {
+        } catch (ProblemException _) {
             return true;
         }
     }
@@ -85,7 +85,7 @@ public class JourneyViewService {
             return sessions.read(tenant, session, section).map(parse);
         } catch (InvalidSectionException e) {
             log.warn("Section {} of journey {} is invalid at {}: not shown", section, journeyId, e.field());
-        } catch (IllegalArgumentException e) {
+        } catch (IllegalArgumentException _) {
             log.warn("Section {} of journey {} cannot be read: not shown", section, journeyId);
         }
         return Optional.empty();
