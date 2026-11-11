@@ -8,6 +8,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **EUD-358 — verificación del correo del titular con un código**:
+  - `POST /journey/email-verification` envía al correo un código de 6 dígitos (10 minutos de validez y 5 intentos). Un código nuevo anula el anterior y deja de dar por verificado el correo anterior.
+  - Límites: 3 envíos por recorrido, 180 s entre envíos (429 `resend_too_soon` con `Retry-After`) y 10 por IP y hora (429 `too_many_requests`). Con 3 envíos, 429 `too_many_codes`.
+  - Un envío que no sale responde 503 `email_unavailable`, no se guarda y no cuenta en los límites.
+  - `POST /journey/email-verification/code` comprueba el código (400 `invalid_code`, `expired_code` o `too_many_attempts`) y, si es correcto, fija el correo verificado y pasa al paso `email_verified`.
+  - Correo por SES en español o inglés según `Accept-Language`, con el nombre del portal de `texts.<idioma>.portal.app_name` y sin enlaces. El adaptador local no envía ni registra el código.
+  - El código se guarda como SHA-256 del recorrido y el código, en la sección cifrada nueva `email_verification`. La migración V4 añade su columna y el paso `email_verified`.
+  - `GET /journey` devuelve `email_verification`. Nuevas trazas del envío y de la comprobación, sin el correo ni el código.
+
 - **EUD-277 — emisión como sistema: confirmación, token de sistema y ticket de alta (fase 1)**: `POST /journey/confirmation` bajo `/issuance-portal/api/v1`. Solo lee `email` (obligatorio y validado: 400 `email_required` o `email_invalid`); exige la identidad y el derecho confirmado (409 `step_not_allowed`) y la configuración del tenant (503 `config_unavailable`). Arma el `payload` con `data_placement` desde la identidad y la fuente, pide la emisión con `delivery` `ui` y `grant_type` `authorization_code`, y responde 200 con `credential_offer_uri`, `expires_at` y, con alta con ticket, `onboarding_url` y `onboarding_expires_at`. El recorrido queda `completed` en `offer_obtained`, con un único `issuance_process_id`, que se guarda con su propio `UPDATE` condicionado (`recordIssuanceProcess`): el `update` genérico del recorrido ya no lo escribe, así que una lectura anterior sin bloqueo no puede borrarlo.
 - Una clave de idempotencia por recorrido, generada en la primera confirmación y guardada con el correo de esa confirmación: todos los reintentos, también los que pide la interfaz tras un error, la reutilizan con el mismo correo. La fila del recorrido se bloquea (`SELECT ... FOR UPDATE`) solo para guardar la clave y para guardar el proceso; la llamada al Issuer va fuera de la transacción. Migración `V3`: `journey.issuance_process_id` sustituye a `issuance_process_ids`.
 - Token de sistema por tenant (design 1.4.0, AD-5): la LEARCredentialMachine del portal y su clave se leen de SSM Parameter Store (`ssm`) o de un fichero montado (`file`); la presentación y la `client_assertion` se arman con `eudistack-verifier-client-java`, que rechaza una clave que no corresponde al `cnf`. El token se pide al Verifier por la red interna con `X-Tenant`, `X-Forwarded-Host` del tenant y `X-Forwarded-Proto: https`, se reutiliza hasta 30 s antes de caducar y un 401 del Wallet Unit Service lo invalida.
@@ -29,6 +38,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `JourneyAccess.requireInProgress`: un recorrido completado responde 410 `journey_closed` antes de consultar la fuente.
 
 ### Changed
+
+- **EUD-358**: `POST /journey/confirmation` ya no lee el cuerpo. Usa el correo verificado del recorrido y, sin él, responde 409 `step_not_allowed`. La emisión y el ticket de alta llevan siempre ese correo, y desaparecen `email_required` y `email_invalid` de la confirmación.
+- **EUD-358**: el límite por IP de las incidencias (5 por hora) es ahora una instancia configurable, compartida con el límite de los códigos del correo (10 por hora).
 
 - Health y métricas en la raíz del servicio, como en el resto de servicios de la plataforma (`management.endpoints.web.base-path: /`): `/issuance-portal/health`, `/issuance-portal/health/liveness`, `/issuance-portal/health/readiness` y `/issuance-portal/prometheus`, en lugar de `/issuance-portal/actuator/...`. Los filtros de la cabecera `X-Requested-With` y del tenant dejan pasar solo esas rutas.
 
