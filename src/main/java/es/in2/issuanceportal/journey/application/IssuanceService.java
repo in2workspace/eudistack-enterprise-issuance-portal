@@ -12,9 +12,7 @@ import es.in2.issuanceportal.journey.application.port.OnboardingTicket;
 import es.in2.issuanceportal.journey.application.port.OnboardingTicketException;
 import es.in2.issuanceportal.journey.application.port.OnboardingTickets;
 import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
-import es.in2.issuanceportal.journey.domain.EmailAddress;
 import es.in2.issuanceportal.journey.domain.IncompletePlacementException;
-import es.in2.issuanceportal.journey.domain.InvalidEmailException;
 import es.in2.issuanceportal.journey.domain.IssuanceProcessAlreadyRecordedException;
 import es.in2.issuanceportal.journey.domain.IssuancePayload;
 import es.in2.issuanceportal.journey.domain.Journey;
@@ -116,16 +114,13 @@ public class IssuanceService {
     private record Prepared(UUID idempotencyKey, IssuanceRequest request, Onboarding onboarding) {
     }
 
-    /**
-     * @param rawEmail what the interface sent as {@code email}, {@code null} when it sent none
-     */
-    public Offer confirm(TenantId tenant, SessionId session, String rawEmail) {
+    /** The email in the request is the one the holder verified with a code (EUD-358). */
+    public Offer confirm(TenantId tenant, SessionId session) {
         access.requireInProgress(tenant, session);
         UUID journeyId = sessions.journeyOf(tenant, session)
                 .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
-        EmailAddress email = email(rawEmail);
         Prepared prepared = Objects.requireNonNull(
-                transactions.execute(status -> prepare(tenant, session, journeyId, email)));
+                transactions.execute(status -> prepare(tenant, session, journeyId)));
         IssuanceResult issued = request(tenant, journeyId, prepared);
         boolean ticketNeeded = prepared.onboarding().enabled();
         OnboardingTicket ticket = ticketNeeded ? requestTicket(tenant, journeyId, prepared, issued) : null;
@@ -137,27 +132,20 @@ public class IssuanceService {
         return offer.orElseThrow(() -> new ProblemException(ProblemCode.ONBOARDING_UNAVAILABLE));
     }
 
-    private static EmailAddress email(String raw) {
-        try {
-            return EmailAddress.parse(raw);
-        } catch (InvalidEmailException e) {
-            throw new ProblemException(e.reason() == InvalidEmailException.Reason.REQUIRED
-                    ? ProblemCode.EMAIL_REQUIRED : ProblemCode.EMAIL_INVALID);
-        }
-    }
-
     /**
-     * First transaction: with the journey locked, checks what the request needs, keeps the email and, only
-     * if the journey has none yet, a new idempotency key. Anything that makes it fail leaves the journey as
+     * First transaction: with the journey locked, checks what the request needs, among it the verified email,
+     * and keeps, only if the journey has none yet, a new idempotency key. Anything that makes it fail leaves the journey as
      * it was.
      */
-    private Prepared prepare(TenantId tenant, SessionId session, UUID journeyId, EmailAddress email) {
+    private Prepared prepare(TenantId tenant, SessionId session, UUID journeyId) {
         Journey journey = lock(tenant, journeyId);
         if (!journey.isInProgress()) {
             throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
         }
         HolderIdentity identity = identity(tenant, session);
         EntitlementRecord entitlement = entitlement(tenant, session);
+        // Always the one in the session: a retry after onboarding_unavailable needs no new code (EC-05).
+        String address = verifiedEmail(tenant, session);
         ServiceSettings settings = settings(tenant);
         if (journey.issuanceProcessId().isPresent()) {
             // The Issuer has no way yet to give another offer for the process (EC-04); the renewal comes with EUD-295.
@@ -167,33 +155,26 @@ public class IssuanceService {
         Map<String, Object> payload = payload(tenant, settings, identity, entitlement);
         Optional<IssuanceRecord> issued = readIssuance(tenant, session);
         UUID key;
-        String address;
         if (issued.isPresent()) {
-            // The key and the email it was first used with stay together: the Issuer's idempotency is on the
-            // key, so a later body with another email must not reach it. The new email was only validated.
             key = issued.get().idempotencyKey();
-            address = storedEmail(tenant, session).orElse(email.value());
         } else {
             key = UUID.randomUUID();
-            address = email.value();
             sessions.write(tenant, session, Section.ISSUANCE, IssuanceRecord.withKey(key).toJson());
-        }
-        if (issued.isEmpty() || storedEmail(tenant, session).isEmpty()) {
-            sessions.write(tenant, session, Section.EMAIL, new EmailRecord(address).toJson());
         }
         return new Prepared(key, new IssuanceRequest(settings.attestationType(), payload, address,
                 DELIVERY, GRANT_TYPE), settings.onboarding());
     }
 
-    private Optional<String> storedEmail(TenantId tenant, SessionId session) {
-        return sessions.read(tenant, session, Section.EMAIL).flatMap(section -> {
-            try {
-                return Optional.of(EmailRecord.fromJson(section).address());
-            } catch (InvalidSectionException e) {
-                log.warn("Email of the journey session is invalid at {}", e.field());
-                return Optional.empty();
-            }
-        });
+    /** The email the holder verified; without it the confirmation is not allowed yet and nothing is requested. */
+    private String verifiedEmail(TenantId tenant, SessionId session) {
+        String section = sessions.read(tenant, session, Section.EMAIL)
+                .orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED));
+        try {
+            return EmailRecord.fromJson(section).address();
+        } catch (InvalidSectionException e) {
+            log.warn("Email of the journey session is invalid at {}", e.field());
+            throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
+        }
     }
 
     /** Outside any transaction. Every failure leaves the journey in progress, with its key, for the next attempt. */

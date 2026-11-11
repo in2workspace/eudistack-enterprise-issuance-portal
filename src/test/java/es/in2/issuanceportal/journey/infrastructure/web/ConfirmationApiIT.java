@@ -15,6 +15,8 @@ import es.in2.issuanceportal.journey.application.port.IssuanceResult;
 import es.in2.issuanceportal.journey.application.port.IssuanceUnavailableException;
 import es.in2.issuanceportal.journey.application.port.OnboardingTicketException;
 import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
+import es.in2.issuanceportal.session.api.EmailRecord;
+import es.in2.issuanceportal.session.api.EmailVerificationRecord;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.IdentifierType;
@@ -317,7 +319,7 @@ class ConfirmationApiIT {
         Map<String, Object> row = jdbc.sql("SELECT state, step FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
                 .param("id", journeyOf(session)).query().singleRow();
         assertThat(row).containsEntry("state", "in_progress")
-                .containsEntry("step", "entitlement_confirmed");
+                .containsEntry("step", "email_verified");
         IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, session, Section.ISSUANCE).orElseThrow());
         assertThat(stored.offerUri()).isEmpty();
         assertThat(stored.offerExpiresAt()).isNull();
@@ -395,26 +397,58 @@ class ConfirmationApiIT {
     }
 
     @Test
-    @DisplayName("EC-01 — postConfirmation_missingOrInvalidEmail_isBadRequestAndNoSystemIsCalled")
-    void postConfirmation_missingOrInvalidEmail_isBadRequestAndNoSystemIsCalled() throws Exception {
-        SessionId session = entitledJourney();
+    @DisplayName("AC-08 — postConfirmation_noVerifiedEmail_isStepNotAllowedWhateverTheBodySaysAndNoSystemIsCalled")
+    void postConfirmation_noVerifiedEmail_isStepNotAllowedWhateverTheBodySaysAndNoSystemIsCalled() throws Exception {
+        configure(CONFIG_WITH_ONBOARDING);
+        SessionId session = entitledJourneyWithoutEmail();
 
-        mvc.perform(confirmation(session, null)).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.type").value("email_required"));
-        mvc.perform(confirmation(session, "{}")).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.type").value("email_required"));
-        mvc.perform(confirmation(session, "{\"email\":\"\"}")).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.type").value("email_required"));
-        mvc.perform(confirmation(session, "{\"email\":null}")).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.type").value("email_required"));
-        mvc.perform(confirmation(session, "{\"email\":\"elena.example.test\"}")).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.type").value("email_invalid"));
-        mvc.perform(confirmation(session, "{\"email\":12345}")).andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.type").value("email_invalid"));
+        for (String body : new String[] {null, "{}", "{\"email\":\"" + EMAIL + "\"}", "{\"email\":12345}"}) {
+            mvc.perform(confirmation(session, body))
+                    .andExpect(status().isConflict())
+                    .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                    .andExpect(jsonPath("$.type").value("step_not_allowed"));
+        }
 
         assertThat(issuer.api().calls()).isEmpty();
+        assertThat(tickets.calls()).isEmpty();
         assertThat(sessions.read(SANDBOX, session, Section.ISSUANCE)).isEmpty();
+        assertThat(sessions.read(SANDBOX, session, Section.EMAIL)).isEmpty();
         assertThat(processOf(session)).isNull();
+    }
+
+    @Test
+    @DisplayName("AC-08 — postConfirmation_bodyWithAnotherEmail_isIgnoredAndTheVerifiedEmailIsUsed")
+    void postConfirmation_bodyWithAnotherEmail_isIgnoredAndTheVerifiedEmailIsUsed() throws Exception {
+        configure(CONFIG_WITH_ONBOARDING);
+        SessionId session = entitledJourney();
+
+        mvc.perform(confirmation(session, "{\"email\":\"mallory@example.test\",\"givenName\":\"Mallory\"}"))
+                .andExpect(status().isOk());
+
+        assertThat(issuer.api().calls()).singleElement().satisfies(call ->
+                assertThat(call.request().email()).isEqualTo(EMAIL));
+        assertThat(tickets.calls()).singleElement().satisfies(call -> assertThat(call.email()).isEqualTo(EMAIL));
+    }
+
+    @Test
+    @DisplayName("EC-05 — postConfirmation_retryAfterOnboardingUnavailable_keepsTheVerifiedEmailAndAsksForNoNewCode")
+    void postConfirmation_retryAfterOnboardingUnavailable_keepsTheVerifiedEmailAndAsksForNoNewCode() throws Exception {
+        configure(CONFIG_WITH_ONBOARDING);
+        SessionId session = entitledJourney();
+        tickets.failWith(OnboardingTicketException.Reason.UNAVAILABLE);
+        mvc.perform(confirmation(session, null)).andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
+        tickets.recover();
+
+        // The renewal of the offer of a process that already exists is EUD-295: until then the answer is the same
+        // 503, but it is never step_not_allowed, because the verified email is still the journey's.
+        mvc.perform(confirmation(session, null)).andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
+
+        assertThat(EmailRecord.fromJson(sessions.read(SANDBOX, session, Section.EMAIL).orElseThrow()).address())
+                .isEqualTo(EMAIL);
+        assertThat(tickets.calls()).extracting(InMemoryOnboardingTickets.Call::email).containsOnly(EMAIL);
+        assertThat(issuer.api().calls()).extracting(c -> c.request().email()).containsOnly(EMAIL);
     }
 
     @Test
@@ -615,7 +649,7 @@ class ConfirmationApiIT {
         Map<String, Object> row = jdbc.sql("SELECT state, step, issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
                 .param("id", journeyOf(session)).query().singleRow();
         assertThat(row).containsEntry("state", "in_progress")
-                .containsEntry("step", "entitlement_confirmed");
+                .containsEntry("step", "email_verified");
         assertThat(row.get("issuance_process_id")).isNull();
         assertThat(sessions.read(SANDBOX, session, Section.ENTITLEMENT)).isPresent();
         assertThat(IssuanceRecord.fromJson(sessions.read(SANDBOX, session, Section.ISSUANCE).orElseThrow()).offerUri())
@@ -641,8 +675,19 @@ class ConfirmationApiIT {
         return SessionId.parse(cookie.getValue()).orElseThrow();
     }
 
-    /** What Identification and Authentic source leave in the journey before the holder confirms. */
+    /** What the holder has before confirming: the entitlement and the email verified with a code. */
     private SessionId entitledJourney() throws Exception {
+        SessionId session = entitledJourneyWithoutEmail();
+        sessions.write(SANDBOX, session, Section.EMAIL, new EmailRecord(EMAIL).toJson());
+        sessions.write(SANDBOX, session, Section.EMAIL_VERIFICATION, new EmailVerificationRecord(EMAIL, null, null, 0, 1,
+                clock.instant()).toJson());
+        jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET step = 'email_verified' WHERE id = :id")
+                .param("id", journeyOf(session)).update();
+        return session;
+    }
+
+    /** What Identification and Authentic source leave in the journey before the holder verifies the email. */
+    private SessionId entitledJourneyWithoutEmail() throws Exception {
         SessionId session = startedJourney();
         sessions.write(SANDBOX, session, Section.IDENTITY, identity());
         progress.reach(SANDBOX, session, JourneyProgress.Step.IDENTIFIED);

@@ -444,12 +444,261 @@ class EmailVerificationApiIT {
                 .doesNotContain(EMAIL, EMAIL.toLowerCase(java.util.Locale.ROOT), "Elena", code, hash);
     }
 
+    // --- the check: AC-02, AC-03, AC-04, AC-07, ES-02, ES-03, ES-04, EC-03 ---
+
+    @Test
+    @DisplayName("AC-02 — postCode_rightCode_answersTheJourneyWithTheVerifiedEmailAndTheCodeNoLongerServes")
+    void postCode_rightCode_answersTheJourneyWithTheVerifiedEmailAndTheCodeNoLongerServes() throws Exception {
+        SessionId session = entitledJourney();
+        String code = sentCode(session);
+
+        mvc.perform(check(session, code(code)))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
+                .andExpect(jsonPath("$.state").value("in_progress"))
+                .andExpect(jsonPath("$.step").value("email_verified"))
+                .andExpect(jsonPath("$.email_verification.email").value(EMAIL))
+                .andExpect(jsonPath("$.email_verification.verified").value(true))
+                .andExpect(jsonPath("$.email_verification.code_expires_at").doesNotExist())
+                .andExpect(jsonPath("$.email_verification.resend_available_at").isNotEmpty())
+                .andExpect(jsonPath("$.email_verification.sends_left").value(2));
+
+        assertThat(EmailRecord.fromJson(sessions.read(SANDBOX, session, Section.EMAIL).orElseThrow()).address())
+                .isEqualTo(EMAIL);
+        assertThat(storedVerification(session).codeHash()).isNull();
+        assertThat(journeyRow(session)).containsEntry("step", "email_verified");
+        mvc.perform(check(session, code(code)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("step_not_allowed"));
+        mvc.perform(get(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.step").value("email_verified"))
+                .andExpect(jsonPath("$.email_verification.verified").value(true));
+    }
+
+    @Test
+    @DisplayName("AC-03 — postCode_wrongCode_is400InvalidCodeAndTheAttemptIsKept")
+    void postCode_wrongCode_is400InvalidCodeAndTheAttemptIsKept() throws Exception {
+        SessionId session = entitledJourney();
+        String code = sentCode(session);
+
+        mvc.perform(check(session, code(wrongCodeFor(code))))
+                .andExpect(status().isBadRequest())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
+                .andExpect(jsonPath("$.type").value("invalid_code"));
+
+        // The answer is an error, and the attempt it spent is committed all the same.
+        assertThat(storedVerification(session).attempts()).isEqualTo(1);
+        assertThat(sessions.read(SANDBOX, session, Section.EMAIL)).isEmpty();
+        assertThat(journeyRow(session)).containsEntry("step", "entitlement_confirmed");
+    }
+
+    @Test
+    @DisplayName("AC-03 — postCode_fiveWrongCodes_theNextIs400TooManyAttemptsEvenWithTheRightOne")
+    void postCode_fiveWrongCodes_theNextIs400TooManyAttemptsEvenWithTheRightOne() throws Exception {
+        SessionId session = entitledJourney();
+        String code = sentCode(session);
+        for (int i = 0; i < 5; i++) {
+            mvc.perform(check(session, code(wrongCodeFor(code)))).andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.type").value("invalid_code"));
+        }
+
+        mvc.perform(check(session, code(code)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.type").value("too_many_attempts"));
+
+        assertThat(storedVerification(session).attempts()).isEqualTo(5);
+        assertThat(sessions.read(SANDBOX, session, Section.EMAIL)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("AC-03 — postCode_tenMinutesAfterTheSend_is400ExpiredCodeEvenWithTheRightOne")
+    void postCode_tenMinutesAfterTheSend_is400ExpiredCodeEvenWithTheRightOne() throws Exception {
+        SessionId session = entitledJourney();
+        String code = sentCode(session);
+        backdate(session, storedVerification(session), Duration.ofMinutes(10).plusSeconds(1));
+
+        mvc.perform(check(session, code(code)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.type").value("expired_code"));
+
+        assertThat(sessions.read(SANDBOX, session, Section.EMAIL)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("AC-04 — postCode_codeReplacedByAResend_is400ExpiredCodeAndTheNewOneVerifies")
+    void postCode_codeReplacedByAResend_is400ExpiredCodeAndTheNewOneVerifies() throws Exception {
+        SessionId session = entitledJourney();
+        String first = sentCode(session);
+        backdate(session, storedVerification(session), Duration.ofMinutes(4));
+        String second = sentCode(session);
+
+        if (!first.equals(second)) {
+            mvc.perform(check(session, code(first)))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.type").value("expired_code"));
+        }
+        mvc.perform(check(session, code(second))).andExpect(status().isOk())
+                .andExpect(jsonPath("$.email_verification.verified").value(true))
+                .andExpect(jsonPath("$.email_verification.sends_left").value(1));
+    }
+
+    @Test
+    @DisplayName("AC-07 — postCode_newCodeToAnotherEmail_theOldEmailStopsBeingVerifiedAndTheNewOneIs")
+    void postCode_newCodeToAnotherEmail_theOldEmailStopsBeingVerifiedAndTheNewOneIs() throws Exception {
+        SessionId session = entitledJourney();
+        mvc.perform(check(session, code(sentCode(session)))).andExpect(status().isOk());
+        backdate(session, storedVerification(session), Duration.ofMinutes(4));
+
+        mvc.perform(send(session, "{\"email\":\"new.address@example.test\"}", null)).andExpect(status().isAccepted());
+
+        assertThat(sessions.read(SANDBOX, session, Section.EMAIL)).isEmpty();
+        mvc.perform(get(session))
+                .andExpect(jsonPath("$.step").value("email_verified"))
+                .andExpect(jsonPath("$.email_verification.verified").value(false))
+                .andExpect(jsonPath("$.email_verification.email").value("new.address@example.test"));
+        mvc.perform(check(session, code(RecordingEmailCodeMailer.codeOf(mailer.last())))).andExpect(status().isOk());
+        assertThat(EmailRecord.fromJson(sessions.read(SANDBOX, session, Section.EMAIL).orElseThrow()).address())
+                .isEqualTo("new.address@example.test");
+    }
+
+    @Test
+    @DisplayName("ES-02 — postCode_malformedCode_is400BadRequestAndSpendsNoAttempt")
+    void postCode_malformedCode_is400BadRequestAndSpendsNoAttempt() throws Exception {
+        SessionId session = entitledJourney();
+        sentCode(session);
+
+        for (String body : new String[] {null, "{}", "{\"code\":null}", "{\"code\":\"12345\"}",
+                "{\"code\":\"1234567\"}", "{\"code\":\"12345a\"}", "{\"code\":123456}", "not json"}) {
+            mvc.perform(check(session, body))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.type").value("bad_request"));
+        }
+
+        assertThat(storedVerification(session).attempts()).isZero();
+    }
+
+    @Test
+    @DisplayName("ES-03 — postCode_neverSentOrAlreadyVerified_is409StepNotAllowed")
+    void postCode_neverSentOrAlreadyVerified_is409StepNotAllowed() throws Exception {
+        SessionId session = entitledJourney();
+
+        mvc.perform(check(session, code("123456")))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("step_not_allowed"));
+    }
+
+    @Test
+    @DisplayName("ES-04 — postCode_withdrawnJourneyOrNoSession_is410JourneyClosed")
+    void postCode_withdrawnJourneyOrNoSession_is410JourneyClosed() throws Exception {
+        SessionId session = entitledJourney();
+        String code = sentCode(session);
+        mvc.perform(MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey/withdrawal").contextPath(CONTEXT)
+                        .header("X-Requested-With", "issuance-portal").with(host())
+                        .cookie(new Cookie("journey_session", session.value())))
+                .andExpect(status().isOk());
+
+        mvc.perform(check(session, code(code))).andExpect(status().isGone())
+                .andExpect(jsonPath("$.type").value("journey_closed"));
+        mvc.perform(check(null, code(code))).andExpect(status().isGone())
+                .andExpect(jsonPath("$.type").value("journey_closed"));
+    }
+
+    @Test
+    @DisplayName("EC-03 — postCode_twoWrongCodesAtOnceWithFourFailures_oneIsInvalidTheOtherTooManyAndTheCountStopsAtFive")
+    void postCode_twoWrongCodesAtOnceWithFourFailures_oneIsInvalidTheOtherTooManyAndTheCountStopsAtFive()
+            throws Exception {
+        SessionId session = entitledJourney();
+        String code = sentCode(session);
+        EmailVerificationRecord sent = storedVerification(session);
+        sessions.write(SANDBOX, session, Section.EMAIL_VERIFICATION, new EmailVerificationRecord(sent.pendingEmail(),
+                sent.codeHash(), sent.codeExpiresAt(), 4, sent.sends(), sent.lastSentAt()).toJson());
+        java.util.concurrent.CyclicBarrier together = new java.util.concurrent.CyclicBarrier(2);
+        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        try {
+            List<java.util.concurrent.Future<String>> answers = new java.util.ArrayList<>();
+            for (int i = 0; i < 2; i++) {
+                answers.add(pool.submit(() -> {
+                    together.await(10, java.util.concurrent.TimeUnit.SECONDS);
+                    MvcResult result = mvc.perform(check(session, code(wrongCodeFor(code)))).andReturn();
+                    assertThat(result.getResponse().getStatus()).isEqualTo(400);
+                    return new com.fasterxml.jackson.databind.ObjectMapper()
+                            .readTree(result.getResponse().getContentAsString()).get("type").asText();
+                }));
+            }
+            List<String> types = new java.util.ArrayList<>();
+            for (java.util.concurrent.Future<String> answer : answers) {
+                types.add(answer.get(30, java.util.concurrent.TimeUnit.SECONDS));
+            }
+
+            assertThat(types).containsExactlyInAnyOrder("invalid_code", "too_many_attempts");
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(storedVerification(session).attempts()).isEqualTo(5);
+    }
+
+    // --- GET /journey: email_verification ---
+
+    @Test
+    @DisplayName("AC-09 — getJourney_codePending_showsTheEmailTheExpiryAndTheResendTime")
+    void getJourney_codePending_showsTheEmailTheExpiryAndTheResendTime() throws Exception {
+        SessionId session = entitledJourney();
+        mvc.perform(get(session)).andExpect(jsonPath("$.email_verification").doesNotExist());
+        sentCode(session);
+
+        mvc.perform(get(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.step").value("entitlement_confirmed"))
+                .andExpect(jsonPath("$.email_verification.email").value(EMAIL))
+                .andExpect(jsonPath("$.email_verification.verified").value(false))
+                .andExpect(jsonPath("$.email_verification.code_expires_at").isNotEmpty())
+                .andExpect(jsonPath("$.email_verification.resend_available_at").isNotEmpty())
+                .andExpect(jsonPath("$.email_verification.sends_left").value(2));
+    }
+
+    @Test
+    @DisplayName("AC-09 — getJourney_offerObtained_hasNoEmailVerification")
+    void getJourney_offerObtained_hasNoEmailVerification() throws Exception {
+        SessionId session = entitledJourney();
+        sentCode(session);
+        jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET state = 'completed', step = 'offer_obtained', "
+                        + "ended_at = now() WHERE id = :id")
+                .param("id", journeyOf(session)).update();
+
+        mvc.perform(get(session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.state").value("completed"))
+                .andExpect(jsonPath("$.email_verification").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("AC-10 — postCode_anyOutcome_logsCarryTheResultButNoEmailCodeOrHash")
+    void postCode_anyOutcome_logsCarryTheResultButNoEmailCodeOrHash() throws Exception {
+        SessionId session = entitledJourney();
+        String code = sentCode(session);
+        String hash = storedVerification(session).codeHash();
+        mvc.perform(check(session, code(wrongCodeFor(code)))).andExpect(status().isBadRequest());
+        mvc.perform(check(session, code(code))).andExpect(status().isOk());
+        mvc.perform(check(session, code(code))).andExpect(status().isConflict());
+
+        String everything = logs.list.stream().map(EmailVerificationApiIT::describe).collect(Collectors.joining("\n"));
+        assertThat(everything).contains("EMAIL_CODE_CHECKED", "result=invalid_code", "result=verified",
+                "STEP_REACHED", "step=email_verified")
+                .doesNotContain(EMAIL, EMAIL.toLowerCase(java.util.Locale.ROOT), "Elena", code, hash);
+    }
+
     // --- helpers ---
+
+    private MockHttpServletRequestBuilder get(SessionId session) {
+        return MockMvcRequestBuilders.get(CONTEXT + "/api/v1/journey").contextPath(CONTEXT).with(host())
+                .cookie(new Cookie("journey_session", session.value()));
+    }
 
     private void backdate(SessionId session, EmailVerificationRecord record, Duration by) {
         sessions.write(SANDBOX, session, Section.EMAIL_VERIFICATION, new EmailVerificationRecord(record.pendingEmail(),
-                record.codeHash(), record.codeExpiresAt().minus(by), record.attempts(), record.sends(),
-                record.lastSentAt().minus(by)).toJson());
+                record.codeHash(), record.codeExpiresAt() == null ? null : record.codeExpiresAt().minus(by),
+                record.attempts(), record.sends(), record.lastSentAt().minus(by), record.voidedCodeHashes()).toJson());
     }
 
     private void assertNothingSent(SessionId session) {
@@ -507,8 +756,31 @@ class EmailVerificationApiIT {
         return body == null ? request : request.contentType(MediaType.APPLICATION_JSON).content(body);
     }
 
+    private MockHttpServletRequestBuilder check(SessionId session, String body) {
+        MockHttpServletRequestBuilder request = postTo(ENDPOINT + "/code", session);
+        return body == null ? request : request.contentType(MediaType.APPLICATION_JSON).content(body);
+    }
+
+    private static String code(String code) {
+        return "{\"code\":\"" + code + "\"}";
+    }
+
+    /** Sends a code to the holder and returns it, as the mail provider got it. */
+    private String sentCode(SessionId session) throws Exception {
+        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
+        return RecordingEmailCodeMailer.codeOf(mailer.last());
+    }
+
+    private static String wrongCodeFor(String code) {
+        return code.equals("000000") ? "000001" : "000000";
+    }
+
     private MockHttpServletRequestBuilder post(SessionId session) {
-        MockHttpServletRequestBuilder request = MockMvcRequestBuilders.post(ENDPOINT)
+        return postTo(ENDPOINT, session);
+    }
+
+    private MockHttpServletRequestBuilder postTo(String path, SessionId session) {
+        MockHttpServletRequestBuilder request = MockMvcRequestBuilders.post(path)
                 .contextPath(CONTEXT)
                 .header("X-Requested-With", "issuance-portal")
                 .with(host())

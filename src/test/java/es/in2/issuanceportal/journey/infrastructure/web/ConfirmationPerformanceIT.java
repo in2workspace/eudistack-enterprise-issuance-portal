@@ -39,14 +39,14 @@ class ConfirmationPerformanceIT extends SystemIssuanceITSupport {
                 .withBody("{\"onboardingUrl\":\"https://sandbox.wallet.test/t/{{randomValue type='UUID'}}\",\"expiresIn\":540}")));
         for (int i = 0; i < WARM_UP; i++) {
             SessionId session = entitledJourney();
-            mvc.perform(confirmation(session, EMAIL)).andExpect(status().isOk());
+            mvc.perform(confirmation(session)).andExpect(status().isOk());
         }
 
         List<Long> nanos = new ArrayList<>();
         for (int i = 0; i < MEASURED; i++) {
             SessionId session = entitledJourney();
             long start = System.nanoTime();
-            mvc.perform(confirmation(session, EMAIL)).andExpect(status().isOk());
+            mvc.perform(confirmation(session)).andExpect(status().isOk());
             nanos.add(System.nanoTime() - start);
         }
 

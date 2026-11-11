@@ -12,6 +12,8 @@ import es.in2.issuanceportal.TestcontainersConfiguration;
 import es.in2.issuanceportal.journey.api.JourneyProgress;
 import es.in2.issuanceportal.journey.application.port.SystemTokenProvider;
 import es.in2.issuanceportal.journey.infrastructure.systemtoken.MachineCredentialFixture;
+import es.in2.issuanceportal.session.api.EmailRecord;
+import es.in2.issuanceportal.session.api.EmailVerificationRecord;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.IdentifierType;
@@ -28,7 +30,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
-import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -292,8 +293,19 @@ abstract class SystemIssuanceITSupport {
         return session;
     }
 
-    /** What Identification and Authentic source leave in the journey before the holder confirms. */
+    /** What the holder has before confirming: the entitlement and the email verified with a code. */
     SessionId entitledJourney() throws Exception {
+        SessionId session = entitledJourneyWithoutEmail();
+        sessions.write(SANDBOX, session, Section.EMAIL, new EmailRecord(EMAIL).toJson());
+        sessions.write(SANDBOX, session, Section.EMAIL_VERIFICATION, new EmailVerificationRecord(EMAIL, null, null, 0, 1,
+                clock.instant()).toJson());
+        jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET step = 'email_verified' WHERE id = :id")
+                .param("id", journeyOf(session)).update();
+        return session;
+    }
+
+    /** What Identification and Authentic source leave in the journey before the holder verifies the email. */
+    SessionId entitledJourneyWithoutEmail() throws Exception {
         SessionId session = identifiedJourney();
         sessions.write(SANDBOX, session, Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.DNI, Map.of(
                 "personal_administrative_number", ADMINISTRATIVE_NUMBER,
@@ -305,16 +317,14 @@ abstract class SystemIssuanceITSupport {
         return session;
     }
 
-    /** The holder's call, with the holder's own token: it must never go on to another system (NFR-4). */
-    static MockHttpServletRequestBuilder confirmation(SessionId session, String email) {
+    /** The holder's call, with the holder's own token: it must never go on to another system (NFR-4). It has no body. */
+    static MockHttpServletRequestBuilder confirmation(SessionId session) {
         return MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey/confirmation")
                 .contextPath(CONTEXT)
                 .header("X-Requested-With", "issuance-portal")
                 .header("Authorization", "Bearer " + HOLDER_TOKEN)
                 .with(host())
-                .cookie(new Cookie("journey_session", session.value()))
-                .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"email\":\"" + email + "\"}");
+                .cookie(new Cookie("journey_session", session.value()));
     }
 
     static RequestPostProcessor host() {

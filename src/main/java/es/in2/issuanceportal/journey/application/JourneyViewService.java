@@ -1,6 +1,9 @@
 package es.in2.issuanceportal.journey.application;
 
+import es.in2.issuanceportal.journey.domain.EmailVerification;
 import es.in2.issuanceportal.journey.domain.Journey;
+import es.in2.issuanceportal.journey.domain.JourneyState;
+import es.in2.issuanceportal.session.api.EmailVerificationRecord;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.InvalidSectionException;
 import es.in2.issuanceportal.session.api.IssuanceRecord;
@@ -38,9 +41,12 @@ public class JourneyViewService {
         this.configs = configs;
     }
 
-    /** The journey and, when the session still has them, its preview (AC-16) and its offer (AC-17). */
+    /**
+     * The journey and, when the session still has them, its preview (AC-16), its offer (AC-17) and its email
+     * verification, from the first code sent until the journey obtains its offer or ends (EUD-358).
+     */
     public record View(Journey journey, Optional<EntitlementRecord.Preview> attestation,
-                       Optional<IssuanceService.Offer> offer) {
+                       Optional<IssuanceService.Offer> offer, Optional<EmailVerification> emailVerification) {
     }
 
     public View current(TenantId tenant, SessionId session) {
@@ -49,7 +55,14 @@ public class JourneyViewService {
                 EntitlementRecord::fromJson).map(EntitlementRecord::preview);
         Optional<IssuanceService.Offer> offer = read(tenant, session, journey.id(), Section.ISSUANCE,
                 IssuanceRecord::fromJson).flatMap(issuance -> offer(tenant, journey.id(), issuance));
-        return new View(journey, attestation, offer);
+        Optional<EmailVerification> emailVerification = journey.state() == JourneyState.IN_PROGRESS
+                ? read(tenant, session, journey.id(), Section.EMAIL_VERIFICATION, JourneyViewService::verification)
+                : Optional.empty();
+        return new View(journey, attestation, offer, emailVerification);
+    }
+
+    private static EmailVerification verification(String section) {
+        return EmailVerificationService.fromRecord(EmailVerificationRecord.fromJson(section));
     }
 
     /**
