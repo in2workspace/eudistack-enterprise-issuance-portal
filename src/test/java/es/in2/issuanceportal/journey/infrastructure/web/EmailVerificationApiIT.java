@@ -402,7 +402,7 @@ class EmailVerificationApiIT {
         mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", "en-GB,en;q=0.9,es;q=0.5"))
                 .andExpect(status().isAccepted());
 
-        assertThat(mailer.last().subject()).isEqualTo("Your verification code");
+        assertThat(mailer.last().subject()).isEqualTo("Your verification code — DoctorID Portal");
         assertThat(mailer.last().body()).contains("DoctorID Portal", "10 minutes").doesNotContain("http");
     }
 
@@ -414,7 +414,7 @@ class EmailVerificationApiIT {
                 .andExpect(status().isAccepted());
 
         assertThat(mailer.sent()).hasSize(2).allSatisfy(message -> {
-            assertThat(message.subject()).isEqualTo("Tu código de verificación");
+            assertThat(message.subject()).isEqualTo("Tu código de verificación — Portal DoctorID");
             assertThat(message.body()).contains("Portal DoctorID", "10 minutos");
         });
     }

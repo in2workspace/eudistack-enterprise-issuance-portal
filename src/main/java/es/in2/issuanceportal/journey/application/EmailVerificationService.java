@@ -118,7 +118,8 @@ public class EmailVerificationService {
 
         String code = EmailVerification.newCode();
         try {
-            mailer.send(EmailCodeMessage.of(email.value(), code, portalName, language));
+            mailer.send(EmailCodeMessage.of(email.value(), code, portalName, language,
+                    tenant.value()));
         } catch (EmailCodeDeliveryException e) {
             clientLimit.giveBack(clientAddress);
             log.warn("Code email of journey {} not sent: {}", journeyId, e.getMessage());

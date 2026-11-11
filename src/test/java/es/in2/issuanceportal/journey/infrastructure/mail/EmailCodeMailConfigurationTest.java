@@ -10,6 +10,8 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
 import org.springframework.mail.javamail.JavaMailSender;
 
+import java.util.Map;
+
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
@@ -17,12 +19,14 @@ import static org.mockito.Mockito.mock;
 class EmailCodeMailConfigurationTest {
 
     private static final String FROM = "noreply@mail.stg.eudistack.net";
+    private static final EmailBrandingProperties BRANDING =
+            new EmailBrandingProperties("https://assets.example.org/tenants", Map.of());
 
     @Test
     void mailerFor_smtpProvider_returnsSmtpMailer() {
         MailProperties properties = new MailProperties(MailProperties.Provider.SMTP);
 
-        assertThat(EmailCodeMailConfiguration.mailerFor(properties, () -> mock(JavaMailSender.class), FROM))
+        assertThat(EmailCodeMailConfiguration.mailerFor(properties, () -> mock(JavaMailSender.class), FROM, BRANDING))
                 .isInstanceOf(SmtpEmailCodeMailer.class);
     }
 
@@ -32,16 +36,27 @@ class EmailCodeMailConfigurationTest {
 
         assertThat(EmailCodeMailConfiguration.mailerFor(properties, () -> {
             throw new AssertionError("No mail sender in local");
-        }, null)).isInstanceOf(LocalEmailCodeMailer.class);
+        }, null, new EmailBrandingProperties(null, Map.of()))).isInstanceOf(LocalEmailCodeMailer.class);
     }
 
     @Test
     void mailerFor_smtpWithoutSender_failsToStart() {
         MailProperties properties = new MailProperties(MailProperties.Provider.SMTP);
 
-        assertThatThrownBy(() -> EmailCodeMailConfiguration.mailerFor(properties, () -> mock(JavaMailSender.class), ""))
+        assertThatThrownBy(() -> EmailCodeMailConfiguration.mailerFor(properties, () -> mock(JavaMailSender.class), "",
+                BRANDING))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("SMTP_FROM");
+    }
+
+    @Test
+    void mailerFor_smtpWithoutAssetsBaseUrl_failsToStart() {
+        MailProperties properties = new MailProperties(MailProperties.Provider.SMTP);
+
+        assertThatThrownBy(() -> EmailCodeMailConfiguration.mailerFor(properties, () -> mock(JavaMailSender.class),
+                FROM, new EmailBrandingProperties("", Map.of())))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("EMAIL_ASSETS_BASE_URL");
     }
 
     @Test
@@ -53,7 +68,7 @@ class EmailCodeMailConfigurationTest {
         logger.addAppender(logs);
         try {
             new LocalEmailCodeMailer().send(EmailCodeMessage.of("ana@example.org", "042042", "DoctorID",
-                    EmailLanguage.ES));
+                    EmailLanguage.ES, "cgcom"));
         } finally {
             logger.detachAppender(logs);
         }

@@ -15,6 +15,7 @@ import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.mail.javamail.JavaMailSender;
 
 import java.io.IOException;
+import java.util.Map;
 
 import static es.in2.issuanceportal.journey.infrastructure.mail.SmtpTestSupport.FROM;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -24,7 +25,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class SmtpTlsHardeningTest {
 
     private static final EmailCodeMessage MESSAGE = EmailCodeMessage.of("ana@example.org", "042042",
-            "DoctorID", EmailLanguage.ES);
+            "DoctorID", EmailLanguage.ES, "cgcom");
 
     @RegisterExtension
     static final GreenMailExtension GREEN_MAIL_TLS = new GreenMailExtension(ServerSetup.SMTPS.dynamicPort())
@@ -46,7 +47,7 @@ class SmtpTlsHardeningTest {
         try (SmtpTestSupport.PlainSmtpServer plain = new SmtpTestSupport.PlainSmtpServer()) {
             shippedConfig(plain.port()).run(context -> {
                 SmtpEmailCodeMailer mailer = new SmtpEmailCodeMailer(
-                        new SmtpMailSender(context.getBean(JavaMailSender.class), FROM));
+                        new SmtpMailSender(context.getBean(JavaMailSender.class), FROM), SmtpTestSupport.html());
 
                 assertThatThrownBy(() -> mailer.send(MESSAGE))
                         .isInstanceOf(EmailCodeDeliveryException.class)
@@ -66,7 +67,7 @@ class SmtpTlsHardeningTest {
         shippedConfig(GREEN_MAIL_TLS.getSmtps().getPort(),
                 "spring.mail.properties.mail.smtp.ssl.enable=true").run(context -> {
             SmtpEmailCodeMailer mailer = new SmtpEmailCodeMailer(
-                    new SmtpMailSender(context.getBean(JavaMailSender.class), FROM));
+                    new SmtpMailSender(context.getBean(JavaMailSender.class), FROM), SmtpTestSupport.html());
 
             assertThatThrownBy(() -> mailer.send(MESSAGE))
                     .isInstanceOf(EmailCodeDeliveryException.class)
@@ -86,7 +87,8 @@ class SmtpTlsHardeningTest {
                 "spring.mail.properties.mail.smtp.ssl.enable=true",
                 "spring.mail.properties.mail.smtp.ssl.trust=*",
                 "spring.mail.properties.mail.smtp.ssl.checkserveridentity=false").run(context -> {
-            new SmtpEmailCodeMailer(new SmtpMailSender(context.getBean(JavaMailSender.class), FROM)).send(MESSAGE);
+            new SmtpEmailCodeMailer(new SmtpMailSender(context.getBean(JavaMailSender.class), FROM),
+                    SmtpTestSupport.html()).send(MESSAGE);
         });
 
         assertThat(GREEN_MAIL_TLS.getReceivedMessages()).hasSize(1);
@@ -100,6 +102,7 @@ class SmtpTlsHardeningTest {
                 .withConfiguration(AutoConfigurations.of(MailSenderAutoConfiguration.class))
                 .withUserConfiguration(IncidentMailConfiguration.class, EmailCodeMailConfiguration.class)
                 .withBean(MailProperties.class, () -> new MailProperties(MailProperties.Provider.SMTP))
+                .withBean(EmailBrandingProperties.class, () -> new EmailBrandingProperties("https://assets.example.org", Map.of()))
                 .run(context -> assertThat(context).hasFailed().getFailure()
                         .hasRootCauseInstanceOf(IllegalStateException.class)
                         .rootCause().hasMessageContaining("SMTP_FROM"));

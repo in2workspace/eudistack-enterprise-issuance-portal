@@ -57,6 +57,9 @@ dependencies {
     // Incidents and verification codes go out by SMTP (SES SMTP interface), with spring.mail and the same SMTP_*
     // variables as the wallet (design.md AD-8).
     implementation 'org.springframework.boot:spring-boot-starter-mail'
+    // The code email is HTML from a Thymeleaf template (the wallet's OTP email, without links). The engine is
+    // built by hand, not with the starter: the service has no views and must not get a view resolver.
+    implementation 'org.thymeleaf:thymeleaf-spring6'
 
     // --- System token ---
     // The machine credential of each tenant is read from SSM Parameter Store, and the presentation and client

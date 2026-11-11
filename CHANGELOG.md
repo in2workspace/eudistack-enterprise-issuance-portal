@@ -13,7 +13,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Límites: 3 envíos por recorrido, 180 s entre envíos (429 `resend_too_soon` con `Retry-After`) y 10 por IP y hora (429 `too_many_requests`). Con 3 envíos, 429 `too_many_codes`.
   - Un envío que no sale responde 503 `email_unavailable`, no se guarda y no cuenta en los límites.
   - `POST /journey/email-verification/code` comprueba el código (400 `invalid_code`, `expired_code` o `too_many_attempts`) y, si es correcto, fija el correo verificado y pasa al paso `email_verified`.
-  - Correo por SMTP en español o inglés según `Accept-Language`, con el nombre del portal de `texts.<idioma>.portal.app_name` y sin enlaces. El adaptador local no envía ni registra el código.
+  - Correo por SMTP en español o inglés según `Accept-Language`, con el nombre del portal de `texts.<idioma>.portal.app_name` y sin enlaces. Es la plantilla del correo OTP del wallet (HTML con la marca del tenant, sin ningún enlace) con el texto plano como alternativa (`multipart/alternative`). El logo y el fondo de cabecera salen solo si el bloque del tenant en `email-branding.yaml` los activa, desde `EMAIL_ASSETS_BASE_URL/<tenant>/email/`; `EMAIL_BRANDING_PATH` sustituye el fichero, como en el wallet. Con `smtp`, `EMAIL_ASSETS_BASE_URL` es obligatoria. El adaptador local no envía ni registra el código.
   - El código se guarda como SHA-256 del recorrido y el código, en la sección cifrada nueva `email_verification`. La migración V4 añade su columna y el paso `email_verified`.
   - `GET /journey` devuelve `email_verification`. Nuevas trazas del envío y de la comprobación, sin el correo ni el código.
 

@@ -395,7 +395,7 @@ class EmailVerificationServiceTest {
 
         service.send(CGCOM, session, EMAIL, EmailLanguage.EN, CLIENT);
 
-        assertThat(mailer.last().subject()).isEqualTo("Your verification code");
+        assertThat(mailer.last().subject()).isEqualTo("Your verification code — DoctorID Portal");
         assertThat(mailer.last().body()).contains("DoctorID Portal").doesNotContain("Portal DoctorID");
     }
 
@@ -408,7 +408,7 @@ class EmailVerificationServiceTest {
 
         service.send(CGCOM, session, EMAIL, EmailLanguage.ES, CLIENT);
 
-        assertThat(mailer.last().subject()).isEqualTo("Tu código de verificación");
+        assertThat(mailer.last().subject()).isEqualTo("Tu código de verificación — Portal DoctorID");
         assertThat(mailer.last().body()).contains("Portal DoctorID");
     }
 

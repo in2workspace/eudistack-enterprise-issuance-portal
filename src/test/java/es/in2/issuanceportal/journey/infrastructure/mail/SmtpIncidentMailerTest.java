@@ -28,7 +28,8 @@ class SmtpIncidentMailerTest {
             "soporte@cgcom-identidad.es", "ana@example.org", "[Incidencia] Otro: Duda ñ", "Nombre: Ana Peña\n");
 
     @RegisterExtension
-    static final GreenMailExtension GREEN_MAIL = new GreenMailExtension(ServerSetup.SMTP.dynamicPort());
+    static final GreenMailExtension GREEN_MAIL = new GreenMailExtension(ServerSetup.SMTP.dynamicPort())
+            .withPerMethodLifecycle(true);
 
     @Test
     @DisplayName("AC-04 — send_message_sendsPlainTextUtf8FromPlatformToSupportWithReplyTo")

@@ -1,0 +1,18 @@
+# ---------------------------------------------------------------------------
+# Email branding data, per tenant, for the code email. This bundled file is the default, with no tenant: no
+# email has images. An environment replaces it entirely by pointing EMAIL_BRANDING_PATH at its own file (e.g.
+# file:/etc/eudistack/email-branding.yaml). Same shape as the wallet's and the issuer's email-branding.yaml, so
+# one file can serve all of them; this service ignores the keys it does not use (social-links, support and
+# knowledge-base links: its email has no links).
+#
+# - logo / header-background (default false): the email shows the image only when the tenant's block sets it
+#   to true. Image locations are not configured; they follow a fixed naming convention under the assets root
+#   (email-branding.assets-base-url, EMAIL_ASSETS_BASE_URL):
+#     <assets-base-url>/<tenant-id>/email/logo.png
+#     <assets-base-url>/<tenant-id>/email/header-bg.png
+#   header-bg.png must be exactly 640x190px.
+#
+# Tenants without a block get no images.
+# ---------------------------------------------------------------------------
+email-branding:
+  tenants: {}

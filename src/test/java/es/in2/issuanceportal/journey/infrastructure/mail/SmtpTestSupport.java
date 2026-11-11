@@ -13,6 +13,7 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.CopyOnWriteArrayList;
 
@@ -20,6 +21,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 final class SmtpTestSupport {
 
     static final String FROM = "noreply@mail.stg.eudistack.net";
+    static final String ASSETS = "https://assets.example.org/tenants";
 
     private SmtpTestSupport() {
     }
@@ -36,6 +38,16 @@ final class SmtpTestSupport {
         properties.put("mail.smtp.timeout", "5000");
         properties.put("mail.smtp.writetimeout", "5000");
         return sender;
+    }
+
+    /** The HTML renderer of the code email, with no tenant branded. */
+    static EmailCodeHtml html() {
+        return html(Map.of());
+    }
+
+    /** The HTML renderer of the code email, with the assets of {@link #ASSETS} and the given tenants branded. */
+    static EmailCodeHtml html(Map<String, EmailBrandingProperties.TenantEmailBranding> tenants) {
+        return new EmailCodeHtml(new EmailBrandingResolver(new EmailBrandingProperties(ASSETS, tenants)));
     }
 
     /** An empty MIME message, for a mocked sender. */

@@ -17,16 +17,27 @@ class EmailCodeMailConfiguration {
 
     @Bean
     EmailCodeMailer emailCodeMailer(MailProperties properties, ObjectProvider<JavaMailSender> mailSender,
-                                    @Value(IncidentMailConfiguration.FROM_PROPERTY) String from) {
+                                    @Value(IncidentMailConfiguration.FROM_PROPERTY) String from,
+                                    EmailBrandingProperties branding) {
         log.info("Verification codes sent with the {} mail provider", properties.provider());
-        return mailerFor(properties, mailSender::getObject, from);
+        return mailerFor(properties, mailSender::getObject, from, branding);
     }
 
-    static EmailCodeMailer mailerFor(MailProperties properties, Supplier<JavaMailSender> mailSender, String from) {
+    static EmailCodeMailer mailerFor(MailProperties properties, Supplier<JavaMailSender> mailSender, String from,
+                                     EmailBrandingProperties branding) {
         return switch (properties.provider()) {
-            case SMTP -> new SmtpEmailCodeMailer(new SmtpMailSender(mailSender.get(),
-                    IncidentMailConfiguration.requireFrom(from)));
+            case SMTP -> new SmtpEmailCodeMailer(
+                    new SmtpMailSender(mailSender.get(), IncidentMailConfiguration.requireFrom(from)),
+                    new EmailCodeHtml(new EmailBrandingResolver(requireAssetsBaseUrl(branding))));
             case LOCAL -> new LocalEmailCodeMailer();
         };
+    }
+
+    /** Fails the start, not the first send: the images of a branded tenant would be broken links. */
+    static EmailBrandingProperties requireAssetsBaseUrl(EmailBrandingProperties branding) {
+        if (branding.assetsBaseUrl() == null || branding.assetsBaseUrl().isBlank()) {
+            throw new IllegalStateException("EMAIL_ASSETS_BASE_URL is required with the smtp mail provider");
+        }
+        return branding;
     }
 }
