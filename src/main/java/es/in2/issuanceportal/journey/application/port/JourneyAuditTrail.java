@@ -84,9 +84,42 @@ public interface JourneyAuditTrail {
     record OnboardingTicketRequested(UUID eventId, UUID journeyId, TicketOutcome result, Instant occurredAt) {
     }
 
+    /** What came of a request to send the holder's email a verification code. */
+    enum EmailCodeOutcome {
+
+        /** The code email was handed over for delivery. */
+        SENT("sent"),
+        /** Less than 180 seconds since the journey's last send. */
+        RESEND_TOO_SOON("resend_too_soon"),
+        /** The journey already sent its 3 codes. */
+        TOO_MANY_CODES("too_many_codes"),
+        /** The client address already sent 10 codes in the last hour. */
+        TOO_MANY_REQUESTS("too_many_requests"),
+        /** The mail provider did not take the email, or did not answer in time. */
+        EMAIL_UNAVAILABLE("email_unavailable");
+
+        private final String code;
+
+        EmailCodeOutcome(String code) {
+            this.code = code;
+        }
+
+        public String code() {
+            return code;
+        }
+    }
+
+    /**
+     * A request to send a verification code (design.md §3.5): the result only. No email, code or hash.
+     */
+    record EmailCodeRequested(UUID eventId, UUID journeyId, EmailCodeOutcome result, Instant occurredAt) {
+    }
+
     void append(TenantId tenant, Event event);
 
     void append(TenantId tenant, IssuanceRequested event);
 
     void append(TenantId tenant, OnboardingTicketRequested event);
+
+    void append(TenantId tenant, EmailCodeRequested event);
 }

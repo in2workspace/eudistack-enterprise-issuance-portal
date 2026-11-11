@@ -57,6 +57,30 @@ abstract class JourneySessionsContract {
     }
 
     @Test
+    void clear_writtenSection_emptiesOnlyThatSection() {
+        SessionId session = openSession(SANDBOX);
+        sessions().write(SANDBOX, session, Section.EMAIL, "{\"email\":\"ana@example.org\"}");
+        sessions().write(SANDBOX, session, Section.EMAIL_VERIFICATION, "{\"sends\":1}");
+
+        sessions().clear(SANDBOX, session, Section.EMAIL);
+        sessions().clear(SANDBOX, session, Section.EMAIL);
+        sessions().clear(SANDBOX, session, Section.IDENTITY);
+
+        assertThat(sessions().read(SANDBOX, session, Section.EMAIL)).isEmpty();
+        assertThat(sessions().read(SANDBOX, session, Section.EMAIL_VERIFICATION)).contains("{\"sends\":1}");
+    }
+
+    @Test
+    void write_emailVerificationSection_isReadBack() {
+        SessionId session = openSession(SANDBOX);
+
+        sessions().write(SANDBOX, session, Section.EMAIL_VERIFICATION, "{\"sends\":2}");
+
+        assertThat(sessions().read(SANDBOX, session, Section.EMAIL_VERIFICATION)).contains("{\"sends\":2}");
+        assertThat(sessions().read(SANDBOX, session, Section.EMAIL)).isEmpty();
+    }
+
+    @Test
     void close_openSession_deletesItIdempotently() {
         SessionId session = SessionId.generate();
         UUID journey = newJourney(SANDBOX);
@@ -77,6 +101,7 @@ abstract class JourneySessionsContract {
         assertThat(sessions().journeyOf(SANDBOX, unknown)).isEmpty();
         assertJourneyClosed(() -> sessions().read(SANDBOX, unknown, Section.IDENTITY));
         assertJourneyClosed(() -> sessions().write(SANDBOX, unknown, Section.IDENTITY, "{}"));
+        assertJourneyClosed(() -> sessions().clear(SANDBOX, unknown, Section.EMAIL));
         assertJourneyClosed(() -> sessions().rotate(SANDBOX, unknown));
     }
 

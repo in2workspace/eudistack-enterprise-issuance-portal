@@ -87,6 +87,22 @@ class LogJourneyAuditTrail implements JourneyAuditTrail {
         }
     }
 
+    @Override
+    public void append(TenantId tenant, EmailCodeRequested event) {
+        try {
+            audit.info("email code {} {} {} {} {} {}",
+                    kv(EVENT, "EMAIL_CODE_REQUESTED"),
+                    kv(JOURNEY_ID, event.journeyId()),
+                    kv(EVENT_ID, event.eventId()),
+                    kv(TENANT, tenant.value()),
+                    kv(RESULT, event.result().code()),
+                    kv(OCCURRED_AT, event.occurredAt()));
+        } catch (RuntimeException e) {
+            audit.error("Could not record the email code request {} of journey {}",
+                    event.eventId(), event.journeyId(), e);
+        }
+    }
+
     /**
      * After commit the journey has already changed: a failure here must never reach the caller
      * (ES-06), so it is only logged, without personal data.

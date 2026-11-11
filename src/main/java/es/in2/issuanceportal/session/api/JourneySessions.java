@@ -21,6 +21,9 @@ public interface JourneySessions {
 
     void write(TenantId tenant, SessionId session, Section section, String content);
 
+    /** Empties one section of the session. Idempotent: an empty section stays empty. */
+    void clear(TenantId tenant, SessionId session, Section section);
+
     /** Physically deletes the session of the journey, with all its personal data. Idempotent. */
     void close(TenantId tenant, UUID journeyId);
 

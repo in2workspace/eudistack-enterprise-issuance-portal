@@ -12,6 +12,7 @@ public class RecordingJourneyAuditTrail implements JourneyAuditTrail {
     private final List<Event> events = new CopyOnWriteArrayList<>();
     private final List<IssuanceRequested> issuanceRequests = new CopyOnWriteArrayList<>();
     private final List<OnboardingTicketRequested> ticketRequests = new CopyOnWriteArrayList<>();
+    private final List<EmailCodeRequested> emailCodeRequests = new CopyOnWriteArrayList<>();
     private volatile boolean failing;
 
     @Override
@@ -36,6 +37,18 @@ public class RecordingJourneyAuditTrail implements JourneyAuditTrail {
             throw new IllegalStateException("audit unavailable");
         }
         ticketRequests.add(event);
+    }
+
+    @Override
+    public void append(TenantId tenant, EmailCodeRequested event) {
+        if (failing) {
+            throw new IllegalStateException("audit unavailable");
+        }
+        emailCodeRequests.add(event);
+    }
+
+    public List<EmailCodeRequested> emailCodeRequests() {
+        return List.copyOf(emailCodeRequests);
     }
 
     public List<OnboardingTicketRequested> ticketRequests() {

@@ -13,5 +13,7 @@ public enum Section {
     /** Issuance requests with their idempotency keys, offer and its expiry. Written by Journey. */
     ISSUANCE,
     /** The holder's email. Written by Journey. */
-    EMAIL
+    EMAIL,
+    /** The code sent to the holder's email and its limits, until the email is verified. Written by Journey. */
+    EMAIL_VERIFICATION
 }

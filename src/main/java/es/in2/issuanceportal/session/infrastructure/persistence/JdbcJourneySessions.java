@@ -70,6 +70,16 @@ class JdbcJourneySessions implements JourneySessions {
     }
 
     @Override
+    public void clear(TenantId tenant, SessionId session, Section section) {
+        int updated = jdbc.sql("UPDATE " + table(tenant) + " SET " + column(section) + " = NULL WHERE session_id_hash = :hash")
+                .param("hash", session.hash())
+                .update();
+        if (updated == 0) {
+            throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
+        }
+    }
+
+    @Override
     public void close(TenantId tenant, UUID journeyId) {
         jdbc.sql("DELETE FROM " + table(tenant) + " WHERE journey_id = :journey")
                 .param("journey", journeyId)
@@ -104,6 +114,7 @@ class JdbcJourneySessions implements JourneySessions {
             case ENTITLEMENT -> "entitlement";
             case ISSUANCE -> "issuance";
             case EMAIL -> "email";
+            case EMAIL_VERIFICATION -> "email_verification";
         };
     }
 

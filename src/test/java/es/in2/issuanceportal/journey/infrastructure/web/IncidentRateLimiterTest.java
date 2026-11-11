@@ -123,6 +123,20 @@ class IncidentRateLimiterTest {
         assertThat(limiter.firstRejectionInWindow("203.0.113.7")).isTrue();
     }
 
+    @Test
+    @DisplayName("AC-05 — tryConsume_emailCodeBudget_allowsTenAnHourAndHasItsOwnWindow")
+    void tryConsume_emailCodeBudget_allowsTenAnHourAndHasItsOwnWindow() {
+        IncidentRateLimiter codes = new IncidentRateLimiter(clock, IncidentRateLimiter.EMAIL_CODE_LIMIT);
+        exhaust("203.0.113.7");
+
+        for (int i = 0; i < 10; i++) {
+            assertThat(codes.tryConsume("203.0.113.7")).isEmpty();
+        }
+
+        assertThat(codes.tryConsume("203.0.113.7")).isPresent();
+        assertThat(limiter.tryConsume("203.0.113.7")).isPresent();
+    }
+
     private void exhaust(String ip) {
         for (int i = 0; i < 5; i++) {
             limiter.tryConsume(ip);

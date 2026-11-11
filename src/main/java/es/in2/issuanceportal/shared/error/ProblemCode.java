@@ -13,13 +13,16 @@ public enum ProblemCode {
     TENANT_NOT_FOUND("tenant_not_found", "Tenant not found", 404),
     STEP_NOT_ALLOWED("step_not_allowed", "Step not allowed", 409),
     JOURNEY_CLOSED("journey_closed", "Journey closed", 410),
+    RESEND_TOO_SOON("resend_too_soon", "Resend too soon", 429),
+    TOO_MANY_CODES("too_many_codes", "Too many codes", 429),
     TOO_MANY_REQUESTS("too_many_requests", "Too many requests", 429),
     ISSUANCE_REJECTED("issuance_rejected", "Issuance rejected", 502),
     SERVICE_UNAVAILABLE("service_unavailable", "Service unavailable", 503),
     CONFIG_UNAVAILABLE("config_unavailable", "Portal configuration unavailable", 503),
     AUTHENTIC_SOURCE_UNAVAILABLE("authentic_source_unavailable", "Authentic source unavailable", 503),
     ISSUANCE_UNAVAILABLE("issuance_unavailable", "Issuance unavailable", 503),
-    ONBOARDING_UNAVAILABLE("onboarding_unavailable", "Onboarding unavailable", 503);
+    ONBOARDING_UNAVAILABLE("onboarding_unavailable", "Onboarding unavailable", 503),
+    EMAIL_UNAVAILABLE("email_unavailable", "Email unavailable", 503);
 
     private final String code;
     private final String title;
