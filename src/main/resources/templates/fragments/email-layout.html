@@ -4,8 +4,9 @@
   Shared layout of the transactional emails (header / footer). Brand-specific items come from the
   `branding` variable (EmailBranding); colours are common to all tenants.
   Copy of eudistack-core-issuer's templates/fragments/email-layout.html (the wallet keeps another copy): keep
-  them in sync so the emails of every EUDIStack service look the same. The only difference of this copy: it has
-  no social links (the portal's email has no links at all), so the footer has no icons.
+  them in sync so the emails of every EUDIStack service look the same. Differences of this copy: it has no
+  social links (the portal's email has no links at all), so the footer has no icons, and it loads no web font
+  (the request to Google would tell it when the holder opens the email): Blinker falls back to Arial.
 -->
 <head th:fragment="head(title)">
     <meta charset="UTF-8" />
@@ -14,8 +15,7 @@
     <meta name="color-scheme" content="light only" />
     <meta name="supported-color-schemes" content="light only" />
     <title th:text="${title}">Email</title>
-    <!-- Gmail and Outlook desktop ignore web fonts: the Arial fallback is expected there. -->
-    <link href="https://fonts.googleapis.com/css2?family=Blinker:wght@400;600;700&amp;display=swap" rel="stylesheet" />
+    <!-- No web font: the Arial fallback of the font stacks is what Gmail and Outlook show anyway. -->
     <style>
         :root { color-scheme: light only; supported-color-schemes: light only; }
         /* Repeated per element: some clients do not inherit the font into nested tables. */

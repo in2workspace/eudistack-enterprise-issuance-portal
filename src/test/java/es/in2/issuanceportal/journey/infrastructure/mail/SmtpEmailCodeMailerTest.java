@@ -23,6 +23,8 @@ import org.springframework.mail.javamail.JavaMailSender;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static es.in2.issuanceportal.journey.infrastructure.mail.SmtpTestSupport.FROM;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -96,9 +98,13 @@ class SmtpEmailCodeMailerTest {
         String text = (String) alternatives.getBodyPart(0).getContent();
         String html = (String) alternatives.getBodyPart(1).getContent();
         assertThat(text).doesNotContain("http", "://", "www.");
-        assertThat(html).doesNotContainPattern("<a[\\s>]").doesNotContain("mailto:");
-        // The only href is the web font of the layout head: a stylesheet, not something to click.
-        assertThat(html.replaceAll("<link [^>]*>", "")).doesNotContain("href=");
+        assertThat(html).doesNotContainPattern("<a[\\s>]").doesNotContain("mailto:", "href=", "<link",
+                "fonts.googleapis.com");
+        // The only external addresses are the tenant's images, from the assets base URL.
+        Matcher urls = Pattern.compile("https?://[^\\s\"')<>]+").matcher(html);
+        while (urls.find()) {
+            assertThat(urls.group()).startsWith(SmtpTestSupport.ASSETS + "/cgcom/email/");
+        }
     }
 
     @Test

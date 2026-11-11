@@ -32,7 +32,7 @@ class EmailCodeHtmlTest {
                 .contains(">482193</span>")
                 .contains("Introdúcelo en el portal de emisión. Caduca en 10 minutos.")
                 .contains("Si no has pedido este código, puedes ignorar este correo.")
-                .contains("family=Blinker")
+                .doesNotContain("fonts.googleapis.com", "<link", "href=")
                 .doesNotContain("<img")
                 .doesNotContain("background-image")
                 .doesNotContain("cid:");
