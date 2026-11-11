@@ -292,6 +292,76 @@ class JourneyApiIT {
                 .andExpect(jsonPath("$.type").value("tenant_not_found"));
     }
 
+    @Test
+    @DisplayName("AC-16, EUD-277 — getJourney_entitlementConfirmed_returnsAttestationPreview")
+    void getJourney_entitlementConfirmed_returnsAttestationPreview() throws Exception {
+        SessionId session = start();
+        progress.reach(SANDBOX, session, JourneyProgress.Step.IDENTIFIED);
+        sessions.write(SANDBOX, session, Section.ENTITLEMENT, entitlement());
+        progress.reach(SANDBOX, session, JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
+
+        mvc.perform(withSession(get(JOURNEY, SANDBOX_HOST), session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.step").value("entitlement_confirmed"))
+                .andExpect(jsonPath("$.attestation.type_name").value("DoctorID"))
+                .andExpect(jsonPath("$.attestation.fields[0].label").value("Nombre y apellidos"))
+                .andExpect(jsonPath("$.attestation.fields[0].value").value("Lucía Prueba Sintética"))
+                .andExpect(jsonPath("$.attestation.fields[1].value").value("280000001"))
+                .andExpect(jsonPath("$.attestation.email").value("lucia.prueba@example.org"))
+                .andExpect(jsonPath("$.attestation.email_required").value(true))
+                .andExpect(jsonPath("$.offer").doesNotExist());
+    }
+
+    @Test
+    @DisplayName("AC-17, EUD-277 — getJourney_offerObtained_returnsOfferAsStored")
+    void getJourney_offerObtained_returnsOfferAsStored() throws Exception {
+        SessionId session = start();
+        progress.reach(SANDBOX, session, JourneyProgress.Step.IDENTIFIED);
+        sessions.write(SANDBOX, session, Section.ENTITLEMENT, entitlement());
+        progress.reach(SANDBOX, session, JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
+        java.time.Instant expires = java.time.Instant.parse("2030-01-01T10:10:00Z");
+        java.time.Instant onboardingExpires = java.time.Instant.parse("2030-01-01T10:09:00Z");
+        sessions.write(SANDBOX, session, Section.ISSUANCE, new es.in2.issuanceportal.session.api.IssuanceRecord(
+                UUID.randomUUID(), "openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fissuer%2Foffer%2F1",
+                expires, "https://sandbox.127.0.0.1.nip.io:4443/t/Zk3q9Xw2", onboardingExpires).toJson());
+
+        mvc.perform(withSession(get(JOURNEY, SANDBOX_HOST), session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.attestation.type_name").value("DoctorID"))
+                .andExpect(jsonPath("$.offer.credential_offer_uri")
+                        .value("openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fissuer%2Foffer%2F1"))
+                .andExpect(jsonPath("$.offer.expires_at").value("2030-01-01T10:10:00Z"))
+                .andExpect(jsonPath("$.offer.onboarding_url").value("https://sandbox.127.0.0.1.nip.io:4443/t/Zk3q9Xw2"))
+                .andExpect(jsonPath("$.offer.onboarding_expires_at").value("2030-01-01T10:09:00Z"));
+    }
+
+    @Test
+    @DisplayName("EC-12, EUD-277 — postJourney_and_withdrawal_answerWithoutAttestationOrOffer")
+    void postJourney_and_withdrawal_answerWithoutAttestationOrOffer() throws Exception {
+        SessionId session = start();
+        progress.reach(SANDBOX, session, JourneyProgress.Step.IDENTIFIED);
+        sessions.write(SANDBOX, session, Section.ENTITLEMENT, entitlement());
+        progress.reach(SANDBOX, session, JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
+
+        mvc.perform(withSession(post(JOURNEY + "/withdrawal", SANDBOX_HOST), session))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.attestation").doesNotExist())
+                .andExpect(jsonPath("$.offer").doesNotExist());
+        mvc.perform(withSession(get(JOURNEY, SANDBOX_HOST), session))
+                .andExpect(status().isGone());
+    }
+
+    private static String entitlement() {
+        return new es.in2.issuanceportal.session.api.EntitlementRecord(
+                es.in2.issuanceportal.session.api.IdentifierType.COLEGIADO, Map.of("license_number", "280000001"),
+                new es.in2.issuanceportal.session.api.EntitlementRecord.Preview("DoctorID", List.of(
+                        new es.in2.issuanceportal.session.api.EntitlementRecord.Field("Nombre y apellidos",
+                                "Lucía Prueba Sintética"),
+                        new es.in2.issuanceportal.session.api.EntitlementRecord.Field("Número de colegiado",
+                                "280000001")), "lucia.prueba@example.org", true),
+                java.time.Instant.parse("2026-11-09T10:00:00Z")).toJson();
+    }
+
     private SessionId start() throws Exception {
         return sessionOf(mvc.perform(post(JOURNEY, SANDBOX_HOST)).andExpect(status().isCreated()).andReturn());
     }

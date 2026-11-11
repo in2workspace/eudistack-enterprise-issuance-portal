@@ -125,6 +125,53 @@ class JourneyTest {
         assertThat(WithdrawalReason.fromCode("not_entitled")).isEqualTo(WithdrawalReason.NOT_ENTITLED);
     }
 
+    @Test
+    void recordIssuanceProcess_inProgress_keepsItAndCountsAsActivity() {
+        Journey journey = Journey.start(UUID.randomUUID(), T0);
+        UUID process = UUID.randomUUID();
+
+        journey.recordIssuanceProcess(process, T0.plusSeconds(30));
+
+        assertThat(journey.issuanceProcessId()).contains(process);
+        assertThat(journey.lastActivity()).isEqualTo(T0.plusSeconds(30));
+    }
+
+    @Test
+    void recordIssuanceProcess_sameProcessAgain_changesNothing() {
+        Journey journey = Journey.start(UUID.randomUUID(), T0);
+        UUID process = UUID.randomUUID();
+        journey.recordIssuanceProcess(process, T0);
+
+        journey.recordIssuanceProcess(process, T0.plusSeconds(5));
+
+        assertThat(journey.issuanceProcessId()).contains(process);
+    }
+
+    @Test
+    void recordIssuanceProcess_differentProcess_isRejectedAndKeepsTheFirst() {
+        Journey journey = Journey.start(UUID.randomUUID(), T0);
+        UUID first = UUID.randomUUID();
+        journey.recordIssuanceProcess(first, T0);
+
+        UUID other = UUID.randomUUID();
+        Instant later = T0.plusSeconds(5);
+
+        assertThatThrownBy(() -> journey.recordIssuanceProcess(other, later))
+                .isInstanceOf(IssuanceProcessAlreadyRecordedException.class);
+        assertThat(journey.issuanceProcessId()).contains(first);
+    }
+
+    @Test
+    void recordIssuanceProcess_closedJourney_throwsJourneyClosed() {
+        Journey withdrawn = Journey.start(UUID.randomUUID(), T0);
+        withdrawn.withdraw(WithdrawalReason.CANCELLED, T0);
+        Journey completed = Journey.start(UUID.randomUUID(), T0);
+        completed.complete(T0);
+
+        assertJourneyClosed(() -> withdrawn.recordIssuanceProcess(UUID.randomUUID(), T0));
+        assertJourneyClosed(() -> completed.recordIssuanceProcess(UUID.randomUUID(), T0));
+    }
+
     private static void assertJourneyClosed(ThrowingCallable call) {
         assertThatThrownBy(call).isInstanceOf(JourneyClosedException.class);
     }

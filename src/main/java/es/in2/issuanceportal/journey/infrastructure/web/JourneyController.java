@@ -1,6 +1,7 @@
 package es.in2.issuanceportal.journey.infrastructure.web;
 
 import es.in2.issuanceportal.journey.application.JourneyService;
+import es.in2.issuanceportal.journey.application.JourneyViewService;
 import es.in2.issuanceportal.session.api.SessionId;
 import es.in2.issuanceportal.shared.error.ProblemCode;
 import es.in2.issuanceportal.shared.error.ProblemException;
@@ -21,9 +22,11 @@ import org.springframework.web.bind.annotation.RestController;
 class JourneyController {
 
     private final JourneyService service;
+    private final JourneyViewService views;
 
-    JourneyController(JourneyService service) {
+    JourneyController(JourneyService service, JourneyViewService views) {
         this.service = service;
+        this.views = views;
     }
 
     @PostMapping
@@ -36,7 +39,7 @@ class JourneyController {
 
     @GetMapping
     JourneyResponse current(HttpServletRequest request) {
-        return JourneyResponse.of(service.current(CurrentTenant.of(request), session(request)));
+        return JourneyResponse.of(views.current(CurrentTenant.of(request), session(request)));
     }
 
     @PostMapping("/withdrawal")

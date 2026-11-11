@@ -49,6 +49,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.locks.LockSupport;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -512,6 +513,17 @@ class EntitlementServiceTest {
                 clock, new LookupSlots(1, 1));
         SessionId interrupted = journeyWithDni("00000001R");
         SessionId next = journeyWithDni("00000001R");
+        // The source does not answer until the test lets it: a source that answered before the request
+        // started to wait would let the wait return its answer, and the interruption would go unnoticed.
+        CountDownLatch sourceMayAnswer = new CountDownLatch(1);
+        adapter.answering(searched -> {
+            try {
+                sourceMayAnswer.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException _) {
+                Thread.currentThread().interrupt();
+            }
+            return source(searched);
+        });
         AtomicReference<Throwable> failure = new AtomicReference<>();
         Thread request = Thread.ofVirtual().unstarted(() -> {
             // The wait for the source fails at once, whether or not the search has started.
@@ -522,13 +534,39 @@ class EntitlementServiceTest {
                 failure.set(e);
             }
         });
-        request.start();
-        request.join(5_000);
-        assertThat(failure.get()).isInstanceOfSatisfying(ProblemException.class,
-                e -> assertThat(e.problem()).isEqualTo(ProblemCode.AUTHENTIC_SOURCE_UNAVAILABLE));
+        try {
+            request.start();
+            request.join(5_000);
+            assertThat(failure.get()).isInstanceOfSatisfying(ProblemException.class,
+                    e -> assertThat(e.problem()).isEqualTo(ProblemCode.AUTHENTIC_SOURCE_UNAVAILABLE));
 
-        assertThat(oneAtATime.check(CGCOM, next)).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
-        oneAtATime.close();
+            // The slot comes back whether the search never started or was interrupted while it ran; in the
+            // second case it does so as the search ends, on its own thread. The next request is served once
+            // that has happened, never refused for good.
+            adapter.answering(EntitlementServiceTest::source);
+            assertThat(checkOnceTheSlotIsBack(oneAtATime, next)).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
+        } finally {
+            sourceMayAnswer.countDown();
+            oneAtATime.close();
+        }
+    }
+
+    /**
+     * Checks again while the only slot is still held by a search that is ending on another thread; gives up
+     * after five seconds, so a slot that never comes back still fails the test.
+     */
+    private static EntitlementService.Outcome checkOnceTheSlotIsBack(EntitlementService service, SessionId session) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (true) {
+            try {
+                return service.check(CGCOM, session);
+            } catch (ProblemException e) {
+                if (e.problem() != ProblemCode.AUTHENTIC_SOURCE_UNAVAILABLE || System.nanoTime() > deadline) {
+                    throw e;
+                }
+                LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(10));
+            }
+        }
     }
 
     @Test
