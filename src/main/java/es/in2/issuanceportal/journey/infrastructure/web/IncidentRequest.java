@@ -10,7 +10,7 @@ import jakarta.validation.constraints.Size;
 /** {@code Incident} of the contract, with its required fields, lengths and formats. */
 record IncidentRequest(
         @NotBlank @Size(max = 200) String name,
-        // Goes to Reply-To: plain ASCII addresses only, which SES accepts as they are.
+        // Goes to Reply-To: plain ASCII addresses only, which any SMTP server accepts as they are.
         @NotBlank @Size(max = 254) @Email @Pattern(regexp = EMAIL_FORMAT) String email,
         @Size(max = 30) String phone,
         @NotBlank @Pattern(regexp = "technical|access|credentials|other") String type,

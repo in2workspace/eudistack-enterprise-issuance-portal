@@ -22,16 +22,21 @@ spring:
       mail:
         smtp:
           # Sender of every message, on the platform's verified SES identity.
-          from: ${SMTP_FROM:noreply@eudistack.com}
+          # No default: with the smtp provider the service does not start without it.
+          from: ${SMTP_FROM:}
           connectiontimeout: ${SMTP_CONNECTION_TIMEOUT_MS:5000}
           timeout: ${SMTP_TIMEOUT_MS:5000}
           writetimeout: ${SMTP_WRITE_TIMEOUT_MS:5000}
           auth: ${SMTP_AUTH:true}
+          # Stricter than the wallet: the credentials and the message never travel without TLS, and the
+          # server's certificate must be valid for its host. SES presents a public-CA certificate that the
+          # JDK truststore validates, so there is no ssl.trust (it would accept any certificate).
           starttls:
             enable: ${SMTP_STARTTLS:true}
+            required: true
           ssl:
             enable: ${SMTP_SSL_ENABLE:false}
-            trust: ${SMTP_SSL_TRUST:}
+            checkserveridentity: true
   flyway:
     # Migrations run per tenant schema in TenantSchemaMigrator, never on the default schema.
     enabled: false

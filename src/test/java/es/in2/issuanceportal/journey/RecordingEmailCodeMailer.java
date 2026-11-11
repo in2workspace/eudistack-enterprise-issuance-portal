@@ -20,7 +20,7 @@ public class RecordingEmailCodeMailer implements EmailCodeMailer {
     @Override
     public void send(EmailCodeMessage message) {
         if (failing) {
-            throw new EmailCodeDeliveryException("SES MessageRejected");
+            throw new EmailCodeDeliveryException("SMTP MailSendException");
         }
         sent.add(message);
     }

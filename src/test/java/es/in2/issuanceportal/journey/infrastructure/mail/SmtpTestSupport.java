@@ -4,13 +4,17 @@ import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
 import org.springframework.mail.javamail.JavaMailSenderImpl;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.net.InetAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /** The pieces the SMTP adapter tests share. */
 final class SmtpTestSupport {
@@ -80,6 +84,71 @@ final class SmtpTestSupport {
                     socket.close();
                 }
             }
+            acceptor.interrupt();
+        }
+    }
+
+    /**
+     * An SMTP server that does not offer STARTTLS and records every command it receives, to check what a client
+     * sends before giving up.
+     */
+    static final class PlainSmtpServer implements AutoCloseable {
+
+        private final ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+        private final List<String> commands = new CopyOnWriteArrayList<>();
+        private final Thread acceptor;
+
+        PlainSmtpServer() throws IOException {
+            acceptor = Thread.ofVirtual().start(() -> {
+                try {
+                    while (!server.isClosed()) {
+                        Socket socket = server.accept();
+                        Thread.ofVirtual().start(() -> serve(socket));
+                    }
+                } catch (IOException _) {
+                    // Closed by the test.
+                }
+            });
+        }
+
+        private void serve(Socket socket) {
+            try (socket;
+                 BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                 OutputStream out = socket.getOutputStream()) {
+                reply(out, "220 plain.test ESMTP");
+                for (String line = in.readLine(); line != null; line = in.readLine()) {
+                    commands.add(line);
+                    String verb = line.toUpperCase(java.util.Locale.ROOT);
+                    if (verb.startsWith("EHLO")) {
+                        reply(out, "250-plain.test\r\n250 AUTH PLAIN LOGIN");
+                    } else if (verb.startsWith("QUIT")) {
+                        reply(out, "221 bye");
+                        return;
+                    } else {
+                        reply(out, "250 ok");
+                    }
+                }
+            } catch (IOException _) {
+                // The client left.
+            }
+        }
+
+        private static void reply(OutputStream out, String text) throws IOException {
+            out.write((text + "\r\n").getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+            out.flush();
+        }
+
+        int port() {
+            return server.getLocalPort();
+        }
+
+        List<String> commands() {
+            return commands;
+        }
+
+        @Override
+        public void close() throws IOException {
+            server.close();
             acceptor.interrupt();
         }
     }
