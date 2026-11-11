@@ -21,7 +21,7 @@ class IncidentMailConfiguration {
     IncidentMailer incidentMailer(MailProperties properties, ObjectProvider<JavaMailSender> mailSender,
                                   @Value(FROM_PROPERTY) String from) {
         log.info("Incidents sent with the {} mail provider", properties.provider());
-        return mailerFor(properties, mailSender::getObject, from);
+        return mailerFor(properties, () -> SmtpTlsPolicy.verified(mailSender.getObject()), from);
     }
 
     static IncidentMailer mailerFor(MailProperties properties, Supplier<JavaMailSender> mailSender, String from) {

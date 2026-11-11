@@ -39,7 +39,7 @@ class EmailCodeHtml {
 
     private static SpringTemplateEngine engine() {
         ClassLoaderTemplateResolver resolver = new ClassLoaderTemplateResolver();
-        resolver.setPrefix("templates/");
+        resolver.setPrefix("mail-templates/");
         resolver.setSuffix(".html");
         resolver.setTemplateMode(TemplateMode.HTML);
         resolver.setCharacterEncoding(StandardCharsets.UTF_8.name());

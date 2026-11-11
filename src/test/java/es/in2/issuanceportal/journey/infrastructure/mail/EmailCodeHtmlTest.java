@@ -4,9 +4,6 @@ import es.in2.issuanceportal.journey.application.port.EmailCodeMessage;
 import es.in2.issuanceportal.journey.domain.EmailLanguage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.context.properties.EnableConfigurationProperties;
-import org.springframework.boot.test.context.ConfigDataApplicationContextInitializer;
-import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 
 import java.util.Map;
 
@@ -74,29 +71,5 @@ class EmailCodeHtmlTest {
                 EmailCodeMessage.of("ana@example.org", "482193", "<b>X</b>", EmailLanguage.ES, "cgcom"));
 
         assertThat(html).doesNotContain("<b>X</b>").contains("&lt;b&gt;X&lt;/b&gt;");
-    }
-
-    @Test
-    @DisplayName("AC-01 — properties_sharedBrandingFile_bindsTheImageFlagsAndIgnoresTheRest")
-    void properties_sharedBrandingFile_bindsTheImageFlagsAndIgnoresTheRest() {
-        new ApplicationContextRunner()
-                .withInitializer(new ConfigDataApplicationContextInitializer())
-                .withUserConfiguration(Binding.class)
-                .withPropertyValues("email-branding.assets-base-url=" + ASSETS,
-                        "email-branding.tenants.dome.logo=true",
-                        "email-branding.tenants.dome.header-background=true",
-                        "email-branding.tenants.dome.social-links[0].type=github",
-                        "email-branding.tenants.dome.social-links[0].url=https://github.com/dome",
-                        "email-branding.tenants.dome.support.url=https://example.org")
-                .run(context -> {
-                    EmailBrandingProperties properties = context.getBean(EmailBrandingProperties.class);
-                    assertThat(properties.assetsBaseUrl()).isEqualTo(ASSETS);
-                    assertThat(properties.tenants().get("dome"))
-                            .isEqualTo(new EmailBrandingProperties.TenantEmailBranding(true, true));
-                });
-    }
-
-    @EnableConfigurationProperties(EmailBrandingProperties.class)
-    static class Binding {
     }
 }

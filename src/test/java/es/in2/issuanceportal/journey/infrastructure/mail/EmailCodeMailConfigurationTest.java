@@ -7,6 +7,8 @@ import es.in2.issuanceportal.journey.application.port.EmailCodeMessage;
 import es.in2.issuanceportal.journey.domain.EmailLanguage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.slf4j.LoggerFactory;
 import org.springframework.mail.javamail.JavaMailSender;
 
@@ -47,6 +49,18 @@ class EmailCodeMailConfigurationTest {
                 BRANDING))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("SMTP_FROM");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"http://assets.example.org/tenants", "//assets.example.org/tenants", "/assets/tenants",
+            "assets.example.org/tenants", "https:///tenants", "https://", "ftp://assets.example.org", "not a url"})
+    void mailerFor_smtpWithAssetsBaseUrlThatIsNotAbsoluteHttps_failsToStart(String url) {
+        MailProperties properties = new MailProperties(MailProperties.Provider.SMTP);
+
+        assertThatThrownBy(() -> EmailCodeMailConfiguration.mailerFor(properties, () -> mock(JavaMailSender.class),
+                FROM, new EmailBrandingProperties(url, Map.of())))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("EMAIL_ASSETS_BASE_URL");
     }
 
     @Test

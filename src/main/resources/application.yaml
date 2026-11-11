@@ -1,11 +1,9 @@
 spring:
   application:
     name: eudistack-enterprise-issuance-portal
-  config:
-    import:
-      # Email branding per tenant (image flags). Each environment can replace the whole file, the same one the
-      # wallet reads: EMAIL_BRANDING_PATH=file:/path/email-branding.yaml (the bundled one is then not loaded).
-      - ${EMAIL_BRANDING_PATH:classpath:email-branding.yaml}
+  autoconfigure:
+    # Thymeleaf only renders the code email, through its own engine: no view resolver over classpath:/templates/.
+    exclude: org.springframework.boot.autoconfigure.thymeleaf.ThymeleafAutoConfiguration
   threads:
     virtual:
       enabled: true
@@ -124,7 +122,9 @@ issuance-portal:
     # smtp in every environment that sends mail, local where none is sent. Empty: the service does not start.
     provider: ${PORTAL_MAIL_PROVIDER:}
 
-# Branding of the code email, as in the wallet: the tenants' blocks come from email-branding.yaml.
+# Branding of the code email. The tenants' blocks are not Spring configuration: EmailBrandingConfiguration reads the
+# file at EMAIL_BRANDING_PATH (default classpath:email-branding.yaml; file: and classpath: work) and binds only
+# its email-branding keys, so that file cannot set any other property.
 email-branding:
   # Tenant-assets root of this environment, as in the wallet. No default: with the smtp provider the service does
   # not start without it.
@@ -167,3 +167,6 @@ management:
 logging:
   level:
     es.in2.issuanceportal: ${LOG_LEVEL:INFO}
+    # The template context holds the verification code: the engine's own log stays off. A failed render is
+    # reported by the mailer with a reason code only.
+    org.thymeleaf.TemplateEngine: "OFF"

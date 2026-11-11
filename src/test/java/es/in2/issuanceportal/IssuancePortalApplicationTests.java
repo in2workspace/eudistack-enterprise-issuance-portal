@@ -8,6 +8,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Import;
+import org.thymeleaf.spring6.SpringTemplateEngine;
+import org.thymeleaf.spring6.view.ThymeleafViewResolver;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -17,6 +19,13 @@ class IssuancePortalApplicationTests {
 
     @Autowired
     private ApplicationContext context;
+
+    @Test
+    void applicationContext_noThymeleafViewResolver() {
+        // Thymeleaf only renders the code email through the mail adapter's own engine.
+        assertThat(context.getBeanNamesForType(ThymeleafViewResolver.class)).isEmpty();
+        assertThat(context.getBeanNamesForType(SpringTemplateEngine.class)).isEmpty();
+    }
 
     @Test
     void applicationContext_testConfiguration_loads() {
