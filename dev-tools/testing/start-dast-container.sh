@@ -21,7 +21,6 @@ docker run -d --name "${CONTAINER_NAME}" \
   -e PORTAL_CRYPTO_PROVIDER=local \
   -e PORTAL_LOCAL_DATA_KEY="$(openssl rand -base64 32)" \
   -e PORTAL_MAIL_PROVIDER=local \
-  -e PORTAL_MAIL_FROM=noreply@mail.local.eudistack.net \
   -e PORTAL_TRUSTED_PROXIES=1 \
   -e PORTAL_SYSTEM_TOKEN_PROVIDER=file \
   -e PORTAL_SYSTEM_TOKEN_DIRECTORY=/nonexistent/machine-credentials \

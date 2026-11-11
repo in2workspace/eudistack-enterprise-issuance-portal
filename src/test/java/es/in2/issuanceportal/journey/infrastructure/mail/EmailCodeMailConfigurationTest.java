@@ -8,9 +8,10 @@ import es.in2.issuanceportal.journey.domain.EmailLanguage;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.slf4j.LoggerFactory;
-import software.amazon.awssdk.services.sesv2.SesV2Client;
+import org.springframework.mail.javamail.JavaMailSender;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 class EmailCodeMailConfigurationTest {
@@ -18,20 +19,29 @@ class EmailCodeMailConfigurationTest {
     private static final String FROM = "noreply@mail.stg.eudistack.net";
 
     @Test
-    void mailerFor_sesProvider_returnsSesMailer() {
-        IncidentMailProperties properties = new IncidentMailProperties(IncidentMailProperties.Provider.SES, FROM);
+    void mailerFor_smtpProvider_returnsSmtpMailer() {
+        MailProperties properties = new MailProperties(MailProperties.Provider.SMTP);
 
-        assertThat(EmailCodeMailConfiguration.mailerFor(properties, () -> mock(SesV2Client.class)))
-                .isInstanceOf(SesEmailCodeMailer.class);
+        assertThat(EmailCodeMailConfiguration.mailerFor(properties, () -> mock(JavaMailSender.class), FROM))
+                .isInstanceOf(SmtpEmailCodeMailer.class);
     }
 
     @Test
-    void mailerFor_localProvider_returnsLocalMailerWithoutCreatingSesClient() {
-        IncidentMailProperties properties = new IncidentMailProperties(IncidentMailProperties.Provider.LOCAL, FROM);
+    void mailerFor_localProvider_returnsLocalMailerWithoutNeedingASender() {
+        MailProperties properties = new MailProperties(MailProperties.Provider.LOCAL);
 
         assertThat(EmailCodeMailConfiguration.mailerFor(properties, () -> {
-            throw new AssertionError("No SES client in local");
-        })).isInstanceOf(LocalEmailCodeMailer.class);
+            throw new AssertionError("No mail sender in local");
+        }, null)).isInstanceOf(LocalEmailCodeMailer.class);
+    }
+
+    @Test
+    void mailerFor_smtpWithoutSender_failsToStart() {
+        MailProperties properties = new MailProperties(MailProperties.Provider.SMTP);
+
+        assertThatThrownBy(() -> EmailCodeMailConfiguration.mailerFor(properties, () -> mock(JavaMailSender.class), ""))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("SMTP_FROM");
     }
 
     @Test

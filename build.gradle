@@ -54,8 +54,9 @@ dependencies {
     implementation 'software.amazon.awssdk:kms:2.31.78'
 
     // --- Mail ---
-    // Incidents go to the tenant's support by Amazon SES (design.md AD-8).
-    implementation 'software.amazon.awssdk:sesv2:2.31.78'
+    // Incidents and verification codes go out by SMTP (SES SMTP interface), with spring.mail and the same SMTP_*
+    // variables as the wallet (design.md AD-8).
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
 
     // --- System token ---
     // The machine credential of each tenant is read from SSM Parameter Store, and the presentation and client
@@ -93,6 +94,8 @@ dependencies {
     testImplementation 'com.tngtech.archunit:archunit-junit5:1.5.0'
     // The Verifier, the Issuer and the Wallet Unit Service are simulated over HTTP.
     testImplementation 'org.wiremock:wiremock-standalone:3.13.1'
+    // A real SMTP server to assert the message the mail adapters send.
+    testImplementation 'com.icegreen:greenmail-junit5:2.1.15'
 
     // --- Integration Testing ---
     // A real PostgreSQL: schema-per-tenant SQL is exactly what an in-memory database would get wrong.

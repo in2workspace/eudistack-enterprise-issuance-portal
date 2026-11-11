@@ -1,9 +1,10 @@
 package es.in2.issuanceportal.journey.infrastructure.mail;
 
 import org.junit.jupiter.api.Test;
-import software.amazon.awssdk.services.sesv2.SesV2Client;
+import org.springframework.mail.javamail.JavaMailSender;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.mock;
 
 class IncidentMailConfigurationTest {
@@ -11,19 +12,28 @@ class IncidentMailConfigurationTest {
     private static final String FROM = "noreply@mail.stg.eudistack.net";
 
     @Test
-    void mailerFor_sesProvider_returnsSesMailer() {
-        IncidentMailProperties properties = new IncidentMailProperties(IncidentMailProperties.Provider.SES, FROM);
+    void mailerFor_smtpProvider_returnsSmtpMailer() {
+        MailProperties properties = new MailProperties(MailProperties.Provider.SMTP);
 
-        assertThat(IncidentMailConfiguration.mailerFor(properties, () -> mock(SesV2Client.class)))
-                .isInstanceOf(SesIncidentMailer.class);
+        assertThat(IncidentMailConfiguration.mailerFor(properties, () -> mock(JavaMailSender.class), FROM))
+                .isInstanceOf(SmtpIncidentMailer.class);
     }
 
     @Test
-    void mailerFor_localProvider_returnsLocalMailerWithoutCreatingSesClient() {
-        IncidentMailProperties properties = new IncidentMailProperties(IncidentMailProperties.Provider.LOCAL, FROM);
+    void mailerFor_localProvider_returnsLocalMailerWithoutNeedingASender() {
+        MailProperties properties = new MailProperties(MailProperties.Provider.LOCAL);
 
         assertThat(IncidentMailConfiguration.mailerFor(properties, () -> {
-            throw new AssertionError("No SES client in local");
-        })).isInstanceOf(LocalIncidentMailer.class);
+            throw new AssertionError("No mail sender in local");
+        }, null)).isInstanceOf(LocalIncidentMailer.class);
+    }
+
+    @Test
+    void mailerFor_smtpWithoutSender_failsToStart() {
+        MailProperties properties = new MailProperties(MailProperties.Provider.SMTP);
+
+        assertThatThrownBy(() -> IncidentMailConfiguration.mailerFor(properties, () -> mock(JavaMailSender.class), " "))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("SMTP_FROM");
     }
 }

@@ -13,7 +13,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Límites: 3 envíos por recorrido, 180 s entre envíos (429 `resend_too_soon` con `Retry-After`) y 10 por IP y hora (429 `too_many_requests`). Con 3 envíos, 429 `too_many_codes`.
   - Un envío que no sale responde 503 `email_unavailable`, no se guarda y no cuenta en los límites.
   - `POST /journey/email-verification/code` comprueba el código (400 `invalid_code`, `expired_code` o `too_many_attempts`) y, si es correcto, fija el correo verificado y pasa al paso `email_verified`.
-  - Correo por SES en español o inglés según `Accept-Language`, con el nombre del portal de `texts.<idioma>.portal.app_name` y sin enlaces. El adaptador local no envía ni registra el código.
+  - Correo por SMTP en español o inglés según `Accept-Language`, con el nombre del portal de `texts.<idioma>.portal.app_name` y sin enlaces. El adaptador local no envía ni registra el código.
   - El código se guarda como SHA-256 del recorrido y el código, en la sección cifrada nueva `email_verification`. La migración V4 añade su columna y el paso `email_verified`.
   - `GET /journey` devuelve `email_verification`. Nuevas trazas del envío y de la comprobación, sin el correo ni el código.
 
@@ -43,6 +43,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **EUD-358**: el límite por IP de las incidencias (5 por hora) es ahora una instancia configurable, separada de la del límite de los códigos del correo (10 por hora): cada una tiene su propio presupuesto.
 - **EUD-358**: la confirmación exige la sección `email_verification` verificada y con el mismo correo que la sección `email`; una sección `email` sola, sin verificar o con otro correo da 409 `step_not_allowed` y no emite. La migración V4 vacía los correos que había en `journey_session.email`, porque ninguno estaba verificado.
 - **EUD-358**: la clave de idempotencia de la emisión se guarda con el correo verificado. Si el titular verifica otro correo antes de que exista el proceso de emisión, la confirmación genera una clave nueva para ese correo (también si el registro es anterior y no guarda el correo). Con el proceso ya creado se mantienen la clave y el proceso (hasta EUD-295 esa confirmación responde 503 `onboarding_unavailable` sin volver a emitir).
+- **EUD-358**: el correo (el código de verificación y las incidencias) se envía por el SMTP de SES con `spring.mail`, con las mismas variables `SMTP_*` que el wallet (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_AUTH`, `SMTP_STARTTLS`, `SMTP_SSL_ENABLE`, `SMTP_SSL_TRUST` y los tiempos `SMTP_*_TIMEOUT_MS`, 5 s por defecto). `PORTAL_MAIL_PROVIDER` pasa a valer `smtp` o `local` (sigue siendo obligatoria). Desaparecen el adaptador de la API de SES, la dependencia `sesv2` y `PORTAL_MAIL_FROM`: el remitente es `SMTP_FROM`. La comprobación de salud del correo de Spring Boot queda desactivada.
 
 - Health y métricas en la raíz del servicio, como en el resto de servicios de la plataforma (`management.endpoints.web.base-path: /`): `/issuance-portal/health`, `/issuance-portal/health/liveness`, `/issuance-portal/health/readiness` y `/issuance-portal/prometheus`, en lugar de `/issuance-portal/actuator/...`. Los filtros de la cabecera `X-Requested-With` y del tenant dejan pasar solo esas rutas.
 
