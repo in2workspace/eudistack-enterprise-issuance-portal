@@ -701,10 +701,10 @@ class EmailVerificationApiIT {
                 .cookie(new Cookie("journey_session", session.value()));
     }
 
-    private void backdate(SessionId session, EmailVerificationRecord record, Duration by) {
-        sessions.write(SANDBOX, session, Section.EMAIL_VERIFICATION, new EmailVerificationRecord(record.pendingEmail(),
-                record.codeHash(), record.codeExpiresAt() == null ? null : record.codeExpiresAt().minus(by),
-                record.attempts(), record.sends(), record.lastSentAt().minus(by), record.voidedCodeHashes()).toJson());
+    private void backdate(SessionId session, EmailVerificationRecord before, Duration by) {
+        sessions.write(SANDBOX, session, Section.EMAIL_VERIFICATION, new EmailVerificationRecord(before.pendingEmail(),
+                before.codeHash(), before.codeExpiresAt() == null ? null : before.codeExpiresAt().minus(by),
+                before.attempts(), before.sends(), before.lastSentAt().minus(by), before.voidedCodeHashes()).toJson());
     }
 
     private void assertNothingSent(SessionId session) {

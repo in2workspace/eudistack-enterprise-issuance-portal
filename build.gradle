@@ -137,9 +137,14 @@ sonar {
                 'src/main/java/**/IssuancePortalApplication.java'
         // The Flyway migrations are PostgreSQL. Sonar reads .sql files with its PL/SQL (Oracle) analyser,
         // whose rules ask for Oracle-only types such as VARCHAR2; none of them applies to these files.
-        property 'sonar.issue.ignore.multicriteria', 'plsqlOnMigrations'
+        property 'sonar.issue.ignore.multicriteria', 'plsqlOnMigrations,htmlEmailTemplates'
         property 'sonar.issue.ignore.multicriteria.plsqlOnMigrations.ruleKey', 'plsql:*'
         property 'sonar.issue.ignore.multicriteria.plsqlOnMigrations.resourceKey', 'src/main/resources/db/**/*.sql'
+        // The email templates are tables with align, valign, bgcolor, width, height, cellspacing and cellpadding
+        // attributes on purpose: Outlook and other mail clients ignore the CSS equivalents. They are a copy of the
+        // wallet and issuer templates, so Web:S1827 (deprecated HTML attributes) does not apply to them.
+        property 'sonar.issue.ignore.multicriteria.htmlEmailTemplates.ruleKey', 'Web:S1827'
+        property 'sonar.issue.ignore.multicriteria.htmlEmailTemplates.resourceKey', 'src/main/resources/mail-templates/**'
     }
 }
 

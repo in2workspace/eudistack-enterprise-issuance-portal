@@ -144,8 +144,9 @@ class SmtpEmailCodeMailerTest {
         doThrow(new MailSendException("550 5.1.1 Address rejected: ana@example.org 042042"))
                 .when(sender).send(any(MimeMessage.class));
 
-        assertThatThrownBy(() -> new SmtpEmailCodeMailer(new SmtpMailSender(sender, FROM), SmtpTestSupport.html())
-                .send(MESSAGE))
+        SmtpEmailCodeMailer mailer = new SmtpEmailCodeMailer(new SmtpMailSender(sender, FROM), SmtpTestSupport.html());
+
+        assertThatThrownBy(() -> mailer.send(MESSAGE))
                 .isInstanceOf(EmailCodeDeliveryException.class)
                 .hasMessageContaining("MailSendException")
                 .hasMessageNotContaining("ana@example.org")
@@ -161,8 +162,9 @@ class SmtpEmailCodeMailerTest {
         doThrow(new MailAuthenticationException("535 Authentication Credentials Invalid"))
                 .when(sender).send(any(MimeMessage.class));
 
-        assertThatThrownBy(() -> new SmtpEmailCodeMailer(new SmtpMailSender(sender, FROM), SmtpTestSupport.html())
-                .send(MESSAGE))
+        SmtpEmailCodeMailer mailer = new SmtpEmailCodeMailer(new SmtpMailSender(sender, FROM), SmtpTestSupport.html());
+
+        assertThatThrownBy(() -> mailer.send(MESSAGE))
                 .isInstanceOf(EmailCodeDeliveryException.class)
                 .hasMessageContaining("MailAuthenticationException")
                 .hasNoCause();

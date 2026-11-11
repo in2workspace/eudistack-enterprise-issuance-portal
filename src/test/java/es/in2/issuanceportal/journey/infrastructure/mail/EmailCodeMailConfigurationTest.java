@@ -56,9 +56,10 @@ class EmailCodeMailConfigurationTest {
             "assets.example.org/tenants", "https:///tenants", "https://", "ftp://assets.example.org", "not a url"})
     void mailerFor_smtpWithAssetsBaseUrlThatIsNotAbsoluteHttps_failsToStart(String url) {
         MailProperties properties = new MailProperties(MailProperties.Provider.SMTP);
+        JavaMailSender sender = mock(JavaMailSender.class);
+        EmailBrandingProperties branding = new EmailBrandingProperties(url, Map.of());
 
-        assertThatThrownBy(() -> EmailCodeMailConfiguration.mailerFor(properties, () -> mock(JavaMailSender.class),
-                FROM, new EmailBrandingProperties(url, Map.of())))
+        assertThatThrownBy(() -> EmailCodeMailConfiguration.mailerFor(properties, () -> sender, FROM, branding))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("EMAIL_ASSETS_BASE_URL");
     }
@@ -66,9 +67,10 @@ class EmailCodeMailConfigurationTest {
     @Test
     void mailerFor_smtpWithoutAssetsBaseUrl_failsToStart() {
         MailProperties properties = new MailProperties(MailProperties.Provider.SMTP);
+        JavaMailSender sender = mock(JavaMailSender.class);
+        EmailBrandingProperties branding = new EmailBrandingProperties("", Map.of());
 
-        assertThatThrownBy(() -> EmailCodeMailConfiguration.mailerFor(properties, () -> mock(JavaMailSender.class),
-                FROM, new EmailBrandingProperties("", Map.of())))
+        assertThatThrownBy(() -> EmailCodeMailConfiguration.mailerFor(properties, () -> sender, FROM, branding))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("EMAIL_ASSETS_BASE_URL");
     }

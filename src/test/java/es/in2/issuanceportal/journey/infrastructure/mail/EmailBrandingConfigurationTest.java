@@ -86,10 +86,9 @@ class EmailBrandingConfigurationTest {
             // The assets root comes from the environment, never from the file.
             assertThat(branding.assetsBaseUrl()).isEqualTo("https://assets.example.org/tenants");
             assertThat(branding.tenants()).containsOnlyKeys("cgcom", "kpmg");
-            assertThat(branding.tenants().get("cgcom"))
-                    .isEqualTo(new EmailBrandingProperties.TenantEmailBranding(true, true));
-            assertThat(branding.tenants().get("kpmg"))
-                    .isEqualTo(new EmailBrandingProperties.TenantEmailBranding(true, false));
+            assertThat(branding.tenants())
+                    .containsEntry("cgcom", new EmailBrandingProperties.TenantEmailBranding(true, true))
+                    .containsEntry("kpmg", new EmailBrandingProperties.TenantEmailBranding(true, false));
         });
     }
 

@@ -250,6 +250,8 @@ public class IssuanceService {
      * @param ticket       {@code null} when the tenant has no onboarding or the ticket was not created
      * @return the offer to give, or empty when the ticket was needed and not created
      */
+    // Each argument is a different step of the confirmation: a record would only rename them.
+    @SuppressWarnings("java:S107")
     private Optional<Offer> finish(TenantId tenant, SessionId session, UUID journeyId, UUID key, String email,
                                    IssuanceResult issued, boolean ticketNeeded, OnboardingTicket ticket) {
         Journey journey = lock(tenant, journeyId);

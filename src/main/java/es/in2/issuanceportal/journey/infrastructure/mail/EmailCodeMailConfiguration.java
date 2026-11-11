@@ -47,7 +47,7 @@ class EmailCodeMailConfiguration {
         URI uri;
         try {
             uri = new URI(url.strip());
-        } catch (URISyntaxException e) {
+        } catch (URISyntaxException _) {
             throw new IllegalStateException("EMAIL_ASSETS_BASE_URL is not a valid URL");
         }
         if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null) {

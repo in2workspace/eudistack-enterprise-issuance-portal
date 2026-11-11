@@ -97,7 +97,9 @@ class SmtpIncidentMailerTest {
         doThrow(new MailSendException("554 Message rejected: soporte@cgcom-identidad.es"))
                 .when(sender).send(any(MimeMessage.class));
 
-        assertThatThrownBy(() -> new SmtpIncidentMailer(new SmtpMailSender(sender, FROM)).send(MESSAGE))
+        SmtpIncidentMailer mailer = new SmtpIncidentMailer(new SmtpMailSender(sender, FROM));
+
+        assertThatThrownBy(() -> mailer.send(MESSAGE))
                 .isInstanceOf(IncidentDeliveryException.class)
                 .hasMessageContaining("MailSendException")
                 .hasMessageNotContaining("soporte@cgcom-identidad.es")

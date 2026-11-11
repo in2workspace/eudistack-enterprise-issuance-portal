@@ -65,11 +65,12 @@ final class SmtpTestSupport {
     /** Accepts connections and sends nothing back: the peer of an SMTP server that hangs. */
     static final class SilentServer implements AutoCloseable {
 
-        private final ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+        private final ServerSocket server;
         private final List<Socket> accepted = new ArrayList<>();
         private final Thread acceptor;
 
         SilentServer() throws IOException {
+            server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
             acceptor = Thread.ofVirtual().start(() -> {
                 try {
                     while (!server.isClosed()) {
@@ -106,11 +107,12 @@ final class SmtpTestSupport {
      */
     static final class PlainSmtpServer implements AutoCloseable {
 
-        private final ServerSocket server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
+        private final ServerSocket server;
         private final List<String> commands = new CopyOnWriteArrayList<>();
         private final Thread acceptor;
 
         PlainSmtpServer() throws IOException {
+            server = new ServerSocket(0, 50, InetAddress.getLoopbackAddress());
             acceptor = Thread.ofVirtual().start(() -> {
                 try {
                     while (!server.isClosed()) {

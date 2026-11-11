@@ -69,10 +69,10 @@ class EmailVerificationRecordTest {
 
     @Test
     void fromJson_voidedCodes_areKept() {
-        EmailVerificationRecord record = new EmailVerificationRecord(ADDRESS, "abc123", SENT.plusSeconds(600), 0, 3,
+        EmailVerificationRecord withVoided = new EmailVerificationRecord(ADDRESS, "abc123", SENT.plusSeconds(600), 0, 3,
                 SENT, java.util.List.of("old1", "old2"));
 
-        assertThat(EmailVerificationRecord.fromJson(record.toJson()).voidedCodeHashes())
+        assertThat(EmailVerificationRecord.fromJson(withVoided.toJson()).voidedCodeHashes())
                 .containsExactly("old1", "old2");
     }
 

@@ -165,7 +165,9 @@ public class EmailVerificationService {
             case TOO_MANY_ATTEMPTS -> EmailCodeCheck.TOO_MANY_ATTEMPTS;
         });
         switch (outcome) {
-            case VERIFIED -> { }
+            case VERIFIED -> {
+                // Nothing to refuse: the caller answers success.
+            }
             case INVALID_CODE -> throw new ProblemException(ProblemCode.INVALID_CODE);
             case EXPIRED_CODE -> throw new ProblemException(ProblemCode.EXPIRED_CODE);
             case TOO_MANY_ATTEMPTS -> throw new ProblemException(ProblemCode.TOO_MANY_ATTEMPTS);
@@ -189,7 +191,9 @@ public class EmailVerificationService {
             }
             case INVALID_CODE ->
                     sessions.write(tenant, session, Section.EMAIL_VERIFICATION, toRecord(check.next()).toJson());
-            case EXPIRED_CODE, TOO_MANY_ATTEMPTS -> { }
+            case EXPIRED_CODE, TOO_MANY_ATTEMPTS -> {
+                // Nothing to store: the stored record already says it is expired or exhausted.
+            }
         }
         return check.outcome();
     }
