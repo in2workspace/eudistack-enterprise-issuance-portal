@@ -55,7 +55,7 @@ dependencies {
 
     // --- Mail ---
     // Incidents go to the tenant's support by Amazon SES (design.md AD-8).
-    implementation 'software.amazon.awssdk:sesv2:2.31.78'
+    implementation 'software.amazon.awssdk:sesv2:2.57.11'
 
     // --- System token ---
     // The machine credential of each tenant is read from SSM Parameter Store, and the presentation and client
