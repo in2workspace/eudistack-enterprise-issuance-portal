@@ -41,9 +41,15 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -613,22 +619,22 @@ class EmailVerificationApiIT {
         EmailVerificationRecord sent = storedVerification(session);
         sessions.write(SANDBOX, session, Section.EMAIL_VERIFICATION, new EmailVerificationRecord(sent.pendingEmail(),
                 sent.codeHash(), sent.codeExpiresAt(), 4, sent.sends(), sent.lastSentAt()).toJson());
-        java.util.concurrent.CyclicBarrier together = new java.util.concurrent.CyclicBarrier(2);
-        java.util.concurrent.ExecutorService pool = java.util.concurrent.Executors.newFixedThreadPool(2);
+        CyclicBarrier together = new CyclicBarrier(2);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
         try {
-            List<java.util.concurrent.Future<String>> answers = new java.util.ArrayList<>();
+            List<Future<String>> answers = new ArrayList<>();
             for (int i = 0; i < 2; i++) {
                 answers.add(pool.submit(() -> {
-                    together.await(10, java.util.concurrent.TimeUnit.SECONDS);
+                    together.await(10, TimeUnit.SECONDS);
                     MvcResult result = mvc.perform(check(session, code(wrongCodeFor(code)))).andReturn();
                     assertThat(result.getResponse().getStatus()).isEqualTo(400);
                     return new com.fasterxml.jackson.databind.ObjectMapper()
                             .readTree(result.getResponse().getContentAsString()).get("type").asText();
                 }));
             }
-            List<String> types = new java.util.ArrayList<>();
-            for (java.util.concurrent.Future<String> answer : answers) {
-                types.add(answer.get(30, java.util.concurrent.TimeUnit.SECONDS));
+            List<String> types = new ArrayList<>();
+            for (Future<String> answer : answers) {
+                types.add(answer.get(30, TimeUnit.SECONDS));
             }
 
             assertThat(types).containsExactlyInAnyOrder("invalid_code", "too_many_attempts");

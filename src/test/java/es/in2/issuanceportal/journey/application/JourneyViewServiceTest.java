@@ -137,7 +137,7 @@ class JourneyViewServiceTest {
     @DisplayName("AC-17 — with the offer obtained, the view carries it with its onboarding address, and still the preview")
     void current_offerObtained_carriesOfferAndPreview() {
         SessionId session = confirmed();
-        sessions.write(SANDBOX, session, Section.ISSUANCE, new IssuanceRecord(UUID.randomUUID(), OFFER_URI,
+        sessions.write(SANDBOX, session, Section.ISSUANCE, new IssuanceRecord(UUID.randomUUID(), null, OFFER_URI,
                 NOW.plusSeconds(600), ONBOARDING_URL, NOW.plusSeconds(540)).toJson());
 
         JourneyViewService.View view = service.current(SANDBOX, session);
@@ -154,7 +154,7 @@ class JourneyViewServiceTest {
     @DisplayName("AC-17 — an expired offer is still shown, so the interface shows the code as expired")
     void current_offerExpired_isStillShown() {
         SessionId session = confirmed();
-        sessions.write(SANDBOX, session, Section.ISSUANCE, new IssuanceRecord(UUID.randomUUID(), OFFER_URI,
+        sessions.write(SANDBOX, session, Section.ISSUANCE, new IssuanceRecord(UUID.randomUUID(), null, OFFER_URI,
                 NOW.minusSeconds(60), ONBOARDING_URL, NOW.minusSeconds(120)).toJson());
 
         assertThat(service.current(SANDBOX, session).offer()).isPresent();
@@ -165,7 +165,7 @@ class JourneyViewServiceTest {
     void current_tenantWithoutTickets_offerWithoutOnboarding() {
         config.set(Optional.of(config(false)));
         SessionId session = confirmed();
-        sessions.write(SANDBOX, session, Section.ISSUANCE, new IssuanceRecord(UUID.randomUUID(), OFFER_URI,
+        sessions.write(SANDBOX, session, Section.ISSUANCE, new IssuanceRecord(UUID.randomUUID(), null, OFFER_URI,
                 NOW.plusSeconds(600), null, null).toJson());
 
         IssuanceService.Offer offer = service.current(SANDBOX, session).offer().orElseThrow();
@@ -178,7 +178,7 @@ class JourneyViewServiceTest {
     @DisplayName("EC-10 — in a tenant with tickets, an offer stored without its onboarding address is not shown")
     void current_tenantWithTickets_offerWithoutOnboarding_isNotShown() {
         SessionId session = confirmed();
-        sessions.write(SANDBOX, session, Section.ISSUANCE, new IssuanceRecord(UUID.randomUUID(), OFFER_URI,
+        sessions.write(SANDBOX, session, Section.ISSUANCE, new IssuanceRecord(UUID.randomUUID(), null, OFFER_URI,
                 NOW.plusSeconds(600), null, null).toJson());
 
         assertThat(service.current(SANDBOX, session).offer()).isEmpty();
@@ -189,7 +189,7 @@ class JourneyViewServiceTest {
     @DisplayName("EC-10 — when the configuration cannot be read, an offer without onboarding address is not shown")
     void current_configUnavailable_offerWithoutOnboarding_isNotShown() {
         SessionId session = confirmed();
-        sessions.write(SANDBOX, session, Section.ISSUANCE, new IssuanceRecord(UUID.randomUUID(), OFFER_URI,
+        sessions.write(SANDBOX, session, Section.ISSUANCE, new IssuanceRecord(UUID.randomUUID(), null, OFFER_URI,
                 NOW.plusSeconds(600), null, null).toJson());
         config.set(Optional.empty());
 
@@ -200,7 +200,7 @@ class JourneyViewServiceTest {
     @DisplayName("issuance section with only the idempotency key (request in flight) shows no offer")
     void current_issuanceKeyOnly_noOffer() {
         SessionId session = confirmed();
-        sessions.write(SANDBOX, session, Section.ISSUANCE, IssuanceRecord.withKey(UUID.randomUUID()).toJson());
+        sessions.write(SANDBOX, session, Section.ISSUANCE, IssuanceRecord.withKey(UUID.randomUUID(), null).toJson());
 
         assertThat(service.current(SANDBOX, session).offer()).isEmpty();
     }
@@ -244,7 +244,7 @@ class JourneyViewServiceTest {
     @DisplayName("AC-15 — the text form of the view carries no personal data")
     void view_toString_hasNoPersonalData() {
         SessionId session = confirmed();
-        sessions.write(SANDBOX, session, Section.ISSUANCE, new IssuanceRecord(UUID.randomUUID(), OFFER_URI,
+        sessions.write(SANDBOX, session, Section.ISSUANCE, new IssuanceRecord(UUID.randomUUID(), null, OFFER_URI,
                 NOW.plusSeconds(600), ONBOARDING_URL, NOW.plusSeconds(540)).toJson());
 
         String text = service.current(SANDBOX, session).toString();

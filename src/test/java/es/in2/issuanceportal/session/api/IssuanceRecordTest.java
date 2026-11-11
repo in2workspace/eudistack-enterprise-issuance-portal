@@ -13,11 +13,12 @@ class IssuanceRecordTest {
     private static final UUID KEY = UUID.fromString("5b0b8c1e-6f43-4a38-9d0b-2f4c6b1a7e10");
     private static final Instant OFFER_EXPIRY = Instant.parse("2026-11-05T10:05:00Z");
     private static final Instant ONBOARDING_EXPIRY = Instant.parse("2026-11-05T10:30:00Z");
+    private static final String EMAIL = "elena.ruiz@example.test";
     private static final String OFFER = "openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fsecret";
     private static final String ONBOARDING = "https://wallet.example.org/onboarding?code=secret-code";
 
     private static IssuanceRecord complete() {
-        return new IssuanceRecord(KEY, OFFER, OFFER_EXPIRY, ONBOARDING, ONBOARDING_EXPIRY);
+        return new IssuanceRecord(KEY, EMAIL, OFFER, OFFER_EXPIRY, ONBOARDING, ONBOARDING_EXPIRY);
     }
 
     @Test
@@ -27,9 +28,9 @@ class IssuanceRecordTest {
 
     @Test
     void fromJson_keyOnly_readsTheSameWithoutOfferNorOnboarding() {
-        IssuanceRecord issuanceRecord = IssuanceRecord.fromJson(IssuanceRecord.withKey(KEY).toJson());
+        IssuanceRecord issuanceRecord = IssuanceRecord.fromJson(IssuanceRecord.withKey(KEY, EMAIL).toJson());
 
-        assertThat(issuanceRecord).isEqualTo(IssuanceRecord.withKey(KEY));
+        assertThat(issuanceRecord).isEqualTo(IssuanceRecord.withKey(KEY, EMAIL));
         assertThat(issuanceRecord.offerUri()).isEmpty();
         assertThat(issuanceRecord.onboarding()).isEmpty();
     }
@@ -37,17 +38,27 @@ class IssuanceRecordTest {
     @Test
     void toJson_record_usesTheContractNames() {
         assertThat(complete().toJson()).contains("\"idempotency_key\":\"" + KEY + "\"",
-                "\"credential_offer_uri\":", "\"offer_expires_at\":\"2026-11-05T10:05:00Z\"",
+                "\"email\":\"" + EMAIL + "\"", "\"credential_offer_uri\":", "\"offer_expires_at\":\"2026-11-05T10:05:00Z\"",
                 "\"onboarding_url\":", "\"onboarding_expires_at\":\"2026-11-05T10:30:00Z\"");
-        assertThat(IssuanceRecord.withKey(KEY).toJson()).doesNotContain("offer", "onboarding");
+        assertThat(IssuanceRecord.withKey(KEY, EMAIL).toJson()).doesNotContain("offer", "onboarding");
     }
 
     @Test
     void toString_record_hidesTheBearerSecrets() {
-        assertThat(complete().toString()).doesNotContain(OFFER, ONBOARDING, "secret")
+        assertThat(complete().toString()).doesNotContain(OFFER, ONBOARDING, EMAIL, "secret")
                 .contains(KEY.toString());
-        assertThat(new IssuanceRecord.Document(KEY, OFFER, OFFER_EXPIRY, ONBOARDING, ONBOARDING_EXPIRY).toString())
-                .doesNotContain(OFFER, ONBOARDING, "secret");
+        assertThat(new IssuanceRecord.Document(KEY, EMAIL, OFFER, OFFER_EXPIRY, ONBOARDING, ONBOARDING_EXPIRY).toString())
+                .doesNotContain(OFFER, ONBOARDING, EMAIL, "secret");
+    }
+
+    @Test
+    void fromJson_recordWithoutEmail_readsAndIsForNoEmail() {
+        IssuanceRecord legacy = IssuanceRecord.fromJson("{\"idempotency_key\":\"" + KEY + "\"}");
+
+        assertThat(legacy.email()).isNull();
+        assertThat(legacy.isForEmail(EMAIL)).isFalse();
+        assertThat(IssuanceRecord.withKey(KEY, EMAIL).isForEmail(EMAIL)).isTrue();
+        assertThat(IssuanceRecord.withKey(KEY, EMAIL).isForEmail("other@example.test")).isFalse();
     }
 
     @Test

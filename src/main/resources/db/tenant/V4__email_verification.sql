@@ -9,3 +9,8 @@ ALTER TABLE journey_session ADD COLUMN email_verification BYTEA;
 ALTER TABLE journey DROP CONSTRAINT journey_step_valid;
 ALTER TABLE journey ADD CONSTRAINT journey_step_valid
     CHECK (step IN ('started', 'identified', 'entitlement_confirmed', 'email_verified', 'offer_obtained'));
+
+-- Until now the email section held the address typed by the holder, which nobody had verified. Only a verified
+-- email may reach the confirmation, so none of those survives. Safe: before the email_verification column no
+-- verified email can exist.
+UPDATE journey_session SET email = NULL;

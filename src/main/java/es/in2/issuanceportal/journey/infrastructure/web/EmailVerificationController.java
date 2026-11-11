@@ -24,8 +24,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * {@code POST /journey/email-verification} and {@code /code} of the contract (annex/openapi.yaml): sends the
- * holder's email a code, and checks the code the holder typed. The address of the limit per client is the one the platform's proxies saw, never one the client wrote
- * ({@code ClientAddressFilter}).
+ * holder's email a code, and checks the code the holder typed. The address of the limit per client is the one
+ * the platform's proxies saw, never one the client wrote ({@code ClientAddressFilter}).
  */
 @RestController
 @RequestMapping("/api/v1/journey/email-verification")

@@ -20,6 +20,7 @@ import es.in2.issuanceportal.journey.domain.JourneyState;
 import es.in2.issuanceportal.journey.domain.config.Onboarding;
 import es.in2.issuanceportal.journey.domain.config.ServiceSettings;
 import es.in2.issuanceportal.session.api.EmailRecord;
+import es.in2.issuanceportal.session.api.EmailVerificationRecord;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.InvalidSectionException;
@@ -46,7 +47,9 @@ import java.util.UUID;
 /**
  * The holder's confirmation: requests the issuance as a system and hands the offer back (design.md §3.3,
  * AD-12). A journey asks the Issuer once, with one idempotency key generated the first time and kept in the
- * journey for every retry (EC-02), so a journey ends with at most one issuance process.
+ * journey, with the verified email it was created with, for every retry (EC-02), so a journey ends with at
+ * most one issuance process. If the holder verifies another email before any process exists, the key is
+ * replaced by a new one for that email; once the process exists the journey keeps its key and its process.
  *
  * <p>The journey's row is locked in two short transactions and never while the Issuer is asked: the first
  * checks the state and keeps the key, the second keeps the process and the offer and completes the
@@ -127,15 +130,15 @@ public class IssuanceService {
         trace(tenant, journeyId, ticketNeeded && ticket == null ? JourneyAuditTrail.IssuanceOutcome.ONBOARDING_FAILED
                 : JourneyAuditTrail.IssuanceOutcome.ISSUED, issued.processId());
         Optional<Offer> offer = Objects.requireNonNull(transactions.execute(status -> finish(tenant, session,
-                journeyId, prepared.idempotencyKey(), issued, ticketNeeded, ticket)));
+                journeyId, prepared.idempotencyKey(), prepared.request().email(), issued, ticketNeeded, ticket)));
         // The process is kept, the offer is not given: without the ticket the holder could not use it in the wallet.
         return offer.orElseThrow(() -> new ProblemException(ProblemCode.ONBOARDING_UNAVAILABLE));
     }
 
     /**
      * First transaction: with the journey locked, checks what the request needs, among it the verified email,
-     * and keeps, only if the journey has none yet, a new idempotency key. Anything that makes it fail leaves the journey as
-     * it was.
+     * and keeps a new idempotency key if the journey has none for that email. Anything that makes it fail
+     * leaves the journey as it was.
      */
     private Prepared prepare(TenantId tenant, SessionId session, UUID journeyId) {
         Journey journey = lock(tenant, journeyId);
@@ -155,22 +158,38 @@ public class IssuanceService {
         Map<String, Object> payload = payload(tenant, settings, identity, entitlement);
         Optional<IssuanceRecord> issued = readIssuance(tenant, session);
         UUID key;
-        if (issued.isPresent()) {
+        if (issued.isPresent() && issued.get().isForEmail(address)) {
             key = issued.get().idempotencyKey();
         } else {
+            // First confirmation, or the holder verified another email after a failed one: the Issuer has no
+            // process for the old key (the journey has none), so a new key goes with the new email (EUD-358).
             key = UUID.randomUUID();
-            sessions.write(tenant, session, Section.ISSUANCE, IssuanceRecord.withKey(key).toJson());
+            sessions.write(tenant, session, Section.ISSUANCE, IssuanceRecord.withKey(key, address).toJson());
         }
         return new Prepared(key, new IssuanceRequest(settings.attestationType(), payload, address,
                 DELIVERY, GRANT_TYPE), settings.onboarding());
     }
 
-    /** The email the holder verified; without it the confirmation is not allowed yet and nothing is requested. */
+    /**
+     * The email the holder verified: the one in the verified {@code EMAIL_VERIFICATION} section and, as the
+     * journey's email, in the {@code EMAIL} section. An email section alone is never enough (NFR-2, AC-08):
+     * without the verification, or with another address in it, the confirmation is not allowed and nothing is
+     * requested.
+     */
     private String verifiedEmail(TenantId tenant, SessionId session) {
-        String section = sessions.read(tenant, session, Section.EMAIL)
+        String emailSection = sessions.read(tenant, session, Section.EMAIL)
+                .orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED));
+        String verificationSection = sessions.read(tenant, session, Section.EMAIL_VERIFICATION)
                 .orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED));
         try {
-            return EmailRecord.fromJson(section).address();
+            String address = EmailRecord.fromJson(emailSection).address();
+            EmailVerificationRecord verification = EmailVerificationRecord.fromJson(verificationSection);
+            boolean verified = verification.codeHash() == null && address.equals(verification.pendingEmail());
+            if (!verified) {
+                log.info("The email of the journey session is not the verified one: confirmation not allowed");
+                throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
+            }
+            return address;
         } catch (InvalidSectionException e) {
             log.warn("Email of the journey session is invalid at {}", e.field());
             throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
@@ -231,7 +250,7 @@ public class IssuanceService {
      * @param ticket       {@code null} when the tenant has no onboarding or the ticket was not created
      * @return the offer to give, or empty when the ticket was needed and not created
      */
-    private Optional<Offer> finish(TenantId tenant, SessionId session, UUID journeyId, UUID key,
+    private Optional<Offer> finish(TenantId tenant, SessionId session, UUID journeyId, UUID key, String email,
                                    IssuanceResult issued, boolean ticketNeeded, OnboardingTicket ticket) {
         Journey journey = lock(tenant, journeyId);
         if (journey.state() == JourneyState.COMPLETED) {
@@ -263,7 +282,7 @@ public class IssuanceService {
         }
         String onboardingUrl = ticket == null ? null : ticket.onboardingUrl();
         Instant onboardingExpiresAt = ticket == null ? null : ticket.expiresAt();
-        sessions.write(tenant, session, Section.ISSUANCE, new IssuanceRecord(key, issued.credentialOfferUri(),
+        sessions.write(tenant, session, Section.ISSUANCE, new IssuanceRecord(key, email, issued.credentialOfferUri(),
                 issued.offerExpiresAt(), onboardingUrl, onboardingExpiresAt).toJson());
         journey.complete(now);
         if (!journeys.update(tenant, journey, JourneyState.IN_PROGRESS)) {
