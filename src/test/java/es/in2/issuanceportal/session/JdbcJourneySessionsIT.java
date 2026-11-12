@@ -1,9 +1,9 @@
 package es.in2.issuanceportal.session;
 
 import es.in2.issuanceportal.TestcontainersConfiguration;
+import es.in2.issuanceportal.session.api.HolderRef;
 import es.in2.issuanceportal.session.api.JourneySessions;
 import es.in2.issuanceportal.session.api.Section;
-import es.in2.issuanceportal.session.api.SessionId;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -45,38 +45,56 @@ class JdbcJourneySessionsIT extends JourneySessionsContract {
 
     @ParameterizedTest
     @EnumSource(Section.class)
-    void write_personalData_storesNeitherIdentifierNorDataInClear(Section section) {
-        SessionId session = SessionId.generate();
+    void write_personalData_storesNoDataInClear(Section section) {
         UUID journey = newJourney(SANDBOX);
-        sessions.open(SANDBOX, session, journey);
-        sessions.write(SANDBOX, session, section, "{\"givenName\":\"Ana\",\"dni\":\"12345678Z\"}");
+        sessions.open(SANDBOX, Holders.next(), journey);
+        sessions.write(SANDBOX, journey, section, "{\"givenName\":\"Ana\",\"dni\":\"12345678Z\"}");
 
-        String hash = jdbc.sql("SELECT session_id_hash FROM \"sandbox_issuance_portal\".journey_session WHERE journey_id = :j")
-                .param("j", journey).query(String.class).single();
         // Column names come from a fixed switch in the adapter, mirrored here.
         String column = section.name().toLowerCase(java.util.Locale.ROOT);
         byte[] stored = jdbc.sql("SELECT " + column + " FROM \"sandbox_issuance_portal\".journey_session WHERE journey_id = :j")
                 .param("j", journey).query(byte[].class).single();
 
-        assertThat(hash).isEqualTo(session.hash()).isNotEqualTo(session.value());
         assertThat(new String(stored, StandardCharsets.ISO_8859_1)).doesNotContain("12345678Z").doesNotContain("Ana");
     }
 
     @Test
+    void open_holder_storesTheReferenceAndNothingElseOfTheHolder() {
+        HolderRef holder = Holders.next();
+        UUID journey = newJourney(SANDBOX);
+
+        sessions.open(SANDBOX, holder, journey);
+
+        String stored = jdbc.sql("SELECT holder_ref FROM \"sandbox_issuance_portal\".journey_session WHERE journey_id = :j")
+                .param("j", journey).query(String.class).single();
+        assertThat(stored).isEqualTo(holder.value());
+    }
+
+    @Test
     void read_valueCopiedFromAnotherJourney_throws() {
-        SessionId victim = SessionId.generate();
         UUID victimJourney = newJourney(SANDBOX);
-        sessions.open(SANDBOX, victim, victimJourney);
-        sessions.write(SANDBOX, victim, Section.IDENTITY, "{\"dni\":\"12345678Z\"}");
-        SessionId attacker = SessionId.generate();
+        sessions.open(SANDBOX, Holders.next(), victimJourney);
+        sessions.write(SANDBOX, victimJourney, Section.IDENTITY, "{\"dni\":\"12345678Z\"}");
         UUID attackerJourney = newJourney(SANDBOX);
-        sessions.open(SANDBOX, attacker, attackerJourney);
+        sessions.open(SANDBOX, Holders.next(), attackerJourney);
 
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey_session SET identity = "
                         + "(SELECT identity FROM \"sandbox_issuance_portal\".journey_session WHERE journey_id = :victim) "
                         + "WHERE journey_id = :attacker")
                 .param("victim", victimJourney).param("attacker", attackerJourney).update();
 
-        assertThatIllegalArgumentException().isThrownBy(() -> sessions.read(SANDBOX, attacker, Section.IDENTITY));
+        assertThatIllegalArgumentException().isThrownBy(() -> sessions.read(SANDBOX, attackerJourney, Section.IDENTITY));
+    }
+
+    @Test
+    void journeyOf_legacySessionsWithoutHolder_areNotReachedByAnyHolder() {
+        UUID legacyA = newJourney(SANDBOX);
+        UUID legacyB = newJourney(SANDBOX);
+
+        // Opened with the cookie, before the migration: two rows without holder do not collide on the unique index.
+        jdbc.sql("INSERT INTO \"sandbox_issuance_portal\".journey_session (journey_id) VALUES (:a), (:b)")
+                .param("a", legacyA).param("b", legacyB).update();
+
+        assertThat(sessions.journeyOf(SANDBOX, Holders.next())).isEmpty();
     }
 }

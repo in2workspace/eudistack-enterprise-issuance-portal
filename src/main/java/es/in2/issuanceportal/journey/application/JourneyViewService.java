@@ -5,11 +5,11 @@ import es.in2.issuanceportal.journey.domain.Journey;
 import es.in2.issuanceportal.journey.domain.JourneyState;
 import es.in2.issuanceportal.session.api.EmailVerificationRecord;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
+import es.in2.issuanceportal.session.api.HolderRef;
 import es.in2.issuanceportal.session.api.InvalidSectionException;
 import es.in2.issuanceportal.session.api.IssuanceRecord;
 import es.in2.issuanceportal.session.api.JourneySessions;
 import es.in2.issuanceportal.session.api.Section;
-import es.in2.issuanceportal.session.api.SessionId;
 import es.in2.issuanceportal.shared.error.ProblemException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import lombok.extern.slf4j.Slf4j;
@@ -49,14 +49,14 @@ public class JourneyViewService {
                        Optional<IssuanceService.Offer> offer, Optional<EmailVerification> emailVerification) {
     }
 
-    public View current(TenantId tenant, SessionId session) {
-        Journey journey = journeys.current(tenant, session);
-        Optional<EntitlementRecord.Preview> attestation = read(tenant, session, journey.id(), Section.ENTITLEMENT,
+    public View current(TenantId tenant, HolderRef holder) {
+        Journey journey = journeys.current(tenant, holder);
+        Optional<EntitlementRecord.Preview> attestation = read(tenant, journey.id(), Section.ENTITLEMENT,
                 EntitlementRecord::fromJson).map(EntitlementRecord::preview);
-        Optional<IssuanceService.Offer> offer = read(tenant, session, journey.id(), Section.ISSUANCE,
+        Optional<IssuanceService.Offer> offer = read(tenant, journey.id(), Section.ISSUANCE,
                 IssuanceRecord::fromJson).flatMap(issuance -> offer(tenant, journey.id(), issuance));
         Optional<EmailVerification> emailVerification = journey.state() == JourneyState.IN_PROGRESS
-                ? read(tenant, session, journey.id(), Section.EMAIL_VERIFICATION, JourneyViewService::verification)
+                ? read(tenant, journey.id(), Section.EMAIL_VERIFICATION, JourneyViewService::verification)
                 : Optional.empty();
         return new View(journey, attestation, offer, emailVerification);
     }
@@ -92,10 +92,10 @@ public class JourneyViewService {
     }
 
     /** A section that is not there is simply absent; one that cannot be decrypted or parsed is left out (EC-11). */
-    private <T> Optional<T> read(TenantId tenant, SessionId session, UUID journeyId, Section section,
+    private <T> Optional<T> read(TenantId tenant, UUID journeyId, Section section,
                                  Function<String, T> parse) {
         try {
-            return sessions.read(tenant, session, section).map(parse);
+            return sessions.read(tenant, journeyId, section).map(parse);
         } catch (InvalidSectionException e) {
             log.warn("Section {} of journey {} is invalid at {}: not shown", section, journeyId, e.field());
         } catch (IllegalArgumentException _) {

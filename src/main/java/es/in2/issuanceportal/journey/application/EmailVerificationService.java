@@ -18,10 +18,10 @@ import es.in2.issuanceportal.journey.domain.JourneyState;
 import es.in2.issuanceportal.journey.domain.JourneyStep;
 import es.in2.issuanceportal.session.api.EmailRecord;
 import es.in2.issuanceportal.session.api.EmailVerificationRecord;
+import es.in2.issuanceportal.session.api.HolderRef;
 import es.in2.issuanceportal.session.api.InvalidSectionException;
 import es.in2.issuanceportal.session.api.JourneySessions;
 import es.in2.issuanceportal.session.api.Section;
-import es.in2.issuanceportal.session.api.SessionId;
 import es.in2.issuanceportal.shared.error.ProblemCode;
 import es.in2.issuanceportal.shared.error.ProblemException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
@@ -88,22 +88,22 @@ public class EmailVerificationService {
      * @param clientAddress the client as the platform's proxies saw it, for the limit per address
      * @return the state of the verification after the send
      */
-    public EmailVerification send(TenantId tenant, SessionId session, String rawEmail, EmailLanguage language,
+    public EmailVerification send(TenantId tenant, HolderRef holder, String rawEmail, EmailLanguage language,
                                   String clientAddress) {
-        access.requireActive(tenant, session);
-        UUID journeyId = sessions.journeyOf(tenant, session)
+        access.requireActive(tenant, holder);
+        UUID journeyId = sessions.journeyOf(tenant, holder)
                 .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
         return Objects.requireNonNull(transactions.execute(
-                status -> sendLocked(tenant, session, journeyId, rawEmail, language, clientAddress)));
+                status -> sendLocked(tenant, journeyId, rawEmail, language, clientAddress)));
     }
 
-    private EmailVerification sendLocked(TenantId tenant, SessionId session, UUID journeyId, String rawEmail,
+    private EmailVerification sendLocked(TenantId tenant, UUID journeyId, String rawEmail,
                                          EmailLanguage language, String clientAddress) {
         requireOpenForCode(lock(tenant, journeyId));
-        requireSection(tenant, session, Section.IDENTITY);
-        requireSection(tenant, session, Section.ENTITLEMENT);
+        requireSection(tenant, journeyId, Section.IDENTITY);
+        requireSection(tenant, journeyId, Section.ENTITLEMENT);
         EmailAddress email = email(rawEmail);
-        Optional<EmailVerification> previous = readVerification(tenant, session);
+        Optional<EmailVerification> previous = readVerification(tenant, journeyId);
 
         Optional<EmailVerification.Refusal> refusal = EmailVerification.refusal(previous.orElse(null), clock.instant());
         if (refusal.isPresent()) {
@@ -132,9 +132,9 @@ public class EmailVerificationService {
 
         EmailVerification sent = EmailVerification.sent(email.value(), EmailVerification.hash(journeyId, code),
                 previous.orElse(null), clock.instant());
-        sessions.write(tenant, session, Section.EMAIL_VERIFICATION, toRecord(sent).toJson());
+        sessions.write(tenant, journeyId, Section.EMAIL_VERIFICATION, toRecord(sent).toJson());
         // The email verified before stops being the journey's: the new one is only verified with its code (ac.md decision 2).
-        sessions.clear(tenant, session, Section.EMAIL);
+        sessions.clear(tenant, journeyId, Section.EMAIL);
         trace(tenant, journeyId, EmailCodeOutcome.SENT);
         return sent;
     }
@@ -149,15 +149,15 @@ public class EmailVerificationService {
      *
      * @param code what the interface sent; anything that is not 6 digits is {@code bad_request} and spends nothing
      */
-    public void check(TenantId tenant, SessionId session, String code) {
+    public void check(TenantId tenant, HolderRef holder, String code) {
         if (!EmailVerification.isWellFormed(code)) {
             throw new ProblemException(ProblemCode.BAD_REQUEST);
         }
-        access.requireActive(tenant, session);
-        UUID journeyId = sessions.journeyOf(tenant, session)
+        access.requireActive(tenant, holder);
+        UUID journeyId = sessions.journeyOf(tenant, holder)
                 .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
         EmailVerification.Check.Outcome outcome = Objects.requireNonNull(
-                transactions.execute(status -> checkLocked(tenant, session, journeyId, code)));
+                transactions.execute(status -> checkLocked(tenant, journeyId, code)));
         traceCheck(tenant, journeyId, switch (outcome) {
             case VERIFIED -> EmailCodeCheck.VERIFIED;
             case INVALID_CODE -> EmailCodeCheck.INVALID_CODE;
@@ -174,23 +174,23 @@ public class EmailVerificationService {
         }
     }
 
-    private EmailVerification.Check.Outcome checkLocked(TenantId tenant, SessionId session, UUID journeyId,
+    private EmailVerification.Check.Outcome checkLocked(TenantId tenant, UUID journeyId,
                                                         String code) {
         Journey journey = lock(tenant, journeyId);
         requireOpenForCode(journey);
         // No code pending: never sent, or already verified (ES-03).
-        EmailVerification pending = readVerification(tenant, session)
+        EmailVerification pending = readVerification(tenant, journeyId)
                 .filter(EmailVerification::isPending)
                 .orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED));
         EmailVerification.Check check = pending.check(journeyId, code, clock.instant());
         switch (check.outcome()) {
             case VERIFIED -> {
-                sessions.write(tenant, session, Section.EMAIL, new EmailRecord(pending.pendingEmail()).toJson());
-                sessions.write(tenant, session, Section.EMAIL_VERIFICATION, toRecord(check.next()).toJson());
+                sessions.write(tenant, journeyId, Section.EMAIL, new EmailRecord(pending.pendingEmail()).toJson());
+                sessions.write(tenant, journeyId, Section.EMAIL_VERIFICATION, toRecord(check.next()).toJson());
                 reachEmailVerified(tenant, journey);
             }
             case INVALID_CODE ->
-                    sessions.write(tenant, session, Section.EMAIL_VERIFICATION, toRecord(check.next()).toJson());
+                    sessions.write(tenant, journeyId, Section.EMAIL_VERIFICATION, toRecord(check.next()).toJson());
             case EXPIRED_CODE, TOO_MANY_ATTEMPTS -> {
                 // Nothing to store: the stored record already says it is expired or exhausted.
             }
@@ -232,8 +232,8 @@ public class EmailVerificationService {
         }
     }
 
-    private void requireSection(TenantId tenant, SessionId session, Section section) {
-        if (sessions.read(tenant, session, section).isEmpty()) {
+    private void requireSection(TenantId tenant, UUID journeyId, Section section) {
+        if (sessions.read(tenant, journeyId, section).isEmpty()) {
             throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
         }
     }
@@ -274,8 +274,8 @@ public class EmailVerificationService {
         return language == EmailLanguage.EN ? APP_NAME_FALLBACK_EN : APP_NAME_FALLBACK_ES;
     }
 
-    private Optional<EmailVerification> readVerification(TenantId tenant, SessionId session) {
-        return sessions.read(tenant, session, Section.EMAIL_VERIFICATION).map(section -> {
+    private Optional<EmailVerification> readVerification(TenantId tenant, UUID journeyId) {
+        return sessions.read(tenant, journeyId, Section.EMAIL_VERIFICATION).map(section -> {
             try {
                 EmailVerificationRecord stored = EmailVerificationRecord.fromJson(section);
                 return fromRecord(stored);

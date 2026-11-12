@@ -10,8 +10,11 @@ import es.in2.issuanceportal.journey.domain.JourneyClosedException;
 import es.in2.issuanceportal.journey.domain.JourneyState;
 import es.in2.issuanceportal.journey.domain.JourneyStep;
 import es.in2.issuanceportal.journey.domain.WithdrawalReason;
+import es.in2.issuanceportal.session.api.HolderAlreadyHasJourneyException;
+import es.in2.issuanceportal.session.api.HolderIdentity;
+import es.in2.issuanceportal.session.api.HolderRef;
 import es.in2.issuanceportal.session.api.JourneySessions;
-import es.in2.issuanceportal.session.api.SessionId;
+import es.in2.issuanceportal.session.api.Section;
 import es.in2.issuanceportal.shared.config.TransactionConfiguration;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import lombok.extern.slf4j.Slf4j;
@@ -24,11 +27,12 @@ import org.springframework.transaction.support.TransactionOperations;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Lifecycle of the holder's journey and its session: start, read, withdraw, and the checks the other
+ * Lifecycle of the holder's journey and its session: open, read, withdraw, and the checks the other
  * modules make through {@code journey.api}.
  *
  * <p>When a request finds its journey already closed, the clean-up it does on the way (withdrawing an
@@ -43,6 +47,8 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
 
     /** Journeys the expiry sweep reads per query. */
     static final int SWEEP_BATCH = 200;
+    /** Times an opening is tried when another one of the same holder gets there first. */
+    private static final int OPEN_ATTEMPTS = 3;
     private static final UUID FIRST_ID = new UUID(0L, 0L);
 
     private final JourneyRepository journeys;
@@ -64,31 +70,66 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
         this.clock = clock;
     }
 
-    public record Started(Journey journey, SessionId session) {
+    /** The holder's journey and whether this call opened it. */
+    public record Opened(Journey journey, boolean created) {
     }
 
-    /** Starts a journey with a new session. A journey still open in the same browser is closed first. */
-    public Started start(TenantId tenant, Optional<SessionId> previous) {
-        previous.ifPresent(session -> closePrevious(tenant, session));
+    /**
+     * Opens the holder's journey with their identity, or returns the one they already have, without touching its
+     * identity (design.md section 3.2). A journey whose inactivity limit has passed but the expiry job has not handled yet
+     * is closed first, as the job would. Two openings at the same time end with a single journey: the session's
+     * unique holder makes the second fail, and it is read again in a new transaction.
+     */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    public Opened open(TenantId tenant, HolderRef holder, HolderIdentity identity, String identificationMethod) {
+        for (int attempt = 1; ; attempt++) {
+            try {
+                return Objects.requireNonNull(
+                        transactions.execute(status -> openOnce(tenant, holder, identity, identificationMethod)));
+            } catch (HolderAlreadyHasJourneyException | JourneyClosedException e) {
+                // Another opening, or a request that closed the holder's journey, got there first: look again.
+                if (attempt == OPEN_ATTEMPTS) {
+                    throw e;
+                }
+                log.debug("The journey of the holder changed while it was being opened: looking again");
+            }
+        }
+    }
+
+    private Opened openOnce(TenantId tenant, HolderRef holder, HolderIdentity identity, String identificationMethod) {
         Instant now = clock.instant();
-        Journey journey = Journey.start(UUID.randomUUID(), now);
-        SessionId session = SessionId.generate();
+        Optional<Journey> existing = sessions.journeyOf(tenant, holder).flatMap(id -> journeys.findById(tenant, id));
+        if (existing.isPresent()) {
+            Journey journey = existing.get();
+            if (journey.state() == JourneyState.WITHDRAWN) {
+                sessions.close(tenant, journey.id());
+            } else if (journey.isInactive(now)) {
+                expireOnRequest(tenant, journey, now);
+            } else {
+                JourneyState readIn = journey.state();
+                journey.touch(now);
+                save(tenant, journey, readIn);
+                return new Opened(journey, false);
+            }
+        }
+        Journey journey = Journey.start(UUID.randomUUID(), now, identificationMethod);
         journeys.insert(tenant, journey);
-        sessions.open(tenant, session, journey.id());
+        sessions.open(tenant, holder, journey.id());
+        sessions.write(tenant, journey.id(), Section.IDENTITY, identity.toJson());
         audit(tenant, JourneyAuditTrail.Kind.STARTED, journey);
-        return new Started(journey, session);
+        return new Opened(journey, true);
     }
 
-    public Journey current(TenantId tenant, SessionId session) {
-        return active(tenant, session);
+    public Journey current(TenantId tenant, HolderRef holder) {
+        return active(tenant, holder);
     }
 
     /**
      * The holder cancels. In progress, the journey is withdrawn as cancelled; completed, only its
      * session closes. Either way the personal data is deleted.
      */
-    public Journey cancel(TenantId tenant, SessionId session) {
-        Journey journey = active(tenant, session);
+    public Journey cancel(TenantId tenant, HolderRef holder) {
+        Journey journey = active(tenant, holder);
         if (journey.isInProgress()) {
             withdraw(tenant, journey, WithdrawalReason.CANCELLED);
         } else {
@@ -98,18 +139,18 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
     }
 
     @Override
-    public void requireActive(TenantId tenant, SessionId session) {
-        active(tenant, session);
+    public void requireActive(TenantId tenant, HolderRef holder) {
+        active(tenant, holder);
     }
 
     @Override
-    public void requireInProgress(TenantId tenant, SessionId session) {
-        activeInProgress(tenant, session);
+    public void requireInProgress(TenantId tenant, HolderRef holder) {
+        activeInProgress(tenant, holder);
     }
 
     @Override
-    public void reach(TenantId tenant, SessionId session, JourneyProgress.Step step) {
-        Journey journey = activeInProgress(tenant, session);
+    public void reach(TenantId tenant, HolderRef holder, JourneyProgress.Step step) {
+        Journey journey = activeInProgress(tenant, holder);
         JourneyStep before = journey.step();
         journey.reach(switch (step) {
             case IDENTIFIED -> JourneyStep.IDENTIFIED;
@@ -122,8 +163,8 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
     }
 
     @Override
-    public void withdraw(TenantId tenant, SessionId session, JourneyWithdrawal.Cause cause) {
-        Journey journey = activeInProgress(tenant, session);
+    public void withdraw(TenantId tenant, HolderRef holder, JourneyWithdrawal.Cause cause) {
+        Journey journey = activeInProgress(tenant, holder);
         withdraw(tenant, journey, switch (cause) {
             case NOT_ENTITLED -> WithdrawalReason.NOT_ENTITLED;
         });
@@ -172,9 +213,9 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
         return journeys.deleteSessionIfClosedOrInactive(tenant, id, cutoff);
     }
 
-    /** The open journey of the session, with its activity recorded, or {@code journey_closed}. */
-    private Journey active(TenantId tenant, SessionId session) {
-        Journey journey = sessions.journeyOf(tenant, session)
+    /** The open journey of the holder, with its activity recorded, or {@code journey_closed}. */
+    private Journey active(TenantId tenant, HolderRef holder) {
+        Journey journey = sessions.journeyOf(tenant, holder)
                 .flatMap(id -> journeys.findById(tenant, id))
                 .orElseThrow(JourneyClosedException::new);
         Instant now = clock.instant();
@@ -205,36 +246,12 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
         journeys.deleteSessionIfClosedOrInactive(tenant, journey.id(), cutoff);
     }
 
-    private Journey activeInProgress(TenantId tenant, SessionId session) {
-        Journey journey = active(tenant, session);
+    private Journey activeInProgress(TenantId tenant, HolderRef holder) {
+        Journey journey = active(tenant, holder);
         if (!journey.isInProgress()) {
             throw new JourneyClosedException();
         }
         return journey;
-    }
-
-    private void closePrevious(TenantId tenant, SessionId session) {
-        sessions.journeyOf(tenant, session)
-                .flatMap(id -> journeys.findById(tenant, id))
-                .ifPresent(journey -> {
-                    if (!journey.isInProgress()) {
-                        sessions.close(tenant, journey.id());
-                        return;
-                    }
-                    // A previous journey already past its inactivity limit expired; it was not cancelled.
-                    Instant now = clock.instant();
-                    if (journey.isInactive(now)) {
-                        expireOnRequest(tenant, journey, now);
-                        return;
-                    }
-                    try {
-                        withdraw(tenant, journey, WithdrawalReason.CANCELLED);
-                    } catch (JourneyClosedException _) {
-                        // A parallel request (a double submit) or the expiry job closed it first: it is
-                        // closed either way, and the holder still gets a new journey.
-                        log.debug("Previous journey {} was already closed", journey.id());
-                    }
-                });
     }
 
     private void withdraw(TenantId tenant, Journey journey, WithdrawalReason reason) {

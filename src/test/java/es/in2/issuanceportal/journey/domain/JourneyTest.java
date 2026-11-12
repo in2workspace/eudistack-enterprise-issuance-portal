@@ -16,7 +16,7 @@ class JourneyTest {
 
     @Test
     void start_newJourney_isInProgressAtFirstStepWithoutEnd() {
-        Journey journey = Journey.start(UUID.randomUUID(), T0);
+        Journey journey = Journey.start(UUID.randomUUID(), T0, null);
 
         assertThat(journey.state()).isEqualTo(JourneyState.IN_PROGRESS);
         assertThat(journey.step()).isEqualTo(JourneyStep.STARTED);
@@ -28,7 +28,7 @@ class JourneyTest {
 
     @Test
     void withdraw_inProgress_keepsStepAndRecordsReasonAndEnd() {
-        Journey journey = Journey.start(UUID.randomUUID(), T0);
+        Journey journey = Journey.start(UUID.randomUUID(), T0, null);
         journey.reach(JourneyStep.ENTITLEMENT_CONFIRMED, T0.plusSeconds(60));
 
         journey.withdraw(WithdrawalReason.CANCELLED, T0.plusSeconds(90));
@@ -41,7 +41,7 @@ class JourneyTest {
 
     @Test
     void reach_earlierStep_keepsLaterStep() {
-        Journey journey = Journey.start(UUID.randomUUID(), T0);
+        Journey journey = Journey.start(UUID.randomUUID(), T0, null);
         journey.reach(JourneyStep.ENTITLEMENT_CONFIRMED, T0);
 
         journey.reach(JourneyStep.IDENTIFIED, T0.plusSeconds(10));
@@ -52,7 +52,7 @@ class JourneyTest {
 
     @Test
     void complete_inProgress_reachesOfferAndEnds() {
-        Journey journey = Journey.start(UUID.randomUUID(), T0);
+        Journey journey = Journey.start(UUID.randomUUID(), T0, null);
 
         journey.complete(T0.plusSeconds(120));
 
@@ -64,7 +64,7 @@ class JourneyTest {
 
     @Test
     void isInactive_fifteenMinutesWithoutActivity_returnsTrue() {
-        Journey journey = Journey.start(UUID.randomUUID(), T0);
+        Journey journey = Journey.start(UUID.randomUUID(), T0, null);
 
         assertThat(journey.isInactive(T0.plus(Duration.ofMinutes(15)).minusMillis(1))).isFalse();
         assertThat(journey.isInactive(T0.plus(Duration.ofMinutes(15)))).isTrue();
@@ -72,7 +72,7 @@ class JourneyTest {
 
     @Test
     void touch_beforeLimit_pushesBackExpiry() {
-        Journey journey = Journey.start(UUID.randomUUID(), T0);
+        Journey journey = Journey.start(UUID.randomUUID(), T0, null);
 
         journey.touch(T0.plus(Duration.ofMinutes(14)));
 
@@ -82,7 +82,7 @@ class JourneyTest {
 
     @Test
     void touch_completedJourney_keepsCountingActivity() {
-        Journey journey = Journey.start(UUID.randomUUID(), T0);
+        Journey journey = Journey.start(UUID.randomUUID(), T0, null);
         journey.complete(T0);
 
         journey.touch(T0.plus(Duration.ofMinutes(10)));
@@ -93,7 +93,7 @@ class JourneyTest {
 
     @Test
     void isInactive_withdrawnJourney_returnsFalse() {
-        Journey journey = Journey.start(UUID.randomUUID(), T0);
+        Journey journey = Journey.start(UUID.randomUUID(), T0, null);
         journey.withdraw(WithdrawalReason.CANCELLED, T0);
 
         assertThat(journey.isInactive(T0.plus(Duration.ofHours(1)))).isFalse();
@@ -101,7 +101,7 @@ class JourneyTest {
 
     @Test
     void transitions_withdrawnJourney_throwJourneyClosed() {
-        Journey journey = Journey.start(UUID.randomUUID(), T0);
+        Journey journey = Journey.start(UUID.randomUUID(), T0, null);
         journey.withdraw(WithdrawalReason.EXPIRED, T0);
 
         assertJourneyClosed(() -> journey.withdraw(WithdrawalReason.CANCELLED, T0));
@@ -112,7 +112,7 @@ class JourneyTest {
 
     @Test
     void withdraw_completedJourney_throwsJourneyClosed() {
-        Journey journey = Journey.start(UUID.randomUUID(), T0);
+        Journey journey = Journey.start(UUID.randomUUID(), T0, null);
         journey.complete(T0);
 
         assertJourneyClosed(() -> journey.withdraw(WithdrawalReason.CANCELLED, T0));
@@ -127,7 +127,7 @@ class JourneyTest {
 
     @Test
     void recordIssuanceProcess_inProgress_keepsItAndCountsAsActivity() {
-        Journey journey = Journey.start(UUID.randomUUID(), T0);
+        Journey journey = Journey.start(UUID.randomUUID(), T0, null);
         UUID process = UUID.randomUUID();
 
         journey.recordIssuanceProcess(process, T0.plusSeconds(30));
@@ -138,7 +138,7 @@ class JourneyTest {
 
     @Test
     void recordIssuanceProcess_sameProcessAgain_changesNothing() {
-        Journey journey = Journey.start(UUID.randomUUID(), T0);
+        Journey journey = Journey.start(UUID.randomUUID(), T0, null);
         UUID process = UUID.randomUUID();
         journey.recordIssuanceProcess(process, T0);
 
@@ -149,7 +149,7 @@ class JourneyTest {
 
     @Test
     void recordIssuanceProcess_differentProcess_isRejectedAndKeepsTheFirst() {
-        Journey journey = Journey.start(UUID.randomUUID(), T0);
+        Journey journey = Journey.start(UUID.randomUUID(), T0, null);
         UUID first = UUID.randomUUID();
         journey.recordIssuanceProcess(first, T0);
 
@@ -163,9 +163,9 @@ class JourneyTest {
 
     @Test
     void recordIssuanceProcess_closedJourney_throwsJourneyClosed() {
-        Journey withdrawn = Journey.start(UUID.randomUUID(), T0);
+        Journey withdrawn = Journey.start(UUID.randomUUID(), T0, null);
         withdrawn.withdraw(WithdrawalReason.CANCELLED, T0);
-        Journey completed = Journey.start(UUID.randomUUID(), T0);
+        Journey completed = Journey.start(UUID.randomUUID(), T0, null);
         completed.complete(T0);
 
         assertJourneyClosed(() -> withdrawn.recordIssuanceProcess(UUID.randomUUID(), T0));

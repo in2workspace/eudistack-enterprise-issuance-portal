@@ -1,6 +1,6 @@
 package es.in2.issuanceportal.journey.api;
 
-import es.in2.issuanceportal.session.api.SessionId;
+import es.in2.issuanceportal.session.api.HolderRef;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 
 /** How the other modules record the step the holder reached through them. */
@@ -13,5 +13,5 @@ public interface JourneyProgress {
         ENTITLEMENT_CONFIRMED
     }
 
-    void reach(TenantId tenant, SessionId session, Step step);
+    void reach(TenantId tenant, HolderRef holder, Step step);
 }

@@ -7,7 +7,7 @@ import com.github.tomakehurst.wiremock.stubbing.Scenario;
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
 import es.in2.issuanceportal.session.api.IssuanceRecord;
 import es.in2.issuanceportal.session.api.Section;
-import es.in2.issuanceportal.session.api.SessionId;
+import es.in2.issuanceportal.shared.security.TestHolder;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -57,9 +57,9 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
     void confirm_entitledHolder_completesWithTheOfferAndTheOnboardingAddress() throws Exception {
         configure(true);
         everythingWorks();
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        MvcResult result = mvc.perform(confirmation(session))
+        MvcResult result = mvc.perform(confirmation(holder))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.credential_offer_uri").value(OFFER))
@@ -68,7 +68,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
                 .andExpect(jsonPath("$.onboarding_expires_at").isNotEmpty())
                 .andReturn();
 
-        UUID key = keyOf(session);
+        UUID key = keyOf(holder);
         assertThat(result.getResponse().getContentAsString()).doesNotContain(key.toString());
         List<LoggedRequest> tokenRequests = requestsTo(TOKEN_PATH);
         assertThat(tokenRequests).hasSize(1);
@@ -88,7 +88,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         assertThat(ticket.get("email").asText()).isEqualTo(EMAIL);
         assertThat(ticket.get("credentialOffer").asText()).isEqualTo(OFFER);
         assertThat(ticket.get("expiresIn").asLong()).isBetween(530L, 540L);
-        Map<String, Object> row = rowOf(session);
+        Map<String, Object> row = rowOf(holder);
         assertThat(row).containsEntry("state", "completed")
                 .containsEntry("step", "offer_obtained")
                 .containsEntry("issuance_process_id", key);
@@ -99,9 +99,9 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
     @DisplayName("EUD-277 AC-10 — a tenant without ticket never asks the Wallet Unit Service and answers only the offer")
     void confirm_tenantWithoutOnboarding_answersTheOfferWithoutCallingTheWalletUnitService() throws Exception {
         everythingWorks();
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        mvc.perform(confirmation(session))
+        mvc.perform(confirmation(holder))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.credential_offer_uri").value(OFFER))
                 .andExpect(jsonPath("$.expires_at").isNotEmpty())
@@ -109,7 +109,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
                 .andExpect(jsonPath("$.onboarding_expires_at").doesNotExist());
 
         assertThat(requestsTo(TICKETS_PATH)).isEmpty();
-        assertThat(rowOf(session)).containsEntry("state", "completed");
+        assertThat(rowOf(holder)).containsEntry("state", "completed");
         assertHolderTokenNeverSent();
     }
 
@@ -118,16 +118,16 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
     void confirm_noEntitlement_isStepNotAllowedAndNoSystemIsAsked() throws Exception {
         configure(true);
         everythingWorks();
-        SessionId session = identifiedJourney();
-        Map<String, Object> before = rowOf(session);
+        TestHolder holder = identifiedJourney();
+        Map<String, Object> before = rowOf(holder);
 
-        mvc.perform(confirmation(session))
+        mvc.perform(confirmation(holder))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.type").value("step_not_allowed"));
 
         assertThat(requestsToAnySystem()).isZero();
-        assertThat(rowOf(session)).isEqualTo(before);
-        assertThat(sessions.read(SANDBOX, session, Section.ISSUANCE)).isEmpty();
+        assertThat(rowOf(holder)).isEqualTo(before);
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE)).isEmpty();
     }
 
     @Test
@@ -136,14 +136,14 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         configure(true);
         everythingWorks();
         Files.deleteIfExists(SECRETS.resolve("sandbox.json"));
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        mvc.perform(confirmation(session))
+        mvc.perform(confirmation(holder))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("issuance_unavailable"));
 
         assertThat(requestsToAnySystem()).isZero();
-        assertStillInProgressWithEntitlement(session);
+        assertStillInProgressWithEntitlement(holder);
     }
 
     @Test
@@ -154,16 +154,16 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         walletUnitServiceCreatesTicket();
         WIRE.stubFor(post(urlEqualTo(TOKEN_PATH)).willReturn(aResponse().withStatus(401)
                 .withHeader("Content-Type", "application/json").withBody("{\"error\":\"invalid_client\"}")));
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        mvc.perform(confirmation(session))
+        mvc.perform(confirmation(holder))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("issuance_unavailable"));
 
         assertThat(requestsTo(TOKEN_PATH)).hasSize(1);
         assertThat(requestsTo(ISSUANCES_PATH)).isEmpty();
         assertThat(requestsTo(TICKETS_PATH)).isEmpty();
-        assertStillInProgressWithEntitlement(session);
+        assertStillInProgressWithEntitlement(holder);
     }
 
     @Test
@@ -186,16 +186,16 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
                 .willSetStateTo("recovered").willReturn(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER)));
         WIRE.stubFor(post(urlEqualTo(ISSUANCES_PATH)).inScenario("issuance").whenScenarioStateIs("recovered")
                 .willReturn(issued()));
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        mvc.perform(confirmation(session)).andExpect(status().isOk());
+        mvc.perform(confirmation(holder)).andExpect(status().isOk());
 
         List<LoggedRequest> attempts = requestsTo(ISSUANCES_PATH);
         assertThat(attempts).hasSize(2);
         assertThat(attempts).extracting(attempt -> attempt.getHeader("X-Idempotency-Key"))
-                .containsOnly(keyOf(session).toString());
-        assertThat(processOf(session)).isEqualTo(keyOf(session));
-        assertThat(processesOfJourney(session)).isEqualTo(1);
+                .containsOnly(keyOf(holder).toString());
+        assertThat(processOf(holder)).isEqualTo(keyOf(holder));
+        assertThat(processesOfJourney(holder)).isEqualTo(1);
     }
 
     @Test
@@ -206,15 +206,15 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         walletUnitServiceCreatesTicket();
         WIRE.stubFor(post(urlEqualTo(ISSUANCES_PATH)).willReturn(aResponse().withStatus(400)
                 .withHeader("Content-Type", "application/problem+json").withBody("{\"type\":\"error\"}")));
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        mvc.perform(confirmation(session))
+        mvc.perform(confirmation(holder))
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.type").value("issuance_rejected"));
 
         assertThat(requestsTo(ISSUANCES_PATH)).hasSize(1);
         assertThat(requestsTo(TICKETS_PATH)).isEmpty();
-        assertStillInProgressWithEntitlement(session);
+        assertStillInProgressWithEntitlement(holder);
     }
 
     @Test
@@ -227,14 +227,14 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
                 .withHeader("Content-Type", "application/json")
                 .withBody("{\"responses\":[{\"channel\":\"ui\",\"status\":200,\"body\":{\"credential_offer_uri\":\""
                         + OFFER + "\"}}]}")));
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        mvc.perform(confirmation(session))
+        mvc.perform(confirmation(holder))
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.type").value("issuance_rejected"));
 
         assertThat(requestsTo(TICKETS_PATH)).isEmpty();
-        assertStillInProgressWithEntitlement(session);
+        assertStillInProgressWithEntitlement(holder);
         assertThat(logs.text()).doesNotContain(EMAIL, OFFER);
     }
 
@@ -243,26 +243,26 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
     void confirm_afterIssuanceUnavailable_reusesTheKeyAndEndsWithOneProcess() throws Exception {
         verifierGrants();
         WIRE.stubFor(post(urlEqualTo(ISSUANCES_PATH)).willReturn(aResponse().withStatus(500)));
-        SessionId session = entitledJourney();
-        mvc.perform(confirmation(session))
+        TestHolder holder = entitledJourney();
+        mvc.perform(confirmation(holder))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("issuance_unavailable"));
-        UUID keptKey = keyOf(session);
+        UUID keptKey = keyOf(holder);
         issuerIssues();
 
-        mvc.perform(confirmation(session)).andExpect(status().isOk());
+        mvc.perform(confirmation(holder)).andExpect(status().isOk());
 
         assertThat(requestsTo(ISSUANCES_PATH)).extracting(request -> request.getHeader("X-Idempotency-Key"))
                 .containsExactly(keptKey.toString(), keptKey.toString());
-        assertThat(processOf(session)).isEqualTo(keptKey);
-        assertThat(processesOfJourney(session)).isEqualTo(1);
+        assertThat(processOf(holder)).isEqualTo(keptKey);
+        assertThat(processesOfJourney(holder)).isEqualTo(1);
     }
 
     @Test
     @DisplayName("EUD-277 NFR-2 — a confirmation repeated after completing, or after the ticket failed, adds no process")
     void confirm_repeated_neverAsksTheIssuerForAnotherProcess() throws Exception {
         everythingWorks();
-        SessionId completed = entitledJourney();
+        TestHolder completed = entitledJourney();
         mvc.perform(confirmation(completed)).andExpect(status().isOk());
         mvc.perform(confirmation(completed)).andExpect(status().isGone())
                 .andExpect(jsonPath("$.type").value("journey_closed"));
@@ -271,7 +271,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         WIRE.resetRequests();
         configure(true);
         WIRE.stubFor(post(urlEqualTo(TICKETS_PATH)).willReturn(aResponse().withStatus(500)));
-        SessionId withoutTicket = entitledJourney();
+        TestHolder withoutTicket = entitledJourney();
         mvc.perform(confirmation(withoutTicket)).andExpect(status().isServiceUnavailable());
         UUID process = processOf(withoutTicket);
         assertThat(process).isNotNull();
@@ -291,7 +291,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
     void confirm_twoAtOnce_shareOneKeyAndEndWithOneProcess() throws Exception {
         verifierGrants();
         WIRE.stubFor(post(urlEqualTo(ISSUANCES_PATH)).willReturn(issued().withFixedDelay(300)));
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
         CyclicBarrier together = new CyclicBarrier(2);
 
         List<MvcResult> results = new ArrayList<>();
@@ -300,7 +300,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
             for (int i = 0; i < 2; i++) {
                 calls.add(pool.submit(() -> {
                     together.await(10, TimeUnit.SECONDS);
-                    return mvc.perform(confirmation(session)).andReturn();
+                    return mvc.perform(confirmation(holder)).andReturn();
                 }));
             }
             for (Future<MvcResult> call : calls) {
@@ -313,9 +313,9 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
                 .isEqualTo(results.get(1).getResponse().getContentAsString());
         Set<String> keys = requestsTo(ISSUANCES_PATH).stream()
                 .map(request -> request.getHeader("X-Idempotency-Key")).collect(Collectors.toSet());
-        assertThat(keys).containsExactly(keyOf(session).toString());
-        assertThat(processOf(session)).isEqualTo(keyOf(session));
-        assertThat(processesOfJourney(session)).isEqualTo(1);
+        assertThat(keys).containsExactly(keyOf(holder).toString());
+        assertThat(processOf(holder)).isEqualTo(keyOf(holder));
+        assertThat(processesOfJourney(holder)).isEqualTo(1);
     }
 
     @ParameterizedTest(name = "the Wallet Unit Service answers {0}")
@@ -326,9 +326,9 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         verifierGrants();
         issuerIssues();
         WIRE.stubFor(post(urlEqualTo(TICKETS_PATH)).willReturn(aResponse().withStatus(status)));
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        MvcResult result = mvc.perform(confirmation(session))
+        MvcResult result = mvc.perform(confirmation(holder))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.type").value("onboarding_unavailable"))
@@ -337,11 +337,11 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
                 .andReturn();
 
         assertThat(result.getResponse().getContentAsString()).doesNotContain("openid-credential-offer");
-        Map<String, Object> row = rowOf(session);
+        Map<String, Object> row = rowOf(holder);
         assertThat(row).containsEntry("state", "in_progress")
                 .containsEntry("step", "email_verified")
-                .containsEntry("issuance_process_id", keyOf(session));
-        IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, session, Section.ISSUANCE).orElseThrow());
+                .containsEntry("issuance_process_id", keyOf(holder));
+        IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow());
         assertThat(stored.offerUri()).isEmpty();
         assertThat(stored.onboarding()).isEmpty();
         assertThat(requestsTo(TICKETS_PATH)).hasSize(1);
@@ -386,16 +386,16 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
                 // everything works: already stubbed by everythingWorks()
             }
         }
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        mvc.perform(confirmation(session));
+        mvc.perform(confirmation(holder));
 
         List<String> issuance = logs.auditLines("ISSUANCE_REQUESTED");
         assertThat(issuance).singleElement().asString().contains("result=" + outcome.result);
         Matcher process = PROCESS_IN_TRAIL.matcher(issuance.getFirst());
         assertThat(process.find()).isEqualTo(outcome.hasProcess);
         if (outcome.hasProcess) {
-            assertThat(UUID.fromString(process.group(1))).isEqualTo(processOf(session));
+            assertThat(UUID.fromString(process.group(1))).isEqualTo(processOf(holder));
         }
         List<String> ticket = logs.auditLines("ONBOARDING_TICKET_REQUESTED");
         if (outcome.asksTicket) {
@@ -410,13 +410,13 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
 
     // --- helpers ---
 
-    private UUID keyOf(SessionId session) {
-        return IssuanceRecord.fromJson(sessions.read(SANDBOX, session, Section.ISSUANCE).orElseThrow()).idempotencyKey();
+    private UUID keyOf(TestHolder holder) {
+        return IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).idempotencyKey();
     }
 
-    private long processesOfJourney(SessionId session) {
+    private long processesOfJourney(TestHolder holder) {
         return jdbc.sql("SELECT count(issuance_process_id) FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
-                .param("id", journeyOf(session)).query(Long.class).single();
+                .param("id", journeyOf(holder)).query(Long.class).single();
     }
 
     private static void assertIssuanceBody(JsonNode body) {
@@ -435,20 +435,21 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
                 "personal_administrative_number", "medical_board", "medical_speciality", "legally_entitled");
     }
 
-    private void assertStillInProgressWithEntitlement(SessionId session) {
-        Map<String, Object> row = rowOf(session);
+    private void assertStillInProgressWithEntitlement(TestHolder holder) {
+        Map<String, Object> row = rowOf(holder);
         assertThat(row).containsEntry("state", "in_progress")
                 .containsEntry("step", "email_verified");
         assertThat(row.get("issuance_process_id")).isNull();
-        assertThat(sessions.read(SANDBOX, session, Section.ENTITLEMENT)).isPresent();
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.ENTITLEMENT)).isPresent();
     }
 
     /** What AC-15 keeps out of every line: the holder's data, the offer and address, and the tenant's secrets. */
     private String[] personalAndSecret() {
         List<String> values = new ArrayList<>(List.of(EMAIL, TOKEN_EMAIL, GIVEN_NAME, FAMILY_NAME, DNI,
                 ADMINISTRATIVE_NUMBER, MEDICAL_BOARD, SPECIALITY, OFFER, "credential_offer_uri", ONBOARDING_URL,
-                "ticket-fixed", ACCESS_TOKEN, HOLDER_TOKEN, MACHINE.credentialJwt(),
+                "ticket-fixed", ACCESS_TOKEN, MACHINE.credentialJwt(),
                 MACHINE.key().getD().toString()));
+        values.addAll(HOLDER_TOKENS);
         for (LoggedRequest request : WIRE.findAll(postRequestedFor(urlEqualTo(TOKEN_PATH)))) {
             Matcher found = CLIENT_ASSERTION.matcher(request.getBodyAsString());
             if (found.find()) {

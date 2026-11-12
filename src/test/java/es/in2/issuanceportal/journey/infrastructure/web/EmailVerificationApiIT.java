@@ -16,9 +16,9 @@ import es.in2.issuanceportal.session.api.IdentifierType;
 import es.in2.issuanceportal.session.api.JourneySessions;
 import es.in2.issuanceportal.session.api.PersonalIdentifier;
 import es.in2.issuanceportal.session.api.Section;
-import es.in2.issuanceportal.session.api.SessionId;
+import es.in2.issuanceportal.shared.security.HolderRefs;
+import es.in2.issuanceportal.shared.security.TestHolder;
 import es.in2.issuanceportal.shared.tenant.TenantId;
-import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -95,6 +95,8 @@ class EmailVerificationApiIT {
     @Autowired
     private JourneySessions sessions;
     @Autowired
+    private HolderRefs holderRefs;
+    @Autowired
     private JourneyProgress progress;
     @Autowired
     private RecordingEmailCodeMailer mailer;
@@ -130,9 +132,9 @@ class EmailVerificationApiIT {
     @Test
     @DisplayName("AC-01 — postEmailVerification_entitledHolder_answers202SendsTheCodeAndKeepsOnlyItsHash")
     void postEmailVerification_entitledHolder_answers202SendsTheCodeAndKeepsOnlyItsHash() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null))
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null))
                 .andExpect(status().isAccepted())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.email").value(EMAIL))
@@ -144,39 +146,39 @@ class EmailVerificationApiIT {
         assertThat(mailer.sent()).hasSize(1);
         assertThat(mailer.last().to()).isEqualTo(EMAIL);
         String code = RecordingEmailCodeMailer.codeOf(mailer.last());
-        EmailVerificationRecord stored = storedVerification(session);
-        assertThat(stored.codeHash()).isEqualTo(EmailVerification.hash(journeyOf(session), code));
+        EmailVerificationRecord stored = storedVerification(holder);
+        assertThat(stored.codeHash()).isEqualTo(EmailVerification.hash(journeyOf(holder), code));
         assertThat(stored.pendingEmail()).isEqualTo(EMAIL);
         assertThat(stored.sends()).isEqualTo(1);
         assertThat(stored.attempts()).isZero();
         assertThat(Duration.between(stored.lastSentAt(), stored.codeExpiresAt())).isEqualTo(Duration.ofMinutes(10));
-        assertThat(journeyRow(session)).containsEntry("state", "in_progress")
+        assertThat(journeyRow(holder)).containsEntry("state", "in_progress")
                 .containsEntry("step", "entitlement_confirmed");
     }
 
     @Test
     @DisplayName("EC-07 — postEmailVerification_emailWithSpaces_sendsToTheStrippedAddressWithItsCapitals")
     void postEmailVerification_emailWithSpaces_sendsToTheStrippedAddressWithItsCapitals() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        mvc.perform(send(session, "{\"email\":\"  Elena.Ruiz@Example.Test \"}", null))
+        mvc.perform(send(holder, "{\"email\":\"  Elena.Ruiz@Example.Test \"}", null))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.email").value("Elena.Ruiz@Example.Test"));
 
         assertThat(mailer.last().to()).isEqualTo("Elena.Ruiz@Example.Test");
-        assertThat(storedVerification(session).pendingEmail()).isEqualTo("Elena.Ruiz@Example.Test");
+        assertThat(storedVerification(holder).pendingEmail()).isEqualTo("Elena.Ruiz@Example.Test");
     }
 
     @Test
     @DisplayName("AC-07 — postEmailVerification_journeyWithVerifiedEmail_clearsItUntilTheNewCodeIsChecked")
     void postEmailVerification_journeyWithVerifiedEmail_clearsItUntilTheNewCodeIsChecked() throws Exception {
-        SessionId session = entitledJourney();
-        sessions.write(SANDBOX, session, Section.EMAIL, new EmailRecord("old@example.test").toJson());
+        TestHolder holder = entitledJourney();
+        sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL, new EmailRecord("old@example.test").toJson());
 
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
 
-        assertThat(sessions.read(SANDBOX, session, Section.EMAIL)).isEmpty();
-        assertThat(sessions.read(SANDBOX, session, Section.EMAIL_VERIFICATION)).isPresent();
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL)).isEmpty();
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION)).isPresent();
     }
 
     // --- ES-01 ---
@@ -184,32 +186,32 @@ class EmailVerificationApiIT {
     @Test
     @DisplayName("ES-01 — postEmailVerification_noEmail_is400EmailRequiredAndSendsNothing")
     void postEmailVerification_noEmail_is400EmailRequiredAndSendsNothing() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
         for (String body : new String[] {null, "{}", "{\"email\":null}", "{\"email\":\"   \"}"}) {
-            mvc.perform(send(session, body, null))
+            mvc.perform(send(holder, body, null))
                     .andExpect(status().isBadRequest())
                     .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                     .andExpect(jsonPath("$.type").value("email_required"));
         }
 
-        assertNothingSent(session);
+        assertNothingSent(holder);
     }
 
     @Test
     @DisplayName("ES-01 — postEmailVerification_malformedOrTooLongEmail_is400EmailInvalidAndCountsForNoLimit")
     void postEmailVerification_malformedOrTooLongEmail_is400EmailInvalidAndCountsForNoLimit() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
         for (String email : new String[] {"\"not-an-email\"", "123", "\"" + "a".repeat(250) + "@example.test\""}) {
-            mvc.perform(send(session, "{\"email\":" + email + "}", null))
+            mvc.perform(send(holder, "{\"email\":" + email + "}", null))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.type").value("email_invalid"));
         }
 
-        assertNothingSent(session);
+        assertNothingSent(holder);
         // Nothing counted: a valid send from the same address and journey still goes out at once.
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
     }
 
     // --- ES-05, EC-04, ES-04 ---
@@ -217,40 +219,40 @@ class EmailVerificationApiIT {
     @Test
     @DisplayName("ES-05 — postEmailVerification_noEntitlement_is409StepNotAllowed")
     void postEmailVerification_noEntitlement_is409StepNotAllowed() throws Exception {
-        SessionId session = identifiedJourney();
+        TestHolder holder = identifiedJourney();
 
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null))
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.type").value("step_not_allowed"));
 
-        assertNothingSent(session);
+        assertNothingSent(holder);
     }
 
     @Test
     @DisplayName("EC-04 — postEmailVerification_offerAlreadyDelivered_is409StepNotAllowed")
     void postEmailVerification_offerAlreadyDelivered_is409StepNotAllowed() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET state = 'completed', step = 'offer_obtained', "
                         + "ended_at = now() WHERE id = :id")
-                .param("id", journeyOf(session)).update();
+                .param("id", journeyOf(holder)).update();
 
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null))
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.type").value("step_not_allowed"));
 
-        assertNothingSent(session);
+        assertNothingSent(holder);
     }
 
     @Test
     @DisplayName("ES-04 — postEmailVerification_withdrawnJourney_is410JourneyClosed")
     void postEmailVerification_withdrawnJourney_is410JourneyClosed() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
         mvc.perform(MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey/withdrawal").contextPath(CONTEXT)
-                        .header("X-Requested-With", "issuance-portal").with(host())
-                        .cookie(new Cookie("journey_session", session.value())))
+                        .with(host())
+                        .with(holder.token()))
                 .andExpect(status().isOk());
 
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null))
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null))
                 .andExpect(status().isGone())
                 .andExpect(jsonPath("$.type").value("journey_closed"));
 
@@ -272,11 +274,11 @@ class EmailVerificationApiIT {
     @Test
     @DisplayName("AC-04 — postEmailVerification_resendBeforeThreeMinutes_is429ResendTooSoonWithRetryAfter")
     void postEmailVerification_resendBeforeThreeMinutes_is429ResendTooSoonWithRetryAfter() throws Exception {
-        SessionId session = entitledJourney();
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
-        String firstSection = sessions.read(SANDBOX, session, Section.EMAIL_VERIFICATION).orElseThrow();
+        TestHolder holder = entitledJourney();
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
+        String firstSection = sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION).orElseThrow();
 
-        MvcResult result = mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null))
+        MvcResult result = mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.type").value("resend_too_soon"))
@@ -285,26 +287,26 @@ class EmailVerificationApiIT {
         long retryAfter = Long.parseLong(result.getResponse().getHeader(HttpHeaders.RETRY_AFTER));
         assertThat(retryAfter).isBetween(1L, 180L);
         assertThat(mailer.sent()).hasSize(1);
-        assertThat(sessions.read(SANDBOX, session, Section.EMAIL_VERIFICATION)).contains(firstSection);
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION)).contains(firstSection);
     }
 
     @Test
     @DisplayName("AC-04 — postEmailVerification_resendAfterThreeMinutes_sendsANewCodeAndReplacesThePrevious")
     void postEmailVerification_resendAfterThreeMinutes_sendsANewCodeAndReplacesThePrevious() throws Exception {
-        SessionId session = entitledJourney();
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
-        EmailVerificationRecord first = storedVerification(session);
-        backdate(session, first, Duration.ofMinutes(4));
+        TestHolder holder = entitledJourney();
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
+        EmailVerificationRecord first = storedVerification(holder);
+        backdate(holder, first, Duration.ofMinutes(4));
 
-        mvc.perform(send(session, "{\"email\":\"other@example.test\"}", null))
+        mvc.perform(send(holder, "{\"email\":\"other@example.test\"}", null))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.email").value("other@example.test"))
                 .andExpect(jsonPath("$.sends_left").value(1));
 
         assertThat(mailer.sent()).hasSize(2);
-        EmailVerificationRecord second = storedVerification(session);
+        EmailVerificationRecord second = storedVerification(holder);
         assertThat(second.codeHash()).isNotEqualTo(first.codeHash())
-                .isEqualTo(EmailVerification.hash(journeyOf(session), RecordingEmailCodeMailer.codeOf(mailer.last())));
+                .isEqualTo(EmailVerification.hash(journeyOf(holder), RecordingEmailCodeMailer.codeOf(mailer.last())));
         assertThat(second.sends()).isEqualTo(2);
         assertThat(second.pendingEmail()).isEqualTo("other@example.test");
     }
@@ -314,14 +316,14 @@ class EmailVerificationApiIT {
     @Test
     @DisplayName("AC-05 — postEmailVerification_afterThreeCodes_is429TooManyCodesWithoutRetryAfter")
     void postEmailVerification_afterThreeCodes_is429TooManyCodesWithoutRetryAfter() throws Exception {
-        SessionId session = entitledJourney();
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
-        EmailVerificationRecord first = storedVerification(session);
-        sessions.write(SANDBOX, session, Section.EMAIL_VERIFICATION, new EmailVerificationRecord(first.pendingEmail(),
+        TestHolder holder = entitledJourney();
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
+        EmailVerificationRecord first = storedVerification(holder);
+        sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION, new EmailVerificationRecord(first.pendingEmail(),
                 first.codeHash(), first.codeExpiresAt().minus(Duration.ofHours(1)), 0, 3,
                 first.lastSentAt().minus(Duration.ofHours(1))).toJson());
 
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null))
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null))
                 .andExpect(status().isTooManyRequests())
                 .andExpect(jsonPath("$.type").value("too_many_codes"))
                 .andExpect(header().doesNotExist(HttpHeaders.RETRY_AFTER));
@@ -335,7 +337,7 @@ class EmailVerificationApiIT {
         for (int i = 0; i < 10; i++) {
             mvc.perform(send(entitledJourney(), "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
         }
-        SessionId eleventh = entitledJourney();
+        TestHolder eleventh = entitledJourney();
 
         MvcResult result = mvc.perform(send(eleventh, "{\"email\":\"" + EMAIL + "\"}", null))
                 .andExpect(status().isTooManyRequests())
@@ -344,7 +346,7 @@ class EmailVerificationApiIT {
 
         assertThat(Long.parseLong(result.getResponse().getHeader(HttpHeaders.RETRY_AFTER))).isBetween(1L, 3600L);
         assertThat(mailer.sent()).hasSize(10);
-        assertThat(sessions.read(SANDBOX, eleventh, Section.EMAIL_VERIFICATION)).isEmpty();
+        assertThat(sessions.read(SANDBOX, journeyOf(eleventh), Section.EMAIL_VERIFICATION)).isEmpty();
         // Another address is not affected.
         client = "198.51.100.250";
         mvc.perform(send(entitledJourney(), "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
@@ -355,29 +357,29 @@ class EmailVerificationApiIT {
     @Test
     @DisplayName("AC-06 — postEmailVerification_mailProviderFails_is503EmailUnavailableAndNothingIsKept")
     void postEmailVerification_mailProviderFails_is503EmailUnavailableAndNothingIsKept() throws Exception {
-        SessionId session = entitledJourney();
-        sessions.write(SANDBOX, session, Section.EMAIL, new EmailRecord("old@example.test").toJson());
+        TestHolder holder = entitledJourney();
+        sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL, new EmailRecord("old@example.test").toJson());
         mailer.failFromNowOn();
 
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null))
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.type").value("email_unavailable"));
 
-        assertThat(sessions.read(SANDBOX, session, Section.EMAIL_VERIFICATION)).isEmpty();
-        assertThat(sessions.read(SANDBOX, session, Section.EMAIL)).isPresent();
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION)).isEmpty();
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL)).isPresent();
     }
 
     @Test
     @DisplayName("AC-06 — postEmailVerification_failedSend_countsForNoLimit")
     void postEmailVerification_failedSend_countsForNoLimit() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
         mailer.failFromNowOn();
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isServiceUnavailable());
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isServiceUnavailable());
         mailer.reset();
 
         // The journey's interval and count are untouched.
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null))
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null))
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.sends_left").value(2));
         // The address's budget is untouched too: nine more succeed after one failure, the tenth send of the
@@ -397,9 +399,9 @@ class EmailVerificationApiIT {
     @Test
     @DisplayName("EC-06 — postEmailVerification_acceptLanguageEnglish_sendsTheEnglishTemplateWithTheTenantsName")
     void postEmailVerification_acceptLanguageEnglish_sendsTheEnglishTemplateWithTheTenantsName() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", "en-GB,en;q=0.9,es;q=0.5"))
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", "en-GB,en;q=0.9,es;q=0.5"))
                 .andExpect(status().isAccepted());
 
         assertThat(mailer.last().subject()).isEqualTo("Your verification code — DoctorID Portal");
@@ -435,15 +437,15 @@ class EmailVerificationApiIT {
     @Test
     @DisplayName("AC-10 — postEmailVerification_anyOutcome_logsAndStoreCarryNoEmailCodeOrHash")
     void postEmailVerification_anyOutcome_logsAndStoreCarryNoEmailCodeOrHash() throws Exception {
-        SessionId session = entitledJourney();
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isTooManyRequests());
+        TestHolder holder = entitledJourney();
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isTooManyRequests());
         mailer.failFromNowOn();
-        backdate(session, storedVerification(session), Duration.ofMinutes(4));
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isServiceUnavailable());
+        backdate(holder, storedVerification(holder), Duration.ofMinutes(4));
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isServiceUnavailable());
 
         String code = RecordingEmailCodeMailer.codeOf(mailer.last());
-        String hash = storedVerification(session).codeHash();
+        String hash = storedVerification(holder).codeHash();
         String everything = logs.list.stream().map(EmailVerificationApiIT::describe).collect(Collectors.joining("\n"));
         assertThat(everything).contains("EMAIL_CODE_REQUESTED", "result=sent", "result=resend_too_soon",
                 "result=email_unavailable")
@@ -455,10 +457,10 @@ class EmailVerificationApiIT {
     @Test
     @DisplayName("AC-02 — postCode_rightCode_answersTheJourneyWithTheVerifiedEmailAndTheCodeNoLongerServes")
     void postCode_rightCode_answersTheJourneyWithTheVerifiedEmailAndTheCodeNoLongerServes() throws Exception {
-        SessionId session = entitledJourney();
-        String code = sentCode(session);
+        TestHolder holder = entitledJourney();
+        String code = sentCode(holder);
 
-        mvc.perform(check(session, code(code)))
+        mvc.perform(check(holder, code(code)))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.state").value("in_progress"))
@@ -469,14 +471,14 @@ class EmailVerificationApiIT {
                 .andExpect(jsonPath("$.email_verification.resend_available_at").isNotEmpty())
                 .andExpect(jsonPath("$.email_verification.sends_left").value(2));
 
-        assertThat(EmailRecord.fromJson(sessions.read(SANDBOX, session, Section.EMAIL).orElseThrow()).address())
+        assertThat(EmailRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL).orElseThrow()).address())
                 .isEqualTo(EMAIL);
-        assertThat(storedVerification(session).codeHash()).isNull();
-        assertThat(journeyRow(session)).containsEntry("step", "email_verified");
-        mvc.perform(check(session, code(code)))
+        assertThat(storedVerification(holder).codeHash()).isNull();
+        assertThat(journeyRow(holder)).containsEntry("step", "email_verified");
+        mvc.perform(check(holder, code(code)))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.type").value("step_not_allowed"));
-        mvc.perform(get(session))
+        mvc.perform(get(holder))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.step").value("email_verified"))
                 .andExpect(jsonPath("$.email_verification.verified").value(true));
@@ -485,66 +487,66 @@ class EmailVerificationApiIT {
     @Test
     @DisplayName("AC-03 — postCode_wrongCode_is400InvalidCodeAndTheAttemptIsKept")
     void postCode_wrongCode_is400InvalidCodeAndTheAttemptIsKept() throws Exception {
-        SessionId session = entitledJourney();
-        String code = sentCode(session);
+        TestHolder holder = entitledJourney();
+        String code = sentCode(holder);
 
-        mvc.perform(check(session, code(wrongCodeFor(code))))
+        mvc.perform(check(holder, code(wrongCodeFor(code))))
                 .andExpect(status().isBadRequest())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.type").value("invalid_code"));
 
         // The answer is an error, and the attempt it spent is committed all the same.
-        assertThat(storedVerification(session).attempts()).isEqualTo(1);
-        assertThat(sessions.read(SANDBOX, session, Section.EMAIL)).isEmpty();
-        assertThat(journeyRow(session)).containsEntry("step", "entitlement_confirmed");
+        assertThat(storedVerification(holder).attempts()).isEqualTo(1);
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL)).isEmpty();
+        assertThat(journeyRow(holder)).containsEntry("step", "entitlement_confirmed");
     }
 
     @Test
     @DisplayName("AC-03 — postCode_fiveWrongCodes_theNextIs400TooManyAttemptsEvenWithTheRightOne")
     void postCode_fiveWrongCodes_theNextIs400TooManyAttemptsEvenWithTheRightOne() throws Exception {
-        SessionId session = entitledJourney();
-        String code = sentCode(session);
+        TestHolder holder = entitledJourney();
+        String code = sentCode(holder);
         for (int i = 0; i < 5; i++) {
-            mvc.perform(check(session, code(wrongCodeFor(code)))).andExpect(status().isBadRequest())
+            mvc.perform(check(holder, code(wrongCodeFor(code)))).andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.type").value("invalid_code"));
         }
 
-        mvc.perform(check(session, code(code)))
+        mvc.perform(check(holder, code(code)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.type").value("too_many_attempts"));
 
-        assertThat(storedVerification(session).attempts()).isEqualTo(5);
-        assertThat(sessions.read(SANDBOX, session, Section.EMAIL)).isEmpty();
+        assertThat(storedVerification(holder).attempts()).isEqualTo(5);
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL)).isEmpty();
     }
 
     @Test
     @DisplayName("AC-03 — postCode_tenMinutesAfterTheSend_is400ExpiredCodeEvenWithTheRightOne")
     void postCode_tenMinutesAfterTheSend_is400ExpiredCodeEvenWithTheRightOne() throws Exception {
-        SessionId session = entitledJourney();
-        String code = sentCode(session);
-        backdate(session, storedVerification(session), Duration.ofMinutes(10).plusSeconds(1));
+        TestHolder holder = entitledJourney();
+        String code = sentCode(holder);
+        backdate(holder, storedVerification(holder), Duration.ofMinutes(10).plusSeconds(1));
 
-        mvc.perform(check(session, code(code)))
+        mvc.perform(check(holder, code(code)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.type").value("expired_code"));
 
-        assertThat(sessions.read(SANDBOX, session, Section.EMAIL)).isEmpty();
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL)).isEmpty();
     }
 
     @Test
     @DisplayName("AC-04 — postCode_codeReplacedByAResend_is400ExpiredCodeAndTheNewOneVerifies")
     void postCode_codeReplacedByAResend_is400ExpiredCodeAndTheNewOneVerifies() throws Exception {
-        SessionId session = entitledJourney();
-        String first = sentCode(session);
-        backdate(session, storedVerification(session), Duration.ofMinutes(4));
-        String second = sentCode(session);
+        TestHolder holder = entitledJourney();
+        String first = sentCode(holder);
+        backdate(holder, storedVerification(holder), Duration.ofMinutes(4));
+        String second = sentCode(holder);
 
         if (!first.equals(second)) {
-            mvc.perform(check(session, code(first)))
+            mvc.perform(check(holder, code(first)))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.type").value("expired_code"));
         }
-        mvc.perform(check(session, code(second))).andExpect(status().isOk())
+        mvc.perform(check(holder, code(second))).andExpect(status().isOk())
                 .andExpect(jsonPath("$.email_verification.verified").value(true))
                 .andExpect(jsonPath("$.email_verification.sends_left").value(1));
     }
@@ -552,44 +554,44 @@ class EmailVerificationApiIT {
     @Test
     @DisplayName("AC-07 — postCode_newCodeToAnotherEmail_theOldEmailStopsBeingVerifiedAndTheNewOneIs")
     void postCode_newCodeToAnotherEmail_theOldEmailStopsBeingVerifiedAndTheNewOneIs() throws Exception {
-        SessionId session = entitledJourney();
-        mvc.perform(check(session, code(sentCode(session)))).andExpect(status().isOk());
-        backdate(session, storedVerification(session), Duration.ofMinutes(4));
+        TestHolder holder = entitledJourney();
+        mvc.perform(check(holder, code(sentCode(holder)))).andExpect(status().isOk());
+        backdate(holder, storedVerification(holder), Duration.ofMinutes(4));
 
-        mvc.perform(send(session, "{\"email\":\"new.address@example.test\"}", null)).andExpect(status().isAccepted());
+        mvc.perform(send(holder, "{\"email\":\"new.address@example.test\"}", null)).andExpect(status().isAccepted());
 
-        assertThat(sessions.read(SANDBOX, session, Section.EMAIL)).isEmpty();
-        mvc.perform(get(session))
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL)).isEmpty();
+        mvc.perform(get(holder))
                 .andExpect(jsonPath("$.step").value("email_verified"))
                 .andExpect(jsonPath("$.email_verification.verified").value(false))
                 .andExpect(jsonPath("$.email_verification.email").value("new.address@example.test"));
-        mvc.perform(check(session, code(RecordingEmailCodeMailer.codeOf(mailer.last())))).andExpect(status().isOk());
-        assertThat(EmailRecord.fromJson(sessions.read(SANDBOX, session, Section.EMAIL).orElseThrow()).address())
+        mvc.perform(check(holder, code(RecordingEmailCodeMailer.codeOf(mailer.last())))).andExpect(status().isOk());
+        assertThat(EmailRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL).orElseThrow()).address())
                 .isEqualTo("new.address@example.test");
     }
 
     @Test
     @DisplayName("ES-02 — postCode_malformedCode_is400BadRequestAndSpendsNoAttempt")
     void postCode_malformedCode_is400BadRequestAndSpendsNoAttempt() throws Exception {
-        SessionId session = entitledJourney();
-        sentCode(session);
+        TestHolder holder = entitledJourney();
+        sentCode(holder);
 
         for (String body : new String[] {null, "{}", "{\"code\":null}", "{\"code\":\"12345\"}",
                 "{\"code\":\"1234567\"}", "{\"code\":\"12345a\"}", "{\"code\":123456}", "not json"}) {
-            mvc.perform(check(session, body))
+            mvc.perform(check(holder, body))
                     .andExpect(status().isBadRequest())
                     .andExpect(jsonPath("$.type").value("bad_request"));
         }
 
-        assertThat(storedVerification(session).attempts()).isZero();
+        assertThat(storedVerification(holder).attempts()).isZero();
     }
 
     @Test
     @DisplayName("ES-03 — postCode_neverSentOrAlreadyVerified_is409StepNotAllowed")
     void postCode_neverSentOrAlreadyVerified_is409StepNotAllowed() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        mvc.perform(check(session, code("123456")))
+        mvc.perform(check(holder, code("123456")))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.type").value("step_not_allowed"));
     }
@@ -597,14 +599,14 @@ class EmailVerificationApiIT {
     @Test
     @DisplayName("ES-04 — postCode_withdrawnJourneyOrNoSession_is410JourneyClosed")
     void postCode_withdrawnJourneyOrNoSession_is410JourneyClosed() throws Exception {
-        SessionId session = entitledJourney();
-        String code = sentCode(session);
+        TestHolder holder = entitledJourney();
+        String code = sentCode(holder);
         mvc.perform(MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey/withdrawal").contextPath(CONTEXT)
-                        .header("X-Requested-With", "issuance-portal").with(host())
-                        .cookie(new Cookie("journey_session", session.value())))
+                        .with(host())
+                        .with(holder.token()))
                 .andExpect(status().isOk());
 
-        mvc.perform(check(session, code(code))).andExpect(status().isGone())
+        mvc.perform(check(holder, code(code))).andExpect(status().isGone())
                 .andExpect(jsonPath("$.type").value("journey_closed"));
         mvc.perform(check(null, code(code))).andExpect(status().isGone())
                 .andExpect(jsonPath("$.type").value("journey_closed"));
@@ -614,10 +616,10 @@ class EmailVerificationApiIT {
     @DisplayName("EC-03 — postCode_twoWrongCodesAtOnceWithFourFailures_oneIsInvalidTheOtherTooManyAndTheCountStopsAtFive")
     void postCode_twoWrongCodesAtOnceWithFourFailures_oneIsInvalidTheOtherTooManyAndTheCountStopsAtFive()
             throws Exception {
-        SessionId session = entitledJourney();
-        String code = sentCode(session);
-        EmailVerificationRecord sent = storedVerification(session);
-        sessions.write(SANDBOX, session, Section.EMAIL_VERIFICATION, new EmailVerificationRecord(sent.pendingEmail(),
+        TestHolder holder = entitledJourney();
+        String code = sentCode(holder);
+        EmailVerificationRecord sent = storedVerification(holder);
+        sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION, new EmailVerificationRecord(sent.pendingEmail(),
                 sent.codeHash(), sent.codeExpiresAt(), 4, sent.sends(), sent.lastSentAt()).toJson());
         CyclicBarrier together = new CyclicBarrier(2);
         ExecutorService pool = Executors.newFixedThreadPool(2);
@@ -626,7 +628,7 @@ class EmailVerificationApiIT {
             for (int i = 0; i < 2; i++) {
                 answers.add(pool.submit(() -> {
                     together.await(10, TimeUnit.SECONDS);
-                    MvcResult result = mvc.perform(check(session, code(wrongCodeFor(code)))).andReturn();
+                    MvcResult result = mvc.perform(check(holder, code(wrongCodeFor(code)))).andReturn();
                     assertThat(result.getResponse().getStatus()).isEqualTo(400);
                     return new com.fasterxml.jackson.databind.ObjectMapper()
                             .readTree(result.getResponse().getContentAsString()).get("type").asText();
@@ -641,7 +643,7 @@ class EmailVerificationApiIT {
         } finally {
             pool.shutdownNow();
         }
-        assertThat(storedVerification(session).attempts()).isEqualTo(5);
+        assertThat(storedVerification(holder).attempts()).isEqualTo(5);
     }
 
     // --- GET /journey: email_verification ---
@@ -649,11 +651,11 @@ class EmailVerificationApiIT {
     @Test
     @DisplayName("AC-09 — getJourney_codePending_showsTheEmailTheExpiryAndTheResendTime")
     void getJourney_codePending_showsTheEmailTheExpiryAndTheResendTime() throws Exception {
-        SessionId session = entitledJourney();
-        mvc.perform(get(session)).andExpect(jsonPath("$.email_verification").doesNotExist());
-        sentCode(session);
+        TestHolder holder = entitledJourney();
+        mvc.perform(get(holder)).andExpect(jsonPath("$.email_verification").doesNotExist());
+        sentCode(holder);
 
-        mvc.perform(get(session))
+        mvc.perform(get(holder))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.step").value("entitlement_confirmed"))
                 .andExpect(jsonPath("$.email_verification.email").value(EMAIL))
@@ -666,13 +668,13 @@ class EmailVerificationApiIT {
     @Test
     @DisplayName("AC-09 — getJourney_offerObtained_hasNoEmailVerification")
     void getJourney_offerObtained_hasNoEmailVerification() throws Exception {
-        SessionId session = entitledJourney();
-        sentCode(session);
+        TestHolder holder = entitledJourney();
+        sentCode(holder);
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET state = 'completed', step = 'offer_obtained', "
                         + "ended_at = now() WHERE id = :id")
-                .param("id", journeyOf(session)).update();
+                .param("id", journeyOf(holder)).update();
 
-        mvc.perform(get(session))
+        mvc.perform(get(holder))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.state").value("completed"))
                 .andExpect(jsonPath("$.email_verification").doesNotExist());
@@ -681,12 +683,12 @@ class EmailVerificationApiIT {
     @Test
     @DisplayName("AC-10 — postCode_anyOutcome_logsCarryTheResultButNoEmailCodeOrHash")
     void postCode_anyOutcome_logsCarryTheResultButNoEmailCodeOrHash() throws Exception {
-        SessionId session = entitledJourney();
-        String code = sentCode(session);
-        String hash = storedVerification(session).codeHash();
-        mvc.perform(check(session, code(wrongCodeFor(code)))).andExpect(status().isBadRequest());
-        mvc.perform(check(session, code(code))).andExpect(status().isOk());
-        mvc.perform(check(session, code(code))).andExpect(status().isConflict());
+        TestHolder holder = entitledJourney();
+        String code = sentCode(holder);
+        String hash = storedVerification(holder).codeHash();
+        mvc.perform(check(holder, code(wrongCodeFor(code)))).andExpect(status().isBadRequest());
+        mvc.perform(check(holder, code(code))).andExpect(status().isOk());
+        mvc.perform(check(holder, code(code))).andExpect(status().isConflict());
 
         String everything = logs.list.stream().map(EmailVerificationApiIT::describe).collect(Collectors.joining("\n"));
         assertThat(everything).contains("EMAIL_CODE_CHECKED", "result=invalid_code", "result=verified",
@@ -696,74 +698,74 @@ class EmailVerificationApiIT {
 
     // --- helpers ---
 
-    private MockHttpServletRequestBuilder get(SessionId session) {
+    private MockHttpServletRequestBuilder get(TestHolder holder) {
         return MockMvcRequestBuilders.get(CONTEXT + "/api/v1/journey").contextPath(CONTEXT).with(host())
-                .cookie(new Cookie("journey_session", session.value()));
+                .with(holder.token());
     }
 
-    private void backdate(SessionId session, EmailVerificationRecord before, Duration by) {
-        sessions.write(SANDBOX, session, Section.EMAIL_VERIFICATION, new EmailVerificationRecord(before.pendingEmail(),
+    private void backdate(TestHolder holder, EmailVerificationRecord before, Duration by) {
+        sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION, new EmailVerificationRecord(before.pendingEmail(),
                 before.codeHash(), before.codeExpiresAt() == null ? null : before.codeExpiresAt().minus(by),
                 before.attempts(), before.sends(), before.lastSentAt().minus(by), before.voidedCodeHashes()).toJson());
     }
 
-    private void assertNothingSent(SessionId session) {
+    private void assertNothingSent(TestHolder holder) {
         assertThat(mailer.sent()).isEmpty();
-        assertThat(sessions.read(SANDBOX, session, Section.EMAIL_VERIFICATION)).isEmpty();
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION)).isEmpty();
     }
 
-    private EmailVerificationRecord storedVerification(SessionId session) {
+    private EmailVerificationRecord storedVerification(TestHolder holder) {
         return EmailVerificationRecord.fromJson(
-                sessions.read(SANDBOX, session, Section.EMAIL_VERIFICATION).orElseThrow());
+                sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION).orElseThrow());
     }
 
-    private UUID journeyOf(SessionId session) {
-        return sessions.journeyOf(SANDBOX, session).orElseThrow();
+    private UUID journeyOf(TestHolder holder) {
+        return sessions.journeyOf(SANDBOX, holder.ref()).orElseThrow();
     }
 
-    private Map<String, Object> journeyRow(SessionId session) {
+    private Map<String, Object> journeyRow(TestHolder holder) {
         return jdbc.sql("SELECT state, step FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
-                .param("id", journeyOf(session)).query().singleRow();
+                .param("id", journeyOf(holder)).query().singleRow();
     }
 
-    private SessionId startedJourney() throws Exception {
-        Cookie cookie = mvc.perform(MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey")
+    private TestHolder startedJourney() throws Exception {
+        TestHolder holder = TestHolder.of(SANDBOX, holderRefs);
+        mvc.perform(MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey")
                         .contextPath(CONTEXT)
-                        .header("X-Requested-With", "issuance-portal")
-                        .with(host()))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getCookie("journey_session");
-        return SessionId.parse(cookie.getValue()).orElseThrow();
+                        .with(host())
+                        .with(holder.token()))
+                .andExpect(status().isCreated());
+        return holder;
     }
 
-    private SessionId identifiedJourney() throws Exception {
-        SessionId session = startedJourney();
-        sessions.write(SANDBOX, session, Section.IDENTITY, new HolderIdentity("Elena", "Ruiz Prieto",
+    private TestHolder identifiedJourney() throws Exception {
+        TestHolder holder = startedJourney();
+        sessions.write(SANDBOX, journeyOf(holder), Section.IDENTITY, new HolderIdentity("Elena", "Ruiz Prieto",
                 new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R"), "elena.token@example.test").toJson());
-        progress.reach(SANDBOX, session, JourneyProgress.Step.IDENTIFIED);
-        return session;
+        progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.IDENTIFIED);
+        return holder;
     }
 
     /** What Identification and Authentic source leave in the journey before the holder reaches Data. */
-    private SessionId entitledJourney() throws Exception {
-        SessionId session = identifiedJourney();
-        sessions.write(SANDBOX, session, Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.PERSONAL_ID,
+    private TestHolder entitledJourney() throws Exception {
+        TestHolder holder = identifiedJourney();
+        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.PERSONAL_ID,
                 Map.of("legally_entitled", true),
                 new EntitlementRecord.Preview("DoctorID", List.of(), null, true), clock.instant()).toJson());
-        progress.reach(SANDBOX, session, JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
-        return session;
+        progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
+        return holder;
     }
 
-    private MockHttpServletRequestBuilder send(SessionId session, String body, String acceptLanguage) {
-        MockHttpServletRequestBuilder request = post(session);
+    private MockHttpServletRequestBuilder send(TestHolder holder, String body, String acceptLanguage) {
+        MockHttpServletRequestBuilder request = post(holder);
         if (acceptLanguage != null) {
             request.header(HttpHeaders.ACCEPT_LANGUAGE, acceptLanguage);
         }
         return body == null ? request : request.contentType(MediaType.APPLICATION_JSON).content(body);
     }
 
-    private MockHttpServletRequestBuilder check(SessionId session, String body) {
-        MockHttpServletRequestBuilder request = postTo(ENDPOINT + "/code", session);
+    private MockHttpServletRequestBuilder check(TestHolder holder, String body) {
+        MockHttpServletRequestBuilder request = postTo(ENDPOINT + "/code", holder);
         return body == null ? request : request.contentType(MediaType.APPLICATION_JSON).content(body);
     }
 
@@ -772,8 +774,8 @@ class EmailVerificationApiIT {
     }
 
     /** Sends a code to the holder and returns it, as the mail provider got it. */
-    private String sentCode(SessionId session) throws Exception {
-        mvc.perform(send(session, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
+    private String sentCode(TestHolder holder) throws Exception {
+        mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
         return RecordingEmailCodeMailer.codeOf(mailer.last());
     }
 
@@ -781,20 +783,19 @@ class EmailVerificationApiIT {
         return code.equals("000000") ? "000001" : "000000";
     }
 
-    private MockHttpServletRequestBuilder post(SessionId session) {
-        return postTo(ENDPOINT, session);
+    private MockHttpServletRequestBuilder post(TestHolder holder) {
+        return postTo(ENDPOINT, holder);
     }
 
-    private MockHttpServletRequestBuilder postTo(String path, SessionId session) {
+    private MockHttpServletRequestBuilder postTo(String path, TestHolder holder) {
         MockHttpServletRequestBuilder request = MockMvcRequestBuilders.post(path)
                 .contextPath(CONTEXT)
-                .header("X-Requested-With", "issuance-portal")
                 .with(host())
                 .with(servletRequest -> {
                     servletRequest.setRemoteAddr(client);
                     return servletRequest;
                 });
-        return session == null ? request : request.cookie(new Cookie("journey_session", session.value()));
+        return holder == null ? request : request.with(holder.token());
     }
 
     private static org.springframework.test.web.servlet.request.RequestPostProcessor host() {

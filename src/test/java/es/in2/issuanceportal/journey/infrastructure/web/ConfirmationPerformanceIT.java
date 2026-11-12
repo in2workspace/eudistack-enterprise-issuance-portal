@@ -1,6 +1,6 @@
 package es.in2.issuanceportal.journey.infrastructure.web;
 
-import es.in2.issuanceportal.session.api.SessionId;
+import es.in2.issuanceportal.shared.security.TestHolder;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -38,15 +38,15 @@ class ConfirmationPerformanceIT extends SystemIssuanceITSupport {
                 .withHeader("Content-Type", "application/json")
                 .withBody("{\"onboardingUrl\":\"https://sandbox.wallet.test/t/{{randomValue type='UUID'}}\",\"expiresIn\":540}")));
         for (int i = 0; i < WARM_UP; i++) {
-            SessionId session = entitledJourney();
-            mvc.perform(confirmation(session)).andExpect(status().isOk());
+            TestHolder holder = entitledJourney();
+            mvc.perform(confirmation(holder)).andExpect(status().isOk());
         }
 
         List<Long> nanos = new ArrayList<>();
         for (int i = 0; i < MEASURED; i++) {
-            SessionId session = entitledJourney();
+            TestHolder holder = entitledJourney();
             long start = System.nanoTime();
-            mvc.perform(confirmation(session)).andExpect(status().isOk());
+            mvc.perform(confirmation(holder)).andExpect(status().isOk());
             nanos.add(System.nanoTime() - start);
         }
 

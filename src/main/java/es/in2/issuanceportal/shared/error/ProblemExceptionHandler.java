@@ -35,6 +35,12 @@ public class ProblemExceptionHandler extends ResponseEntityExceptionHandler {
             log.error("Dependency unavailable", exception);
         }
         ProblemDetail detail = Problems.of(exception.problem());
+        if (exception.problem() == ProblemCode.UNAUTHENTICATED) {
+            // A valid token that cannot do what the call needs (RFC 6750 section 3): the challenge goes with every 401.
+            return ResponseEntity.status(detail.getStatus())
+                    .header(HttpHeaders.WWW_AUTHENTICATE, "Bearer error=\"invalid_token\"")
+                    .body(detail);
+        }
         return exception.retryAfter()
                 .map(wait -> ResponseEntity.status(detail.getStatus())
                         .header(HttpHeaders.RETRY_AFTER, Long.toString(retryAfterSeconds(wait)))

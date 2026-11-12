@@ -7,26 +7,29 @@ import java.util.UUID;
 
 /**
  * The journey session shared by the three modules (design.md AD-3). Section contents are opaque JSON:
- * each module defines and serialises its own, so the session knows none of them. Reading or writing a
- * session that does not exist answers {@code journey_closed}.
+ * each module defines and serialises its own, so the session knows none of them. A session is reached
+ * through its holder and then addressed by its journey. Reading or writing a session that does not exist
+ * answers {@code journey_closed}.
  */
 public interface JourneySessions {
 
-    void open(TenantId tenant, SessionId session, UUID journeyId);
+    /**
+     * Opens the session of a journey for its holder.
+     *
+     * @throws HolderAlreadyHasJourneyException when the holder has another session open
+     */
+    void open(TenantId tenant, HolderRef holder, UUID journeyId);
 
-    /** The journey the session belongs to, if the session still exists. */
-    Optional<UUID> journeyOf(TenantId tenant, SessionId session);
+    /** The journey the holder can reach, if its session exists. */
+    Optional<UUID> journeyOf(TenantId tenant, HolderRef holder);
 
-    Optional<String> read(TenantId tenant, SessionId session, Section section);
+    Optional<String> read(TenantId tenant, UUID journeyId, Section section);
 
-    void write(TenantId tenant, SessionId session, Section section, String content);
+    void write(TenantId tenant, UUID journeyId, Section section, String content);
 
     /** Empties one section of the session. Idempotent: an empty section stays empty. */
-    void clear(TenantId tenant, SessionId session, Section section);
+    void clear(TenantId tenant, UUID journeyId, Section section);
 
     /** Physically deletes the session of the journey, with all its personal data. Idempotent. */
     void close(TenantId tenant, UUID journeyId);
-
-    /** Replaces the session identifier, keeping the content. The old identifier stops working. */
-    SessionId rotate(TenantId tenant, SessionId session);
 }

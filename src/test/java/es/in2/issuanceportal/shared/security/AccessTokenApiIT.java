@@ -241,8 +241,7 @@ class AccessTokenApiIT {
     void journeyEndpoint_validToken_passesTheValidation() throws Exception {
         String token = AccessTokens.forTenant(SANDBOX, Instant.now()).sign();
 
-        // No journey for the holder yet, and the cookie is still the session of this task: the call reached the
-        // controller, which answers 410, not the 401 of the validation.
+        // No journey for the holder yet: the call reached the controller, which answers 410, not the 401 of the validation.
         mvc.perform(request(Endpoint.GET_JOURNEY, SANDBOX_HOST, token))
                 .andExpect(status().isGone())
                 .andExpect(jsonPath("$.type").value("journey_closed"));
@@ -262,7 +261,6 @@ class AccessTokenApiIT {
     @DisplayName("AC-04 — postIncident_noToken_isAccepted")
     void postIncident_noToken_isAccepted() throws Exception {
         mvc.perform(MockMvcRequestBuilders.post(API + "/incidents").contextPath(CONTEXT).with(host(SANDBOX_HOST))
-                        .header("X-Requested-With", "issuance-portal")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"name": "Ana García", "email": "ana@example.org", "phone": "600 111 222",
@@ -591,7 +589,7 @@ class AccessTokenApiIT {
                 .contextPath(CONTEXT)
                 .with(host(host));
         if (endpoint.method == HttpMethod.POST) {
-            request.header("X-Requested-With", "issuance-portal").contentType(MediaType.APPLICATION_JSON).content("{}");
+            request.contentType(MediaType.APPLICATION_JSON).content("{}");
         }
         return token == null ? request : request.header(HttpHeaders.AUTHORIZATION, "Bearer " + token);
     }

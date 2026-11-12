@@ -24,9 +24,9 @@ import es.in2.issuanceportal.session.api.IssuanceRecord;
 import es.in2.issuanceportal.session.api.JourneySessions;
 import es.in2.issuanceportal.session.api.PersonalIdentifier;
 import es.in2.issuanceportal.session.api.Section;
-import es.in2.issuanceportal.session.api.SessionId;
+import es.in2.issuanceportal.shared.security.HolderRefs;
+import es.in2.issuanceportal.shared.security.TestHolder;
 import es.in2.issuanceportal.shared.tenant.TenantId;
-import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -180,6 +180,8 @@ class ConfirmationApiIT {
     @Autowired
     private JourneySessions sessions;
     @Autowired
+    private HolderRefs holderRefs;
+    @Autowired
     private JourneyProgress progress;
     @Autowired
     private IssuerGate issuer;
@@ -212,9 +214,9 @@ class ConfirmationApiIT {
     @Test
     @DisplayName("AC-03 — postConfirmation_entitledHolder_answersTheOfferAndCompletesTheJourney")
     void postConfirmation_entitledHolder_answersTheOfferAndCompletesTheJourney() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        MvcResult result = mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}"))
+        MvcResult result = mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.credential_offer_uri").value(
@@ -226,7 +228,7 @@ class ConfirmationApiIT {
         assertThat(tickets.calls()).isEmpty();
 
         UUID process = jdbc.sql("SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
-                .param("id", journeyOf(session)).query(UUID.class).single();
+                .param("id", journeyOf(holder)).query(UUID.class).single();
         assertThat(result.getResponse().getContentAsString()).doesNotContain(process.toString());
         assertThat(issuer.api().calls()).hasSize(1);
         IssuanceRequest request = issuer.api().calls().getFirst().request();
@@ -239,7 +241,7 @@ class ConfirmationApiIT {
                 .containsEntry("legally_entitled", true)
                 .doesNotContainKeys("email", "dni", "country");
         mvc.perform(MockMvcRequestBuilders.get(CONTEXT + "/api/v1/journey").contextPath(CONTEXT).with(host())
-                        .cookie(new Cookie("journey_session", session.value())))
+                        .with(holder.token()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.state").value("completed"))
                 .andExpect(jsonPath("$.step").value("offer_obtained"));
@@ -249,9 +251,9 @@ class ConfirmationApiIT {
     @DisplayName("AC-03 — postConfirmation_tenantWithOnboarding_answersTheOfferAndTheOnboardingAddress")
     void postConfirmation_tenantWithOnboarding_answersTheOfferAndTheOnboardingAddress() throws Exception {
         configure(CONFIG_WITH_ONBOARDING);
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        MvcResult result = mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}"))
+        MvcResult result = mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.credential_offer_uri").value(
                         org.hamcrest.Matchers.startsWith("openid-credential-offer://?credential_offer_uri=")))
@@ -268,13 +270,13 @@ class ConfirmationApiIT {
             assertThat(call.email()).isEqualTo(EMAIL);
             assertThat(call.credentialOffer()).isEqualTo(answer.get("credential_offer_uri").asText());
         });
-        UUID process = processOf(session);
+        UUID process = processOf(holder);
         assertThat(result.getResponse().getContentAsString()).doesNotContain(process.toString());
-        IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, session, Section.ISSUANCE).orElseThrow());
+        IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow());
         assertThat(stored.onboarding()).contains("https://sandbox.wallet.test/t/ticket-1");
         assertThat(stored.offerUri()).contains(answer.get("credential_offer_uri").asText());
         mvc.perform(MockMvcRequestBuilders.get(CONTEXT + "/api/v1/journey").contextPath(CONTEXT).with(host())
-                        .cookie(new Cookie("journey_session", session.value())))
+                        .with(holder.token()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.state").value("completed"))
                 .andExpect(jsonPath("$.step").value("offer_obtained"));
@@ -284,9 +286,9 @@ class ConfirmationApiIT {
     @DisplayName("AC-11 — postConfirmation_tenantWithOnboarding_theAddressExpiresSixtySecondsBeforeTheOffer")
     void postConfirmation_tenantWithOnboarding_theAddressExpiresSixtySecondsBeforeTheOffer() throws Exception {
         configure(CONFIG_WITH_ONBOARDING);
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        MvcResult result = mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}"))
+        MvcResult result = mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
                 .andExpect(status().isOk()).andReturn();
 
         com.fasterxml.jackson.databind.JsonNode answer = new com.fasterxml.jackson.databind.ObjectMapper()
@@ -303,10 +305,10 @@ class ConfirmationApiIT {
     @DisplayName("AC-12 — postConfirmation_ticketNotCreated_isOnboardingUnavailableWithoutOfferAndKeepsTheProcess")
     void postConfirmation_ticketNotCreated_isOnboardingUnavailableWithoutOfferAndKeepsTheProcess() throws Exception {
         configure(CONFIG_WITH_ONBOARDING);
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
         tickets.failWith(OnboardingTicketException.Reason.UNAVAILABLE);
 
-        MvcResult result = mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}"))
+        MvcResult result = mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.type").value("onboarding_unavailable"))
@@ -314,14 +316,14 @@ class ConfirmationApiIT {
                 .andExpect(jsonPath("$.onboarding_url").doesNotExist())
                 .andReturn();
 
-        UUID process = processOf(session);
+        UUID process = processOf(holder);
         assertThat(process).isNotNull();
         assertThat(result.getResponse().getContentAsString()).doesNotContain("openid-credential-offer");
         Map<String, Object> row = jdbc.sql("SELECT state, step FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
-                .param("id", journeyOf(session)).query().singleRow();
+                .param("id", journeyOf(holder)).query().singleRow();
         assertThat(row).containsEntry("state", "in_progress")
                 .containsEntry("step", "email_verified");
-        IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, session, Section.ISSUANCE).orElseThrow());
+        IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow());
         assertThat(stored.offerUri()).isEmpty();
         assertThat(stored.offerExpiresAt()).isNull();
         assertThat(stored.onboarding()).isEmpty();
@@ -336,12 +338,12 @@ class ConfirmationApiIT {
     @DisplayName("AC-12 — postConfirmation_afterTheTicketFailed_isOnboardingUnavailableUntilTheRenewalExists")
     void postConfirmation_afterTheTicketFailed_isOnboardingUnavailableUntilTheRenewalExists() throws Exception {
         configure(CONFIG_WITH_ONBOARDING);
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
         tickets.failWith(OnboardingTicketException.Reason.REJECTED);
-        mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}")).andExpect(status().isServiceUnavailable());
+        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}")).andExpect(status().isServiceUnavailable());
         tickets.recover();
 
-        mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}"))
+        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
 
@@ -354,7 +356,7 @@ class ConfirmationApiIT {
     void postConfirmation_ticketSuccessAndFailure_leaveNoAddressOrPersonalDataInLogs() throws Exception {
         configure(CONFIG_WITH_ONBOARDING);
         String body = "{\"email\":\"" + EMAIL + "\"}";
-        SessionId failing = entitledJourney();
+        TestHolder failing = entitledJourney();
         tickets.failWith(OnboardingTicketException.Reason.NOT_AUTHORIZED);
         mvc.perform(confirmation(failing, body)).andExpect(status().isServiceUnavailable());
         tickets.recover();
@@ -368,9 +370,9 @@ class ConfirmationApiIT {
     @Test
     @DisplayName("AC-02 — postConfirmation_bodyWithOtherFields_ignoresThemAndUsesTheJourneysData")
     void postConfirmation_bodyWithOtherFields_ignoresThemAndUsesTheJourneysData() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\",\"givenName\":\"Mallory\","
+        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\",\"givenName\":\"Mallory\","
                         + "\"personal_administrative_number\":\"999999999\",\"legally_entitled\":false}"))
                 .andExpect(status().isOk());
 
@@ -383,28 +385,28 @@ class ConfirmationApiIT {
     @Test
     @DisplayName("AC-01 — postConfirmation_noConfirmedEntitlement_isStepNotAllowedAndNothingChanges")
     void postConfirmation_noConfirmedEntitlement_isStepNotAllowedAndNothingChanges() throws Exception {
-        SessionId session = startedJourney();
-        sessions.write(SANDBOX, session, Section.IDENTITY, identity());
+        TestHolder holder = startedJourney();
+        sessions.write(SANDBOX, journeyOf(holder), Section.IDENTITY, identity());
 
-        mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}"))
+        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
                 .andExpect(status().isConflict())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.type").value("step_not_allowed"));
 
         assertThat(issuer.api().calls()).isEmpty();
-        assertThat(sessions.read(SANDBOX, session, Section.ISSUANCE)).isEmpty();
-        assertThat(sessions.read(SANDBOX, session, Section.EMAIL)).isEmpty();
-        assertThat(processOf(session)).isNull();
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE)).isEmpty();
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL)).isEmpty();
+        assertThat(processOf(holder)).isNull();
     }
 
     @Test
     @DisplayName("AC-08 — postConfirmation_noVerifiedEmail_isStepNotAllowedWhateverTheBodySaysAndNoSystemIsCalled")
     void postConfirmation_noVerifiedEmail_isStepNotAllowedWhateverTheBodySaysAndNoSystemIsCalled() throws Exception {
         configure(CONFIG_WITH_ONBOARDING);
-        SessionId session = entitledJourneyWithoutEmail();
+        TestHolder holder = entitledJourneyWithoutEmail();
 
         for (String body : new String[] {null, "{}", "{\"email\":\"" + EMAIL + "\"}", "{\"email\":12345}"}) {
-            mvc.perform(confirmation(session, body))
+            mvc.perform(confirmation(holder, body))
                     .andExpect(status().isConflict())
                     .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                     .andExpect(jsonPath("$.type").value("step_not_allowed"));
@@ -412,64 +414,64 @@ class ConfirmationApiIT {
 
         assertThat(issuer.api().calls()).isEmpty();
         assertThat(tickets.calls()).isEmpty();
-        assertThat(sessions.read(SANDBOX, session, Section.ISSUANCE)).isEmpty();
-        assertThat(sessions.read(SANDBOX, session, Section.EMAIL)).isEmpty();
-        assertThat(processOf(session)).isNull();
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE)).isEmpty();
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL)).isEmpty();
+        assertThat(processOf(holder)).isNull();
     }
 
     @Test
     @DisplayName("AC-08 — postConfirmation_emailSectionWithoutVerification_isStepNotAllowedAndNothingIsRequested")
     void postConfirmation_emailSectionWithoutVerification_isStepNotAllowedAndNothingIsRequested() throws Exception {
         configure(CONFIG_WITH_ONBOARDING);
-        SessionId session = entitledJourneyWithoutEmail();
-        sessions.write(SANDBOX, session, Section.EMAIL, new EmailRecord(EMAIL).toJson());
+        TestHolder holder = entitledJourneyWithoutEmail();
+        sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL, new EmailRecord(EMAIL).toJson());
 
-        mvc.perform(confirmation(session, null))
+        mvc.perform(confirmation(holder, null))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.type").value("step_not_allowed"));
 
-        assertNothingRequested(session);
+        assertNothingRequested(holder);
     }
 
     @Test
     @DisplayName("AC-08 — postConfirmation_emailNotVerifiedYet_isStepNotAllowedAndNothingIsRequested")
     void postConfirmation_emailNotVerifiedYet_isStepNotAllowedAndNothingIsRequested() throws Exception {
         configure(CONFIG_WITH_ONBOARDING);
-        SessionId session = entitledJourneyWithoutEmail();
-        sessions.write(SANDBOX, session, Section.EMAIL, new EmailRecord(EMAIL).toJson());
-        sessions.write(SANDBOX, session, Section.EMAIL_VERIFICATION, new EmailVerificationRecord(EMAIL,
+        TestHolder holder = entitledJourneyWithoutEmail();
+        sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL, new EmailRecord(EMAIL).toJson());
+        sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION, new EmailVerificationRecord(EMAIL,
                 "hash-of-a-pending-code", clock.instant().plusSeconds(600), 0, 1, clock.instant()).toJson());
 
-        mvc.perform(confirmation(session, null))
+        mvc.perform(confirmation(holder, null))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.type").value("step_not_allowed"));
 
-        assertNothingRequested(session);
+        assertNothingRequested(holder);
     }
 
     @Test
     @DisplayName("AC-08 — postConfirmation_verifiedEmailIsNotTheSessionEmail_isStepNotAllowedAndNothingIsRequested")
     void postConfirmation_verifiedEmailIsNotTheSessionEmail_isStepNotAllowedAndNothingIsRequested() throws Exception {
         configure(CONFIG_WITH_ONBOARDING);
-        SessionId session = entitledJourneyWithoutEmail();
-        sessions.write(SANDBOX, session, Section.EMAIL, new EmailRecord(EMAIL).toJson());
-        sessions.write(SANDBOX, session, Section.EMAIL_VERIFICATION, new EmailVerificationRecord(OTHER_EMAIL, null,
+        TestHolder holder = entitledJourneyWithoutEmail();
+        sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL, new EmailRecord(EMAIL).toJson());
+        sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION, new EmailVerificationRecord(OTHER_EMAIL, null,
                 null, 0, 1, clock.instant()).toJson());
 
-        mvc.perform(confirmation(session, null))
+        mvc.perform(confirmation(holder, null))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.type").value("step_not_allowed"));
 
-        assertNothingRequested(session);
+        assertNothingRequested(holder);
     }
 
     @Test
     @DisplayName("AC-08 — postConfirmation_bodyWithAnotherEmail_isIgnoredAndTheVerifiedEmailIsUsed")
     void postConfirmation_bodyWithAnotherEmail_isIgnoredAndTheVerifiedEmailIsUsed() throws Exception {
         configure(CONFIG_WITH_ONBOARDING);
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
 
-        mvc.perform(confirmation(session, "{\"email\":\"mallory@example.test\",\"givenName\":\"Mallory\"}"))
+        mvc.perform(confirmation(holder, "{\"email\":\"mallory@example.test\",\"givenName\":\"Mallory\"}"))
                 .andExpect(status().isOk());
 
         assertThat(issuer.api().calls()).singleElement().satisfies(call ->
@@ -481,18 +483,18 @@ class ConfirmationApiIT {
     @DisplayName("EC-05 — postConfirmation_retryAfterOnboardingUnavailable_keepsTheVerifiedEmailAndAsksForNoNewCode")
     void postConfirmation_retryAfterOnboardingUnavailable_keepsTheVerifiedEmailAndAsksForNoNewCode() throws Exception {
         configure(CONFIG_WITH_ONBOARDING);
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
         tickets.failWith(OnboardingTicketException.Reason.UNAVAILABLE);
-        mvc.perform(confirmation(session, null)).andExpect(status().isServiceUnavailable())
+        mvc.perform(confirmation(holder, null)).andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
         tickets.recover();
 
         // The renewal of the offer of a process that already exists is EUD-295: until then the answer is the same
         // 503, but it is never step_not_allowed, because the verified email is still the journey's.
-        mvc.perform(confirmation(session, null)).andExpect(status().isServiceUnavailable())
+        mvc.perform(confirmation(holder, null)).andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
 
-        assertThat(EmailRecord.fromJson(sessions.read(SANDBOX, session, Section.EMAIL).orElseThrow()).address())
+        assertThat(EmailRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL).orElseThrow()).address())
                 .isEqualTo(EMAIL);
         assertThat(tickets.calls()).extracting(InMemoryOnboardingTickets.Call::email).containsOnly(EMAIL);
         assertThat(issuer.api().calls()).extracting(c -> c.request().email()).containsOnly(EMAIL);
@@ -504,7 +506,7 @@ class ConfirmationApiIT {
         mvc.perform(post().contentType(MediaType.APPLICATION_JSON).content("{\"email\":\"" + EMAIL + "\"}"))
                 .andExpect(status().isGone())
                 .andExpect(jsonPath("$.type").value("journey_closed"));
-        mvc.perform(confirmation(SessionId.generate(), "{\"email\":\"" + EMAIL + "\"}"))
+        mvc.perform(confirmation(TestHolder.of(SANDBOX, holderRefs), "{\"email\":\"" + EMAIL + "\"}"))
                 .andExpect(status().isGone())
                 .andExpect(jsonPath("$.type").value("journey_closed"));
 
@@ -514,10 +516,10 @@ class ConfirmationApiIT {
     @Test
     @DisplayName("EC-09 — postConfirmation_completedJourney_isJourneyClosedAndNoSystemIsCalled")
     void postConfirmation_completedJourney_isJourneyClosedAndNoSystemIsCalled() throws Exception {
-        SessionId session = entitledJourney();
-        mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}")).andExpect(status().isOk());
+        TestHolder holder = entitledJourney();
+        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}")).andExpect(status().isOk());
 
-        mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}"))
+        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
                 .andExpect(status().isGone())
                 .andExpect(jsonPath("$.type").value("journey_closed"));
 
@@ -527,78 +529,78 @@ class ConfirmationApiIT {
     @Test
     @DisplayName("ES-04 — postConfirmation_incompleteConfiguration_isConfigUnavailableAndNoSystemIsCalled")
     void postConfirmation_incompleteConfiguration_isConfigUnavailableAndNoSystemIsCalled() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
         configure(CONFIG.replace("\"onboarding\": {\"enabled\": false}", "\"onboarding\": {\"enabled\": true}"));
 
-        mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}"))
+        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("config_unavailable"));
         configure(CONFIG.replace("\"attestation_type\": \"doctorid.sd.1\",", ""));
-        mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}"))
+        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("config_unavailable"));
 
         assertThat(issuer.api().calls()).isEmpty();
-        assertThat(processOf(session)).isNull();
+        assertThat(processOf(holder)).isNull();
     }
 
     @Test
     @DisplayName("AC-05 — postConfirmation_noSystemToken_isIssuanceUnavailableAndTheJourneyStaysInProgress")
     void postConfirmation_noSystemToken_isIssuanceUnavailableAndTheJourneyStaysInProgress() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
         issuer.api().failWith(new SystemTokenUnavailableException(
                 SystemTokenUnavailableException.Reason.NO_MACHINE_CREDENTIAL));
 
-        mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}"))
+        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("issuance_unavailable"));
 
-        assertInProgressWithEntitlement(session);
+        assertInProgressWithEntitlement(holder);
     }
 
     @Test
     @DisplayName("ES-01 — postConfirmation_issuerRejects_isBadGatewayAndTheJourneyStaysInProgress")
     void postConfirmation_issuerRejects_isBadGatewayAndTheJourneyStaysInProgress() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
         issuer.api().failWith(new IssuanceRejectedException(IssuanceRejectedException.Reason.REQUEST_REJECTED));
 
-        mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}"))
+        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.type").value("issuance_rejected"));
 
-        assertInProgressWithEntitlement(session);
+        assertInProgressWithEntitlement(holder);
     }
 
     @Test
     @DisplayName("EC-02 — postConfirmation_afterIssuanceUnavailable_reusesTheKeyAndEndsWithOneProcess")
     void postConfirmation_afterIssuanceUnavailable_reusesTheKeyAndEndsWithOneProcess() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
         issuer.api().failWith(new IssuanceUnavailableException(IssuanceUnavailableException.Reason.NETWORK));
-        mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}"))
+        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("issuance_unavailable"));
-        assertInProgressWithEntitlement(session);
-        UUID keptKey = IssuanceRecord.fromJson(sessions.read(SANDBOX, session, Section.ISSUANCE).orElseThrow())
+        assertInProgressWithEntitlement(holder);
+        UUID keptKey = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow())
                 .idempotencyKey();
         issuer.api().recover();
 
-        mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}")).andExpect(status().isOk());
+        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}")).andExpect(status().isOk());
 
         assertThat(issuer.api().calls()).extracting(InMemoryIssuanceApi.Call::idempotencyKey)
                 .containsExactly(keptKey, keptKey);
         assertThat(issuer.api().processes()).isEqualTo(1);
-        assertThat(processOf(session)).isNotNull();
+        assertThat(processOf(holder)).isNotNull();
     }
 
     @Test
     @DisplayName("EC-02 — postConfirmation_retryWithTheSameVerifiedEmail_reusesTheKeyAndTheEmail")
     void postConfirmation_retryWithTheSameVerifiedEmail_reusesTheKeyAndTheEmail() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
         issuer.api().failWith(new IssuanceUnavailableException(IssuanceUnavailableException.Reason.NETWORK));
-        mvc.perform(confirmation(session, null)).andExpect(status().isServiceUnavailable());
+        mvc.perform(confirmation(holder, null)).andExpect(status().isServiceUnavailable());
         issuer.api().recover();
 
-        mvc.perform(confirmation(session, null)).andExpect(status().isOk());
+        mvc.perform(confirmation(holder, null)).andExpect(status().isOk());
 
         assertThat(issuer.api().calls()).extracting(c -> c.request().email()).containsExactly(EMAIL, EMAIL);
         assertThat(issuer.api().calls().get(1).idempotencyKey())
@@ -609,31 +611,31 @@ class ConfirmationApiIT {
     @Test
     @DisplayName("AC-07 — postConfirmation_anotherEmailVerifiedBeforeAnyProcess_sendsANewKeyWithTheNewEmail")
     void postConfirmation_anotherEmailVerifiedBeforeAnyProcess_sendsANewKeyWithTheNewEmail() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
         issuer.api().failWith(new IssuanceUnavailableException(IssuanceUnavailableException.Reason.NETWORK));
-        mvc.perform(confirmation(session, null)).andExpect(status().isServiceUnavailable());
+        mvc.perform(confirmation(holder, null)).andExpect(status().isServiceUnavailable());
         issuer.api().recover();
-        verifyEmail(session, OTHER_EMAIL);
+        verifyEmail(holder, OTHER_EMAIL);
 
-        mvc.perform(confirmation(session, null)).andExpect(status().isOk());
+        mvc.perform(confirmation(holder, null)).andExpect(status().isOk());
 
         assertThat(issuer.api().calls()).extracting(c -> c.request().email()).containsExactly(EMAIL, OTHER_EMAIL);
         assertThat(issuer.api().calls().get(1).idempotencyKey())
                 .isNotEqualTo(issuer.api().calls().get(0).idempotencyKey());
-        IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, session, Section.ISSUANCE).orElseThrow());
+        IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow());
         assertThat(stored.idempotencyKey()).isEqualTo(issuer.api().calls().get(1).idempotencyKey());
         assertThat(stored.isForEmail(OTHER_EMAIL)).isTrue();
-        assertThat(processOf(session)).isNotNull();
+        assertThat(processOf(holder)).isNotNull();
     }
 
     @Test
     @DisplayName("AC-07 — postConfirmation_issuanceRecordWithoutEmailAndNoProcess_sendsANewKey")
     void postConfirmation_issuanceRecordWithoutEmailAndNoProcess_sendsANewKey() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
         UUID legacyKey = UUID.randomUUID();
-        sessions.write(SANDBOX, session, Section.ISSUANCE, "{\"idempotency_key\":\"" + legacyKey + "\"}");
+        sessions.write(SANDBOX, journeyOf(holder), Section.ISSUANCE, "{\"idempotency_key\":\"" + legacyKey + "\"}");
 
-        mvc.perform(confirmation(session, null)).andExpect(status().isOk());
+        mvc.perform(confirmation(holder, null)).andExpect(status().isOk());
 
         assertThat(issuer.api().calls()).singleElement().satisfies(call ->
                 assertThat(call.idempotencyKey()).isNotEqualTo(legacyKey));
@@ -643,50 +645,50 @@ class ConfirmationApiIT {
     @DisplayName("AC-07 — postConfirmation_anotherEmailVerifiedAfterTheProcessExists_keepsTheKeyAndTheProcess")
     void postConfirmation_anotherEmailVerifiedAfterTheProcessExists_keepsTheKeyAndTheProcess() throws Exception {
         configure(CONFIG_WITH_ONBOARDING);
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
         tickets.failWith(OnboardingTicketException.Reason.UNAVAILABLE);
-        mvc.perform(confirmation(session, null)).andExpect(status().isServiceUnavailable());
+        mvc.perform(confirmation(holder, null)).andExpect(status().isServiceUnavailable());
         tickets.recover();
-        UUID process = processOf(session);
-        UUID key = IssuanceRecord.fromJson(sessions.read(SANDBOX, session, Section.ISSUANCE).orElseThrow())
+        UUID process = processOf(holder);
+        UUID key = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow())
                 .idempotencyKey();
-        verifyEmail(session, OTHER_EMAIL);
+        verifyEmail(holder, OTHER_EMAIL);
 
         // The renewal of the offer of a process that exists is EUD-295: until then the answer is onboarding_unavailable.
-        mvc.perform(confirmation(session, null)).andExpect(status().isServiceUnavailable())
+        mvc.perform(confirmation(holder, null)).andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
 
         assertThat(issuer.api().calls()).singleElement().satisfies(call ->
                 assertThat(call.idempotencyKey()).isEqualTo(key));
         assertThat(issuer.api().processes()).isEqualTo(1);
-        assertThat(processOf(session)).isEqualTo(process);
-        assertThat(IssuanceRecord.fromJson(sessions.read(SANDBOX, session, Section.ISSUANCE).orElseThrow())
+        assertThat(processOf(holder)).isEqualTo(process);
+        assertThat(IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow())
                 .idempotencyKey()).isEqualTo(key);
     }
 
     @Test
     @DisplayName("EC-04 — postConfirmation_processAlreadyRecorded_isOnboardingUnavailableWithoutAskingTheIssuer")
     void postConfirmation_processAlreadyRecorded_isOnboardingUnavailableWithoutAskingTheIssuer() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
         UUID process = UUID.randomUUID();
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET issuance_process_id = :process WHERE id = :id")
-                .param("process", process).param("id", journeyOf(session)).update();
+                .param("process", process).param("id", journeyOf(holder)).update();
 
-        mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}"))
+        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
 
         assertThat(issuer.api().calls()).isEmpty();
-        assertThat(processOf(session)).isEqualTo(process);
+        assertThat(processOf(holder)).isEqualTo(process);
     }
 
     @Test
     @DisplayName("EC-03 — postConfirmation_issuerAsked_holdsNoLockOnTheJourneyRow")
     void postConfirmation_issuerAsked_holdsNoLockOnTheJourneyRow() throws Exception {
-        SessionId session = entitledJourney();
-        issuer.probe(journeyOf(session));
+        TestHolder holder = entitledJourney();
+        issuer.probe(journeyOf(holder));
 
-        mvc.perform(confirmation(session, "{\"email\":\"" + EMAIL + "\"}")).andExpect(status().isOk());
+        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}")).andExpect(status().isOk());
 
         assertThat(issuer.api().calls()).hasSize(1);
         assertThat(issuer.rowLockedWhileAsked).isFalse();
@@ -695,14 +697,14 @@ class ConfirmationApiIT {
     @Test
     @DisplayName("EC-03 — postConfirmation_twoAtTheSameTime_shareOneKeyAndEndWithOneProcess")
     void postConfirmation_twoAtTheSameTime_shareOneKeyAndEndWithOneProcess() throws Exception {
-        SessionId session = entitledJourney();
+        TestHolder holder = entitledJourney();
         issuer.bothInFlight();
         String body = "{\"email\":\"" + EMAIL + "\"}";
 
         List<MvcResult> results;
         try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
-            Future<MvcResult> first = pool.submit(() -> mvc.perform(confirmation(session, body)).andReturn());
-            Future<MvcResult> second = pool.submit(() -> mvc.perform(confirmation(session, body)).andReturn());
+            Future<MvcResult> first = pool.submit(() -> mvc.perform(confirmation(holder, body)).andReturn());
+            Future<MvcResult> second = pool.submit(() -> mvc.perform(confirmation(holder, body)).andReturn());
             results = List.of(first.get(30, TimeUnit.SECONDS), second.get(30, TimeUnit.SECONDS));
         }
 
@@ -712,16 +714,16 @@ class ConfirmationApiIT {
         assertThat(issuer.api().calls()).hasSize(2);
         assertThat(issuer.api().calls().get(0).idempotencyKey()).isEqualTo(issuer.api().calls().get(1).idempotencyKey());
         assertThat(issuer.api().processes()).isEqualTo(1);
-        assertThat(processOf(session)).isNotNull();
+        assertThat(processOf(holder)).isNotNull();
         assertThat(jdbc.sql("SELECT count(*) FROM \"sandbox_issuance_portal\".journey WHERE id = :id AND state = 'completed'")
-                .param("id", journeyOf(session)).query(Long.class).single()).isEqualTo(1L);
+                .param("id", journeyOf(holder)).query(Long.class).single()).isEqualTo(1L);
     }
 
     @Test
     @DisplayName("NFR-3 — postConfirmation_successAndFailures_leaveNoPersonalDataOrOfferInLogs")
     void postConfirmation_successAndFailures_leaveNoPersonalDataOrOfferInLogs() throws Exception {
         String body = "{\"email\":\"" + EMAIL + "\"}";
-        SessionId failing = entitledJourney();
+        TestHolder failing = entitledJourney();
         for (RuntimeException failure : List.<RuntimeException>of(
                 new IssuanceUnavailableException(IssuanceUnavailableException.Reason.SERVER_ERROR),
                 new IssuanceRejectedException(IssuanceRejectedException.Reason.UNEXPECTED_RESPONSE),
@@ -750,74 +752,74 @@ class ConfirmationApiIT {
                 .update();
     }
 
-    private void assertInProgressWithEntitlement(SessionId session) {
+    private void assertInProgressWithEntitlement(TestHolder holder) {
         Map<String, Object> row = jdbc.sql("SELECT state, step, issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
-                .param("id", journeyOf(session)).query().singleRow();
+                .param("id", journeyOf(holder)).query().singleRow();
         assertThat(row).containsEntry("state", "in_progress")
                 .containsEntry("step", "email_verified");
         assertThat(row.get("issuance_process_id")).isNull();
-        assertThat(sessions.read(SANDBOX, session, Section.ENTITLEMENT)).isPresent();
-        assertThat(IssuanceRecord.fromJson(sessions.read(SANDBOX, session, Section.ISSUANCE).orElseThrow()).offerUri())
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.ENTITLEMENT)).isPresent();
+        assertThat(IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).offerUri())
                 .isEmpty();
     }
 
-    private void assertNothingRequested(SessionId session) {
+    private void assertNothingRequested(TestHolder holder) {
         assertThat(issuer.api().calls()).isEmpty();
         assertThat(tickets.calls()).isEmpty();
-        assertThat(sessions.read(SANDBOX, session, Section.ISSUANCE)).isEmpty();
-        assertThat(processOf(session)).isNull();
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE)).isEmpty();
+        assertThat(processOf(holder)).isNull();
     }
 
     /** The holder verifies another email with a code: both sections now carry it. */
-    private void verifyEmail(SessionId session, String address) {
-        sessions.write(SANDBOX, session, Section.EMAIL, new EmailRecord(address).toJson());
-        sessions.write(SANDBOX, session, Section.EMAIL_VERIFICATION, new EmailVerificationRecord(address, null, null,
+    private void verifyEmail(TestHolder holder, String address) {
+        sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL, new EmailRecord(address).toJson());
+        sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION, new EmailVerificationRecord(address, null, null,
                 0, 2, clock.instant()).toJson());
     }
 
-    private UUID processOf(SessionId session) {
+    private UUID processOf(TestHolder holder) {
         return jdbc.sql("SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
-                .param("id", journeyOf(session)).query(UUID.class).optional().orElse(null);
+                .param("id", journeyOf(holder)).query(UUID.class).optional().orElse(null);
     }
 
-    private UUID journeyOf(SessionId session) {
-        return sessions.journeyOf(SANDBOX, session).orElseThrow();
+    private UUID journeyOf(TestHolder holder) {
+        return sessions.journeyOf(SANDBOX, holder.ref()).orElseThrow();
     }
 
-    private SessionId startedJourney() throws Exception {
-        Cookie cookie = mvc.perform(MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey")
+    private TestHolder startedJourney() throws Exception {
+        TestHolder holder = TestHolder.of(SANDBOX, holderRefs);
+        mvc.perform(MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey")
                         .contextPath(CONTEXT)
-                        .header("X-Requested-With", "issuance-portal")
-                        .with(host()))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getCookie("journey_session");
-        return SessionId.parse(cookie.getValue()).orElseThrow();
+                        .with(host())
+                        .with(holder.token()))
+                .andExpect(status().isCreated());
+        return holder;
     }
 
     /** What the holder has before confirming: the entitlement and the email verified with a code. */
-    private SessionId entitledJourney() throws Exception {
-        SessionId session = entitledJourneyWithoutEmail();
-        sessions.write(SANDBOX, session, Section.EMAIL, new EmailRecord(EMAIL).toJson());
-        sessions.write(SANDBOX, session, Section.EMAIL_VERIFICATION, new EmailVerificationRecord(EMAIL, null, null, 0, 1,
+    private TestHolder entitledJourney() throws Exception {
+        TestHolder holder = entitledJourneyWithoutEmail();
+        sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL, new EmailRecord(EMAIL).toJson());
+        sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION, new EmailVerificationRecord(EMAIL, null, null, 0, 1,
                 clock.instant()).toJson());
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET step = 'email_verified' WHERE id = :id")
-                .param("id", journeyOf(session)).update();
-        return session;
+                .param("id", journeyOf(holder)).update();
+        return holder;
     }
 
     /** What Identification and Authentic source leave in the journey before the holder verifies the email. */
-    private SessionId entitledJourneyWithoutEmail() throws Exception {
-        SessionId session = startedJourney();
-        sessions.write(SANDBOX, session, Section.IDENTITY, identity());
-        progress.reach(SANDBOX, session, JourneyProgress.Step.IDENTIFIED);
-        sessions.write(SANDBOX, session, Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.PERSONAL_ID, Map.of(
+    private TestHolder entitledJourneyWithoutEmail() throws Exception {
+        TestHolder holder = startedJourney();
+        sessions.write(SANDBOX, journeyOf(holder), Section.IDENTITY, identity());
+        progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.IDENTIFIED);
+        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.PERSONAL_ID, Map.of(
                 "personal_administrative_number", ADMINISTRATIVE_NUMBER,
                 "medical_board", List.of("Colegio de Medicos de Prueba"),
                 "medical_speciality", List.of("Cardiology"),
                 "legally_entitled", true),
                 new EntitlementRecord.Preview("DoctorID", List.of(), null, true), clock.instant()).toJson());
-        progress.reach(SANDBOX, session, JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
-        return session;
+        progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
+        return holder;
     }
 
     private static String identity() {
@@ -825,15 +827,14 @@ class ConfirmationApiIT {
                 "elena.token@example.test").toJson();
     }
 
-    private static MockHttpServletRequestBuilder confirmation(SessionId session, String body) {
-        MockHttpServletRequestBuilder request = post().cookie(new Cookie("journey_session", session.value()));
+    private static MockHttpServletRequestBuilder confirmation(TestHolder holder, String body) {
+        MockHttpServletRequestBuilder request = post().with(holder.token());
         return body == null ? request : request.contentType(MediaType.APPLICATION_JSON).content(body);
     }
 
     private static MockHttpServletRequestBuilder post() {
         return MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey/confirmation")
                 .contextPath(CONTEXT)
-                .header("X-Requested-With", "issuance-portal")
                 .with(host());
     }
 

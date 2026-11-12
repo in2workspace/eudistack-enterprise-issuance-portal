@@ -63,6 +63,10 @@ issuance-portal:
     provider: ${PORTAL_CRYPTO_PROVIDER:}
     kms-key-id: ${PORTAL_KMS_KEY_ID:}
     local-key: ${PORTAL_LOCAL_DATA_KEY:}
+  holder-ref:
+    # Base64 key, at least 32 bytes, of the HMAC that gives each holder their reference (design.md section 3.2): one
+    # per environment, never in git. Empty: the service does not start.
+    key: ${PORTAL_HOLDER_REF_KEY:}
   client-address:
     # Proxies of the platform in front of the service, each appending to X-Forwarded-For: 1 in Docker
     # Compose (nginx), 2 in AWS (CloudFront and the ALB). Empty: the service does not start.

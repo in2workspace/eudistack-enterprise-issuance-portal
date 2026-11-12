@@ -6,9 +6,9 @@ import es.in2.issuanceportal.session.api.IdentifierType;
 import es.in2.issuanceportal.session.api.JourneySessions;
 import es.in2.issuanceportal.session.api.PersonalIdentifier;
 import es.in2.issuanceportal.session.api.Section;
-import es.in2.issuanceportal.session.api.SessionId;
+import es.in2.issuanceportal.shared.security.HolderRefs;
+import es.in2.issuanceportal.shared.security.TestHolder;
 import es.in2.issuanceportal.shared.tenant.TenantId;
-import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -67,6 +67,8 @@ class EntitlementSimulatedIT {
     private JdbcClient jdbc;
     @Autowired
     private JourneySessions sessions;
+    @Autowired
+    private HolderRefs holderRefs;
 
     /**
      * The JSON is a copy of cgcom's local configuration in eudistack-platform-dev
@@ -91,9 +93,9 @@ class EntitlementSimulatedIT {
     @Test
     @DisplayName("AC-03, AC-04 — postEntitlement_activeByDni_confirmsAndKeepsTheDataEncrypted")
     void postEntitlement_activeByDni_confirmsAndKeepsTheDataEncrypted() throws Exception {
-        SessionId session = journeyWith(IdentifierType.PERSONAL_ID, "00000001R");
+        TestHolder holder = journeyWith(IdentifierType.PERSONAL_ID, "00000001R");
 
-        mvc.perform(entitlement(session))
+        mvc.perform(entitlement(holder))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result").value("confirmed"))
                 .andExpect(jsonPath("$.attestation.type_name").value("DoctorID"))
@@ -106,9 +108,9 @@ class EntitlementSimulatedIT {
                 .andExpect(jsonPath("$.attestation.email_required").value(true))
                 .andExpect(jsonPath("$.attestation.fields[?(@.value == '00000001R')]").isEmpty());
 
-        UUID journeyId = sessions.journeyOf(SANDBOX, session).orElseThrow();
+        UUID journeyId = sessions.journeyOf(SANDBOX, holder.ref()).orElseThrow();
         assertThat(journeyRow(journeyId)).containsEntry("step", "entitlement_confirmed");
-        assertThat(sessions.read(SANDBOX, session, Section.ENTITLEMENT)).isPresent();
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.ENTITLEMENT)).isPresent();
         assertThat(jdbc.sql("SELECT position(convert_to('280000001', 'UTF8') in entitlement) "
                         + "FROM \"sandbox_issuance_portal\".journey_session WHERE journey_id = :id")
                 .param("id", journeyId).query(Integer.class).single()).isZero();
@@ -117,9 +119,9 @@ class EntitlementSimulatedIT {
     @Test
     @DisplayName("AC-05 — postEntitlement_activeByRegistrationNumber_confirms")
     void postEntitlement_activeByRegistrationNumber_confirms() throws Exception {
-        SessionId session = journeyWith(IdentifierType.COLEGIADO, "280000001");
+        TestHolder holder = journeyWith(IdentifierType.COLEGIADO, "280000001");
 
-        mvc.perform(entitlement(session))
+        mvc.perform(entitlement(holder))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result").value("confirmed"));
     }
@@ -130,10 +132,10 @@ class EntitlementSimulatedIT {
     @DisplayName("AC-07 — postEntitlement_deregisteredOrUnknown_isNotConfirmedAndTheJourneyWithdrawn")
     void postEntitlement_deregisteredOrUnknown_isNotConfirmedAndTheJourneyWithdrawn(IdentifierType type, String value,
                                                                                     String reason) throws Exception {
-        SessionId session = journeyWith(type, value);
-        UUID journeyId = sessions.journeyOf(SANDBOX, session).orElseThrow();
+        TestHolder holder = journeyWith(type, value);
+        UUID journeyId = sessions.journeyOf(SANDBOX, holder.ref()).orElseThrow();
 
-        mvc.perform(entitlement(session))
+        mvc.perform(entitlement(holder))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result").value("not_confirmed"))
                 .andExpect(jsonPath("$.reason").value(reason));
@@ -149,11 +151,11 @@ class EntitlementSimulatedIT {
     @DisplayName("AC-09, NFR-2 — postEntitlement_slowRecord_isUnavailableWithinTheTimeout")
     void postEntitlement_slowRecord_isUnavailableWithinTheTimeout(CapturedOutput output) throws Exception {
         int before = output.getOut().length();
-        SessionId session = journeyWith(IdentifierType.PERSONAL_ID, "00000003A");
-        UUID journeyId = sessions.journeyOf(SANDBOX, session).orElseThrow();
+        TestHolder holder = journeyWith(IdentifierType.PERSONAL_ID, "00000003A");
+        UUID journeyId = sessions.journeyOf(SANDBOX, holder.ref()).orElseThrow();
 
         long start = System.nanoTime();
-        mvc.perform(entitlement(session))
+        mvc.perform(entitlement(holder))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(header().string(HttpHeaders.RETRY_AFTER, "30"))
                 .andExpect(jsonPath("$.type").value("authentic_source_unavailable"));
@@ -161,7 +163,7 @@ class EntitlementSimulatedIT {
 
         assertThat(took).isBetween(Duration.ofSeconds(10), Duration.ofSeconds(11));
         assertThat(journeyRow(journeyId)).containsEntry("state", "in_progress").containsEntry("step", "started");
-        assertThat(sessions.read(SANDBOX, session, Section.ENTITLEMENT)).isEmpty();
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.ENTITLEMENT)).isEmpty();
         String logged = output.getOut().substring(before);
         assertThat(logged).contains("\"result\":\"unavailable\"")
                 .doesNotContain(PERSONAL_DATA.toArray(String[]::new))
@@ -191,15 +193,15 @@ class EntitlementSimulatedIT {
     @Test
     @DisplayName("NFR-1 — postEntitlement_activeHolder_p95UnderThreeHundredMilliseconds")
     void postEntitlement_activeHolder_p95UnderThreeHundredMilliseconds() throws Exception {
-        SessionId session = journeyWith(IdentifierType.PERSONAL_ID, "00000001R");
+        TestHolder holder = journeyWith(IdentifierType.PERSONAL_ID, "00000001R");
         for (int i = 0; i < 20; i++) {
-            mvc.perform(entitlement(session)).andExpect(status().isOk());
+            mvc.perform(entitlement(holder)).andExpect(status().isOk());
         }
 
         List<Long> micros = new ArrayList<>();
         for (int i = 0; i < 200; i++) {
             long start = System.nanoTime();
-            mvc.perform(entitlement(session)).andExpect(status().isOk());
+            mvc.perform(entitlement(holder)).andExpect(status().isOk());
             micros.add((System.nanoTime() - start) / 1_000);
         }
 
@@ -211,17 +213,20 @@ class EntitlementSimulatedIT {
     }
 
     /** A journey whose identity is what the Journey module writes from the holder's Access Token. */
-    private SessionId journeyWith(IdentifierType type, String value) throws Exception {
-        Cookie cookie = mvc.perform(MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey")
+    private TestHolder journeyWith(IdentifierType type, String value) throws Exception {
+        TestHolder holder = TestHolder.of(SANDBOX, holderRefs);
+        mvc.perform(MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey")
                         .contextPath(CONTEXT)
-                        .header("X-Requested-With", "issuance-portal")
-                        .with(host()))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getCookie("journey_session");
-        SessionId session = SessionId.parse(cookie.getValue()).orElseThrow();
-        sessions.write(SANDBOX, session, Section.IDENTITY,
+                        .with(host())
+                        .with(holder.token()))
+                .andExpect(status().isCreated());
+        sessions.write(SANDBOX, journeyOf(holder), Section.IDENTITY,
                 new HolderIdentity("Lucía", "Prueba Activa", new PersonalIdentifier(type, value), null).toJson());
-        return session;
+        return holder;
+    }
+
+    private UUID journeyOf(TestHolder holder) {
+        return sessions.journeyOf(SANDBOX, holder.ref()).orElseThrow();
     }
 
     private Map<String, Object> journeyRow(UUID id) {
@@ -229,11 +234,10 @@ class EntitlementSimulatedIT {
                 .param("id", id).query().singleRow();
     }
 
-    private static MockHttpServletRequestBuilder entitlement(SessionId session) {
+    private static MockHttpServletRequestBuilder entitlement(TestHolder holder) {
         return MockMvcRequestBuilders.post(CONTEXT + "/api/v1/entitlement")
                 .contextPath(CONTEXT)
-                .header("X-Requested-With", "issuance-portal")
-                .cookie(new Cookie("journey_session", session.value()))
+                .with(holder.token())
                 .with(host());
     }
 

@@ -1,6 +1,6 @@
 package es.in2.issuanceportal.journey.api;
 
-import es.in2.issuanceportal.session.api.SessionId;
+import es.in2.issuanceportal.session.api.HolderRef;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 
 /**
@@ -14,5 +14,5 @@ public interface JourneyWithdrawal {
         NOT_ENTITLED
     }
 
-    void withdraw(TenantId tenant, SessionId session, Cause cause);
+    void withdraw(TenantId tenant, HolderRef holder, Cause cause);
 }

@@ -39,8 +39,10 @@ public final class Journey {
         this.endedAt = endedAt;
     }
 
-    public static Journey start(UUID id, Instant now) {
-        return new Journey(id, JourneyState.IN_PROGRESS, JourneyStep.STARTED, null, null, null, now, now, null);
+    /** @param identificationMethod how the holder logged in; {@code null} when it is not known */
+    public static Journey start(UUID id, Instant now, String identificationMethod) {
+        return new Journey(id, JourneyState.IN_PROGRESS, JourneyStep.STARTED, null, identificationMethod, null,
+                now, now, null);
     }
 
     /** Rebuilds a journey from storage. */

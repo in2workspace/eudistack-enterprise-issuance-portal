@@ -16,10 +16,10 @@ import es.in2.issuanceportal.journey.api.JourneyProgress;
 import es.in2.issuanceportal.journey.api.JourneyWithdrawal;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
+import es.in2.issuanceportal.session.api.HolderRef;
 import es.in2.issuanceportal.session.api.InvalidSectionException;
 import es.in2.issuanceportal.session.api.JourneySessions;
 import es.in2.issuanceportal.session.api.Section;
-import es.in2.issuanceportal.session.api.SessionId;
 import es.in2.issuanceportal.shared.error.ProblemCode;
 import es.in2.issuanceportal.shared.error.ProblemException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
@@ -90,13 +90,13 @@ public class EntitlementService implements AutoCloseable {
         }
     }
 
-    public Outcome check(TenantId tenant, SessionId session) {
+    public Outcome check(TenantId tenant, HolderRef holder) {
         long started = System.nanoTime();
-        access.requireInProgress(tenant, session);
+        access.requireInProgress(tenant, holder);
         // Read before anything else: a withdrawal deletes the session, and the trace still needs the journey.
-        UUID journeyId = sessions.journeyOf(tenant, session)
+        UUID journeyId = sessions.journeyOf(tenant, holder)
                 .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
-        HolderIdentity identity = identity(tenant, session);
+        HolderIdentity identity = identity(tenant, journeyId);
         PersonalIdentifier searched = toDomain(identity);
         AuthenticSourceConfigs.Current current = configs.current(tenant);
         Trace trace = new Trace(tenant, journeyId, current, searched.type(), started);
@@ -107,7 +107,7 @@ public class EntitlementService implements AutoCloseable {
             AttestationPreview preview = AttestationPreview.of(current.attestationType(), identity.givenName(),
                     identity.familyName(), List.of(), Map.of(), identity.email(), null);
             trace.write(AuthenticSourceAuditTrail.Result.CONFIRMED, null);
-            confirm(tenant, session, null, Map.of(), preview);
+            confirm(tenant, holder, journeyId, null, Map.of(), preview);
             return new Outcome.Confirmed(preview);
         }
         if (!current.identifierTypes().contains(searched.type())) {
@@ -127,11 +127,11 @@ public class EntitlementService implements AutoCloseable {
         return switch (EntitlementRules.decide(searched, answer)) {
             case EntitlementDecision.Confirmed(SourceRecord found) -> {
                 trace.write(AuthenticSourceAuditTrail.Result.CONFIRMED, null);
-                yield confirmed(tenant, session, identity, current, found);
+                yield confirmed(tenant, holder, journeyId, identity, current, found);
             }
             case EntitlementDecision.NotConfirmed(NotConfirmedReason reason) -> {
                 trace.write(AuthenticSourceAuditTrail.Result.NOT_CONFIRMED, reason);
-                withdrawal.withdraw(tenant, session, JourneyWithdrawal.Cause.NOT_ENTITLED);
+                withdrawal.withdraw(tenant, holder, JourneyWithdrawal.Cause.NOT_ENTITLED);
                 yield new Outcome.NotConfirmed(reason);
             }
         };
@@ -169,8 +169,8 @@ public class EntitlementService implements AutoCloseable {
         }
     }
 
-    private HolderIdentity identity(TenantId tenant, SessionId session) {
-        String section = sessions.read(tenant, session, Section.IDENTITY)
+    private HolderIdentity identity(TenantId tenant, UUID journeyId) {
+        String section = sessions.read(tenant, journeyId, Section.IDENTITY)
                 .orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED));
         try {
             return HolderIdentity.fromJson(section);
@@ -231,14 +231,14 @@ public class EntitlementService implements AutoCloseable {
         }
     }
 
-    private Outcome confirmed(TenantId tenant, SessionId session, HolderIdentity identity,
+    private Outcome confirmed(TenantId tenant, HolderRef holder, UUID journeyId, HolderIdentity identity,
                               AuthenticSourceConfigs.Current current, SourceRecord found) {
         SourceSettings settings = current.settings();
         Map<String, Object> claims = AttestationTranslation.translate(settings.mapping(), found);
         Object sourceEmail = settings.emailAttribute() == null ? null : found.attributes().get(settings.emailAttribute());
         AttestationPreview preview = AttestationPreview.of(settings.typeName(), identity.givenName(),
                 identity.familyName(), settings.mapping(), claims, identity.email(), sourceEmail);
-        confirm(tenant, session, identity.personalIdentifier().type(), claims, preview);
+        confirm(tenant, holder, journeyId, identity.personalIdentifier().type(), claims, preview);
         return new Outcome.Confirmed(preview);
     }
 
@@ -247,13 +247,13 @@ public class EntitlementService implements AutoCloseable {
      *
      * @param searchedBy the identity's identifier type, {@code null} when the attestation type has no source
      */
-    private void confirm(TenantId tenant, SessionId session,
+    private void confirm(TenantId tenant, HolderRef holder, UUID journeyId,
                          es.in2.issuanceportal.session.api.IdentifierType searchedBy,
                          Map<String, Object> claims, AttestationPreview preview) {
         EntitlementRecord entitlement = new EntitlementRecord(searchedBy, claims, toSection(preview), clock.instant());
         transactions.executeWithoutResult(status -> {
-            sessions.write(tenant, session, Section.ENTITLEMENT, entitlement.toJson());
-            progress.reach(tenant, session, JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
+            sessions.write(tenant, journeyId, Section.ENTITLEMENT, entitlement.toJson());
+            progress.reach(tenant, holder, JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
         });
     }
 
