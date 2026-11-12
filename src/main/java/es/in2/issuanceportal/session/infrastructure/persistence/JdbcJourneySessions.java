@@ -18,6 +18,10 @@ import java.util.UUID;
  * {@code journey_session} in the tenant's schema. Every section is encrypted with the journey and the
  * section as context, so a value copied to another row or column cannot be decrypted.
  */
+// "UPDATE " is written in each statement (write, clear, rotate): extracting the keyword would rewrite write and
+// read, which carry the java:S2077 false-positive review, so the duplicate literal is accepted (as in
+// JdbcJourneyRepository).
+@SuppressWarnings("java:S1192")
 @Component
 class JdbcJourneySessions implements JourneySessions {
 
@@ -70,6 +74,19 @@ class JdbcJourneySessions implements JourneySessions {
     }
 
     @Override
+    // java:S2077 false positive, as in write and read: the table comes from the validated TenantId schema and the
+    // column from the closed Section switch; the only value is bound.
+    @SuppressWarnings("java:S2077")
+    public void clear(TenantId tenant, SessionId session, Section section) {
+        int updated = jdbc.sql("UPDATE " + table(tenant) + " SET " + column(section) + " = NULL WHERE session_id_hash = :hash")
+                .param("hash", session.hash())
+                .update();
+        if (updated == 0) {
+            throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
+        }
+    }
+
+    @Override
     public void close(TenantId tenant, UUID journeyId) {
         jdbc.sql("DELETE FROM " + table(tenant) + " WHERE journey_id = :journey")
                 .param("journey", journeyId)
@@ -104,6 +121,7 @@ class JdbcJourneySessions implements JourneySessions {
             case ENTITLEMENT -> "entitlement";
             case ISSUANCE -> "issuance";
             case EMAIL -> "email";
+            case EMAIL_VERIFICATION -> "email_verification";
         };
     }
 

@@ -149,13 +149,13 @@ class IncidentApiIT {
     @DisplayName("ES-03 — postIncident_deliveryFails_isUnavailableAndTracedAsFailedWithoutContent")
     void postIncident_deliveryFails_isUnavailableAndTracedAsFailedWithoutContent(CapturedOutput output) throws Exception {
         configure("sandbox", "soporte@sandbox.example.org", "48 horas");
-        doThrow(new IncidentDeliveryException("SES MessageRejected")).when(mailer).send(any());
+        doThrow(new IncidentDeliveryException("SMTP MailSendException")).when(mailer).send(any());
 
         mvc.perform(post(VALID))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("service_unavailable"));
 
-        assertThat(output.getAll()).contains("INCIDENT_FAILED", "MessageRejected")
+        assertThat(output.getAll()).contains("INCIDENT_FAILED", "MailSendException")
                 .doesNotContain("Ana García", "ana@example.org", "No puedo entrar");
     }
 

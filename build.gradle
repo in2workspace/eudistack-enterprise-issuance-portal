@@ -54,8 +54,12 @@ dependencies {
     implementation 'software.amazon.awssdk:kms:2.31.78'
 
     // --- Mail ---
-    // Incidents go to the tenant's support by Amazon SES (design.md AD-8).
-    implementation 'software.amazon.awssdk:sesv2:2.31.78'
+    // Incidents and verification codes go out by SMTP (SES SMTP interface), with spring.mail and the same SMTP_*
+    // variables as the wallet (design.md AD-8).
+    implementation 'org.springframework.boot:spring-boot-starter-mail'
+    // The code email is HTML from a Thymeleaf template (the wallet's OTP email, without links). The engine is
+    // built by hand, not with the starter: the service has no views and must not get a view resolver.
+    implementation 'org.thymeleaf:thymeleaf-spring6'
 
     // --- System token ---
     // The machine credential of each tenant is read from SSM Parameter Store, and the presentation and client
@@ -93,6 +97,8 @@ dependencies {
     testImplementation 'com.tngtech.archunit:archunit-junit5:1.5.0'
     // The Verifier, the Issuer and the Wallet Unit Service are simulated over HTTP.
     testImplementation 'org.wiremock:wiremock-standalone:3.13.1'
+    // A real SMTP server to assert the message the mail adapters send.
+    testImplementation 'com.icegreen:greenmail-junit5:2.1.15'
 
     // --- Integration Testing ---
     // A real PostgreSQL: schema-per-tenant SQL is exactly what an in-memory database would get wrong.
@@ -131,9 +137,14 @@ sonar {
                 'src/main/java/**/IssuancePortalApplication.java'
         // The Flyway migrations are PostgreSQL. Sonar reads .sql files with its PL/SQL (Oracle) analyser,
         // whose rules ask for Oracle-only types such as VARCHAR2; none of them applies to these files.
-        property 'sonar.issue.ignore.multicriteria', 'plsqlOnMigrations'
+        property 'sonar.issue.ignore.multicriteria', 'plsqlOnMigrations,htmlEmailTemplates'
         property 'sonar.issue.ignore.multicriteria.plsqlOnMigrations.ruleKey', 'plsql:*'
         property 'sonar.issue.ignore.multicriteria.plsqlOnMigrations.resourceKey', 'src/main/resources/db/**/*.sql'
+        // The email templates are tables with align, valign, bgcolor, width, height, cellspacing and cellpadding
+        // attributes on purpose: Outlook and other mail clients ignore the CSS equivalents. They are a copy of the
+        // wallet and issuer templates, so Web:S1827 (deprecated HTML attributes) does not apply to them.
+        property 'sonar.issue.ignore.multicriteria.htmlEmailTemplates.ruleKey', 'Web:S1827'
+        property 'sonar.issue.ignore.multicriteria.htmlEmailTemplates.resourceKey', 'src/main/resources/mail-templates/**'
     }
 }
 

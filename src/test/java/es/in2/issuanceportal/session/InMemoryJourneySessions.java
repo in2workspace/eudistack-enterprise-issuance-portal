@@ -43,6 +43,11 @@ public class InMemoryJourneySessions implements JourneySessions {
     }
 
     @Override
+    public void clear(TenantId tenant, SessionId session, Section section) {
+        existing(tenant, session).sections().remove(section);
+    }
+
+    @Override
     public void close(TenantId tenant, UUID journeyId) {
         sessions.entrySet().removeIf(e -> e.getKey().startsWith(tenant.value() + "/")
                 && e.getValue().journeyId().equals(journeyId));

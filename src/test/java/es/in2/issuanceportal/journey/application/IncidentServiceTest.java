@@ -68,13 +68,13 @@ class IncidentServiceTest {
     @DisplayName("ES-03 — send_deliveryFails_isUnavailableAndTracesFailedWithReason")
     void send_deliveryFails_isUnavailableAndTracesFailedWithReason() {
         IncidentService service = service(SUPPORT, message -> {
-            throw new IncidentDeliveryException("SES MessageRejected");
+            throw new IncidentDeliveryException("SMTP MailSendException");
         });
 
         assertUnavailable(() -> service.send(CGCOM, INCIDENT));
         assertThat(events).singleElement().satisfies(event -> {
             assertThat(event.outcome()).isEqualTo(Outcome.FAILED);
-            assertThat(event.reason()).hasValueSatisfying(reason -> assertThat(reason).contains("MessageRejected"));
+            assertThat(event.reason()).hasValueSatisfying(reason -> assertThat(reason).contains("MailSendException"));
         });
     }
 

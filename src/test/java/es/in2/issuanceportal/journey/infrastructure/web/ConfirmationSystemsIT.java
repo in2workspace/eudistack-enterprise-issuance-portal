@@ -59,7 +59,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         everythingWorks();
         SessionId session = entitledJourney();
 
-        MvcResult result = mvc.perform(confirmation(session, EMAIL))
+        MvcResult result = mvc.perform(confirmation(session))
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(jsonPath("$.credential_offer_uri").value(OFFER))
@@ -101,7 +101,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         everythingWorks();
         SessionId session = entitledJourney();
 
-        mvc.perform(confirmation(session, EMAIL))
+        mvc.perform(confirmation(session))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.credential_offer_uri").value(OFFER))
                 .andExpect(jsonPath("$.expires_at").isNotEmpty())
@@ -121,7 +121,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         SessionId session = identifiedJourney();
         Map<String, Object> before = rowOf(session);
 
-        mvc.perform(confirmation(session, EMAIL))
+        mvc.perform(confirmation(session))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.type").value("step_not_allowed"));
 
@@ -138,7 +138,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         Files.deleteIfExists(SECRETS.resolve("sandbox.json"));
         SessionId session = entitledJourney();
 
-        mvc.perform(confirmation(session, EMAIL))
+        mvc.perform(confirmation(session))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("issuance_unavailable"));
 
@@ -156,7 +156,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
                 .withHeader("Content-Type", "application/json").withBody("{\"error\":\"invalid_client\"}")));
         SessionId session = entitledJourney();
 
-        mvc.perform(confirmation(session, EMAIL))
+        mvc.perform(confirmation(session))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("issuance_unavailable"));
 
@@ -171,8 +171,8 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
     void confirm_twoJourneysOfTheTenant_askTheVerifierOnce() throws Exception {
         everythingWorks();
 
-        mvc.perform(confirmation(entitledJourney(), EMAIL)).andExpect(status().isOk());
-        mvc.perform(confirmation(entitledJourney(), EMAIL)).andExpect(status().isOk());
+        mvc.perform(confirmation(entitledJourney())).andExpect(status().isOk());
+        mvc.perform(confirmation(entitledJourney())).andExpect(status().isOk());
 
         assertThat(requestsTo(TOKEN_PATH)).hasSize(1);
         assertThat(requestsTo(ISSUANCES_PATH)).hasSize(2);
@@ -188,7 +188,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
                 .willReturn(issued()));
         SessionId session = entitledJourney();
 
-        mvc.perform(confirmation(session, EMAIL)).andExpect(status().isOk());
+        mvc.perform(confirmation(session)).andExpect(status().isOk());
 
         List<LoggedRequest> attempts = requestsTo(ISSUANCES_PATH);
         assertThat(attempts).hasSize(2);
@@ -208,7 +208,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
                 .withHeader("Content-Type", "application/problem+json").withBody("{\"type\":\"error\"}")));
         SessionId session = entitledJourney();
 
-        mvc.perform(confirmation(session, EMAIL))
+        mvc.perform(confirmation(session))
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.type").value("issuance_rejected"));
 
@@ -229,7 +229,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
                         + OFFER + "\"}}]}")));
         SessionId session = entitledJourney();
 
-        mvc.perform(confirmation(session, EMAIL))
+        mvc.perform(confirmation(session))
                 .andExpect(status().isBadGateway())
                 .andExpect(jsonPath("$.type").value("issuance_rejected"));
 
@@ -244,13 +244,13 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         verifierGrants();
         WIRE.stubFor(post(urlEqualTo(ISSUANCES_PATH)).willReturn(aResponse().withStatus(500)));
         SessionId session = entitledJourney();
-        mvc.perform(confirmation(session, EMAIL))
+        mvc.perform(confirmation(session))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("issuance_unavailable"));
         UUID keptKey = keyOf(session);
         issuerIssues();
 
-        mvc.perform(confirmation(session, EMAIL)).andExpect(status().isOk());
+        mvc.perform(confirmation(session)).andExpect(status().isOk());
 
         assertThat(requestsTo(ISSUANCES_PATH)).extracting(request -> request.getHeader("X-Idempotency-Key"))
                 .containsExactly(keptKey.toString(), keptKey.toString());
@@ -263,8 +263,8 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
     void confirm_repeated_neverAsksTheIssuerForAnotherProcess() throws Exception {
         everythingWorks();
         SessionId completed = entitledJourney();
-        mvc.perform(confirmation(completed, EMAIL)).andExpect(status().isOk());
-        mvc.perform(confirmation(completed, EMAIL)).andExpect(status().isGone())
+        mvc.perform(confirmation(completed)).andExpect(status().isOk());
+        mvc.perform(confirmation(completed)).andExpect(status().isGone())
                 .andExpect(jsonPath("$.type").value("journey_closed"));
         assertThat(requestsTo(ISSUANCES_PATH)).hasSize(1);
 
@@ -272,12 +272,12 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         configure(true);
         WIRE.stubFor(post(urlEqualTo(TICKETS_PATH)).willReturn(aResponse().withStatus(500)));
         SessionId withoutTicket = entitledJourney();
-        mvc.perform(confirmation(withoutTicket, EMAIL)).andExpect(status().isServiceUnavailable());
+        mvc.perform(confirmation(withoutTicket)).andExpect(status().isServiceUnavailable());
         UUID process = processOf(withoutTicket);
         assertThat(process).isNotNull();
         walletUnitServiceCreatesTicket();
 
-        mvc.perform(confirmation(withoutTicket, EMAIL))
+        mvc.perform(confirmation(withoutTicket))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
 
@@ -300,7 +300,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
             for (int i = 0; i < 2; i++) {
                 calls.add(pool.submit(() -> {
                     together.await(10, TimeUnit.SECONDS);
-                    return mvc.perform(confirmation(session, EMAIL)).andReturn();
+                    return mvc.perform(confirmation(session)).andReturn();
                 }));
             }
             for (Future<MvcResult> call : calls) {
@@ -328,7 +328,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         WIRE.stubFor(post(urlEqualTo(TICKETS_PATH)).willReturn(aResponse().withStatus(status)));
         SessionId session = entitledJourney();
 
-        MvcResult result = mvc.perform(confirmation(session, EMAIL))
+        MvcResult result = mvc.perform(confirmation(session))
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.type").value("onboarding_unavailable"))
@@ -339,7 +339,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         assertThat(result.getResponse().getContentAsString()).doesNotContain("openid-credential-offer");
         Map<String, Object> row = rowOf(session);
         assertThat(row).containsEntry("state", "in_progress")
-                .containsEntry("step", "entitlement_confirmed")
+                .containsEntry("step", "email_verified")
                 .containsEntry("issuance_process_id", keyOf(session));
         IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, session, Section.ISSUANCE).orElseThrow());
         assertThat(stored.offerUri()).isEmpty();
@@ -388,7 +388,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         }
         SessionId session = entitledJourney();
 
-        mvc.perform(confirmation(session, EMAIL));
+        mvc.perform(confirmation(session));
 
         List<String> issuance = logs.auditLines("ISSUANCE_REQUESTED");
         assertThat(issuance).singleElement().asString().contains("result=" + outcome.result);
@@ -438,7 +438,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
     private void assertStillInProgressWithEntitlement(SessionId session) {
         Map<String, Object> row = rowOf(session);
         assertThat(row).containsEntry("state", "in_progress")
-                .containsEntry("step", "entitlement_confirmed");
+                .containsEntry("step", "email_verified");
         assertThat(row.get("issuance_process_id")).isNull();
         assertThat(sessions.read(SANDBOX, session, Section.ENTITLEMENT)).isPresent();
     }

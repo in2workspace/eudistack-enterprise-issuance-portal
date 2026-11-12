@@ -19,13 +19,15 @@ record JourneyResponse(
         String step,
         @JsonProperty("withdrawal_reason") String withdrawalReason,
         AttestationPreviewResponse attestation,
-        OfferResponse offer) {
+        OfferResponse offer,
+        @JsonProperty("email_verification") EmailVerificationResponse emailVerification) {
 
     static JourneyResponse of(Journey journey) {
         return new JourneyResponse(
                 journey.state().code(),
                 journey.step().code(),
                 journey.withdrawalReason().map(WithdrawalReason::code).orElse(null),
+                null,
                 null,
                 null);
     }
@@ -34,13 +36,15 @@ record JourneyResponse(
         JourneyResponse base = of(view.journey());
         return new JourneyResponse(base.state(), base.step(), base.withdrawalReason(),
                 view.attestation().map(AttestationPreviewResponse::of).orElse(null),
-                view.offer().map(OfferResponse::of).orElse(null));
+                view.offer().map(OfferResponse::of).orElse(null),
+                view.emailVerification().map(EmailVerificationResponse::of).orElse(null));
     }
 
     @Override
     public String toString() {
         return "JourneyResponse[state=" + state + ", step=" + step + ", withdrawalReason=" + withdrawalReason
-                + ", attestation=" + (attestation != null) + ", offer=" + (offer != null) + "]";
+                + ", attestation=" + (attestation != null) + ", offer=" + (offer != null)
+                + ", emailVerification=" + (emailVerification != null) + "]";
     }
 
     /** {@code AttestationPreview} of the contract: what the Data step shows. Personal data: never in the text form. */

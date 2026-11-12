@@ -107,6 +107,44 @@ class LogJourneyAuditTrailTest {
                 UUID.randomUUID(), UUID.randomUUID(), JourneyAuditTrail.TicketOutcome.CREATED, Instant.now())));
     }
 
+    @Test
+    void append_emailCodeRequest_writesTheResultOnly() {
+        trail.append(SANDBOX, new JourneyAuditTrail.EmailCodeRequested(UUID.randomUUID(), UUID.randomUUID(),
+                JourneyAuditTrail.EmailCodeOutcome.RESEND_TOO_SOON, Instant.now()));
+
+        ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
+        verify(audit).info(anyString(), arguments.capture());
+        assertThat(java.util.Arrays.stream(arguments.getValue()).map(Object::toString))
+                .contains("result=resend_too_soon", "event=EMAIL_CODE_REQUESTED", "tenant=sandbox");
+    }
+
+    @Test
+    void append_emailCodeRequestWriteFails_doesNotThrow() {
+        doThrow(new IllegalStateException("log sink down")).when(audit).info(anyString(), any(Object[].class));
+
+        assertThatNoException().isThrownBy(() -> trail.append(SANDBOX, new JourneyAuditTrail.EmailCodeRequested(
+                UUID.randomUUID(), UUID.randomUUID(), JourneyAuditTrail.EmailCodeOutcome.SENT, Instant.now())));
+    }
+
+    @Test
+    void append_emailCodeCheck_writesTheResultOnly() {
+        trail.append(SANDBOX, new JourneyAuditTrail.EmailCodeChecked(UUID.randomUUID(), UUID.randomUUID(),
+                JourneyAuditTrail.EmailCodeCheck.TOO_MANY_ATTEMPTS, Instant.now()));
+
+        ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
+        verify(audit).info(anyString(), arguments.capture());
+        assertThat(java.util.Arrays.stream(arguments.getValue()).map(Object::toString))
+                .contains("result=too_many_attempts", "event=EMAIL_CODE_CHECKED", "tenant=sandbox");
+    }
+
+    @Test
+    void append_emailCodeCheckWriteFails_doesNotThrow() {
+        doThrow(new IllegalStateException("log sink down")).when(audit).info(anyString(), any(Object[].class));
+
+        assertThatNoException().isThrownBy(() -> trail.append(SANDBOX, new JourneyAuditTrail.EmailCodeChecked(
+                UUID.randomUUID(), UUID.randomUUID(), JourneyAuditTrail.EmailCodeCheck.VERIFIED, Instant.now())));
+    }
+
     private static JourneyAuditTrail.Event event() {
         return new JourneyAuditTrail.Event(UUID.randomUUID(), JourneyAuditTrail.Kind.STARTED, UUID.randomUUID(),
                 JourneyState.IN_PROGRESS, JourneyStep.STARTED, Optional.empty(), Instant.now());

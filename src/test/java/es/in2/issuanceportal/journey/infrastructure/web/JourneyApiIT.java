@@ -322,7 +322,7 @@ class JourneyApiIT {
         java.time.Instant expires = java.time.Instant.parse("2030-01-01T10:10:00Z");
         java.time.Instant onboardingExpires = java.time.Instant.parse("2030-01-01T10:09:00Z");
         sessions.write(SANDBOX, session, Section.ISSUANCE, new es.in2.issuanceportal.session.api.IssuanceRecord(
-                UUID.randomUUID(), "openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fissuer%2Foffer%2F1",
+                UUID.randomUUID(), null, "openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fissuer%2Foffer%2F1",
                 expires, "https://sandbox.127.0.0.1.nip.io:4443/t/Zk3q9Xw2", onboardingExpires).toJson());
 
         mvc.perform(withSession(get(JOURNEY, SANDBOX_HOST), session))

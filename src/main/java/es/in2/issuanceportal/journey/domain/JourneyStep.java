@@ -6,6 +6,7 @@ public enum JourneyStep {
     STARTED("started"),
     IDENTIFIED("identified"),
     ENTITLEMENT_CONFIRMED("entitlement_confirmed"),
+    EMAIL_VERIFIED("email_verified"),
     OFFER_OBTAINED("offer_obtained");
 
     private final String code;

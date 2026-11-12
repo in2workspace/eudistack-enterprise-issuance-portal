@@ -34,13 +34,13 @@ class LogIncidentAuditTrailTest {
     @DisplayName("AC-07 — append_failedEvent_writesTenantTypeOutcomeAndReason")
     void append_failedEvent_writesTenantTypeOutcomeAndReason() {
         trail.append(CGCOM, new IncidentAuditTrail.Event(UUID.randomUUID(), IncidentType.TECHNICAL, Outcome.FAILED,
-                Optional.of("Incident not delivered: SES MessageRejected"), Instant.parse("2026-10-26T10:00:00Z")));
+                Optional.of("Incident not delivered: SMTP MailSendException"), Instant.parse("2026-10-26T10:00:00Z")));
 
         ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
         verify(audit).info(anyString(), arguments.capture());
         String line = Arrays.stream(arguments.getValue()).map(String::valueOf).collect(Collectors.joining(" "));
         assertThat(line).contains("event=INCIDENT_FAILED", "tenant=cgcom", "incident_type=technical",
-                "reason=Incident not delivered: SES MessageRejected", "occurred_at=2026-10-26T10:00:00Z");
+                "reason=Incident not delivered: SMTP MailSendException", "occurred_at=2026-10-26T10:00:00Z");
     }
 
     @Test

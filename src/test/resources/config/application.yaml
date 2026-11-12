@@ -25,7 +25,5 @@ issuance-portal:
   # No Issuer listens: the issuance API client has its own tests.
   issuance-api:
     issuer-internal-url: http://localhost:9/issuer
-  incidents:
-    mail:
-      provider: local
-      from: noreply@mail.test.eudistack.net
+  mail:
+    provider: local

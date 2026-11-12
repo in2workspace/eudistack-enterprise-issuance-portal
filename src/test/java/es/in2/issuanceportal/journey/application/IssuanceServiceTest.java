@@ -25,6 +25,7 @@ import es.in2.issuanceportal.journey.domain.config.ServiceSettings;
 import es.in2.issuanceportal.journey.domain.config.Support;
 import es.in2.issuanceportal.session.InMemoryJourneySessions;
 import es.in2.issuanceportal.session.api.EmailRecord;
+import es.in2.issuanceportal.session.api.EmailVerificationRecord;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.IdentifierType;
@@ -120,7 +121,7 @@ class IssuanceServiceTest {
         configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
         SessionId session = entitledJourney();
 
-        IssuanceService.Offer offer = service.confirm(CGCOM, session, EMAIL);
+        IssuanceService.Offer offer = service.confirm(CGCOM, session);
 
         assertThat(api.calls()).hasSize(1);
         InMemoryIssuanceApi.Call call = api.calls().getFirst();
@@ -149,7 +150,7 @@ class IssuanceServiceTest {
         configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
         SessionId session = entitledJourney();
 
-        IssuanceService.Offer offer = service.confirm(CGCOM, session, "  " + EMAIL + " ");
+        IssuanceService.Offer offer = service.confirm(CGCOM, session);
 
         IssuanceRecord issuance = IssuanceRecord.fromJson(sessions.read(CGCOM, session, Section.ISSUANCE).orElseThrow());
         assertThat(issuance.idempotencyKey()).isEqualTo(api.calls().getFirst().idempotencyKey());
@@ -166,7 +167,7 @@ class IssuanceServiceTest {
         configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
         SessionId session = entitledJourney();
 
-        service.confirm(CGCOM, session, EMAIL);
+        service.confirm(CGCOM, session);
 
         assertThat(trail.issuanceRequests()).singleElement().satisfies(event -> {
             assertThat(event.result()).isEqualTo(JourneyAuditTrail.IssuanceOutcome.ISSUED);
@@ -184,7 +185,7 @@ class IssuanceServiceTest {
         SessionId session = entitledJourney();
         trail.failFromNowOn();
 
-        assertThat(service.confirm(CGCOM, session, EMAIL).credentialOfferUri()).isNotBlank();
+        assertThat(service.confirm(CGCOM, session).credentialOfferUri()).isNotBlank();
     }
 
     @Test
@@ -192,7 +193,7 @@ class IssuanceServiceTest {
         configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
         SessionId session = entitledJourney();
 
-        service.confirm(CGCOM, session, EMAIL);
+        service.confirm(CGCOM, session);
 
         assertThat(api.calls()).hasSize(1);
         assertThat(askedInsideTransaction).isFalse();
@@ -207,7 +208,7 @@ class IssuanceServiceTest {
         SessionId session = identifiedJourney();
         Journey before = journeys.findById(CGCOM, journeyOf(session)).orElseThrow();
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
                 ProblemCode.STEP_NOT_ALLOWED));
 
         assertThat(api.calls()).isEmpty();
@@ -226,7 +227,7 @@ class IssuanceServiceTest {
         SessionId session = journey.start(CGCOM, Optional.empty()).session();
         sessions.write(CGCOM, session, Section.ENTITLEMENT, entitlement().toJson());
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
                 ProblemCode.STEP_NOT_ALLOWED));
 
         assertThat(api.calls()).isEmpty();
@@ -235,31 +236,35 @@ class IssuanceServiceTest {
     // --- EC-01 ---
 
     @Test
-    @DisplayName("EC-01 — confirm_missingEmail_isEmailRequiredAndNoSystemIsCalled")
-    void confirm_missingEmail_isEmailRequiredAndNoSystemIsCalled() {
+    @DisplayName("AC-08 — confirm_noVerifiedEmail_isStepNotAllowedAndNoSystemIsCalled")
+    void confirm_noVerifiedEmail_isStepNotAllowedAndNoSystemIsCalled() {
         configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
-        SessionId session = entitledJourney();
+        SessionId session = entitledJourneyWithoutEmail();
 
-        for (String email : new String[] {null, "", "   "}) {
-            assertThatThrownBy(() -> service.confirm(CGCOM, session, email)).satisfies(e -> assertProblem(e,
-                    ProblemCode.EMAIL_REQUIRED));
-        }
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
+                ProblemCode.STEP_NOT_ALLOWED));
 
-        assertNothingAsked(session);
+        assertThat(api.calls()).isEmpty();
+        assertThat(tickets.calls()).isEmpty();
+        assertThat(sessions.read(CGCOM, session, Section.ISSUANCE)).isEmpty();
+        assertThat(sessions.read(CGCOM, session, Section.EMAIL)).isEmpty();
+        Journey stored = journeys.findById(CGCOM, journeyOf(session)).orElseThrow();
+        assertThat(stored.state()).isEqualTo(JourneyState.IN_PROGRESS);
+        assertThat(stored.step()).isEqualTo(JourneyStep.ENTITLEMENT_CONFIRMED);
+        assertThat(stored.issuanceProcessId()).isEmpty();
     }
 
     @Test
-    @DisplayName("EC-01 — confirm_emailWithoutEmailShape_isEmailInvalidAndNoSystemIsCalled")
-    void confirm_emailWithoutEmailShape_isEmailInvalidAndNoSystemIsCalled() {
+    @DisplayName("AC-08 — confirm_emailSectionInvalid_isStepNotAllowedAndNoSystemIsCalled")
+    void confirm_emailSectionInvalid_isStepNotAllowedAndNoSystemIsCalled() {
         configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
-        SessionId session = entitledJourney();
+        SessionId session = entitledJourneyWithoutEmail();
+        sessions.write(CGCOM, session, Section.EMAIL, "{}");
 
-        for (String email : new String[] {"elena", "elena@", "@example.test", "elena@example", "a b@example.test"}) {
-            assertThatThrownBy(() -> service.confirm(CGCOM, session, email)).satisfies(e -> assertProblem(e,
-                    ProblemCode.EMAIL_INVALID));
-        }
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
+                ProblemCode.STEP_NOT_ALLOWED));
 
-        assertNothingAsked(session);
+        assertThat(api.calls()).isEmpty();
     }
 
     // --- ES-04 ---
@@ -276,7 +281,7 @@ class IssuanceServiceTest {
 
         for (PortalConfig config : incomplete) {
             configs.put(CGCOM, config);
-            assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+            assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
                     ProblemCode.CONFIG_UNAVAILABLE));
         }
 
@@ -288,7 +293,7 @@ class IssuanceServiceTest {
     void confirm_tenantWithoutConfiguration_isConfigUnavailable() {
         SessionId session = entitledJourney();
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
                 ProblemCode.CONFIG_UNAVAILABLE));
 
         assertNothingAsked(session);
@@ -301,7 +306,7 @@ class IssuanceServiceTest {
                 "unknown", "authentic_source.not_translated"), Onboarding.DISABLED));
         SessionId session = entitledJourney();
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
                 ProblemCode.CONFIG_UNAVAILABLE));
 
         assertNothingAsked(session);
@@ -314,9 +319,9 @@ class IssuanceServiceTest {
     void confirm_completedJourney_isJourneyClosedAndNoSystemIsCalled() {
         configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
         SessionId session = entitledJourney();
-        service.confirm(CGCOM, session, EMAIL);
+        service.confirm(CGCOM, session);
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).isInstanceOf(JourneyClosedException.class);
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).isInstanceOf(JourneyClosedException.class);
 
         assertThat(api.calls()).hasSize(1);
     }
@@ -328,7 +333,7 @@ class IssuanceServiceTest {
 
         SessionId unknown = SessionId.generate();
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, unknown, EMAIL))
+        assertThatThrownBy(() -> service.confirm(CGCOM, unknown))
                 .isInstanceOf(JourneyClosedException.class);
 
         assertThat(api.calls()).isEmpty();
@@ -340,7 +345,7 @@ class IssuanceServiceTest {
         SessionId session = entitledJourney();
         journey.cancel(CGCOM, session);
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).isInstanceOf(JourneyClosedException.class);
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).isInstanceOf(JourneyClosedException.class);
 
         assertThat(api.calls()).isEmpty();
     }
@@ -356,7 +361,7 @@ class IssuanceServiceTest {
         SessionId session = entitledJourney();
         api.failWith(new SystemTokenUnavailableException(reason));
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
                 ProblemCode.ISSUANCE_UNAVAILABLE));
 
         assertStillEntitled(session);
@@ -374,7 +379,7 @@ class IssuanceServiceTest {
         SessionId session = entitledJourney();
         api.failWith(new IssuanceRejectedException(reason));
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
                 ProblemCode.ISSUANCE_REJECTED));
 
         assertStillEntitled(session);
@@ -390,7 +395,7 @@ class IssuanceServiceTest {
         SessionId session = entitledJourney();
         api.failWith(new IssuanceUnavailableException(reason));
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
                 ProblemCode.ISSUANCE_UNAVAILABLE));
 
         assertStillEntitled(session);
@@ -407,10 +412,10 @@ class IssuanceServiceTest {
         configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
         SessionId session = entitledJourney();
         api.failWith(new IssuanceUnavailableException(IssuanceUnavailableException.Reason.NETWORK));
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).isInstanceOf(ProblemException.class);
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).isInstanceOf(ProblemException.class);
         api.recover();
 
-        IssuanceService.Offer offer = service.confirm(CGCOM, session, EMAIL);
+        IssuanceService.Offer offer = service.confirm(CGCOM, session);
 
         assertThat(api.calls()).hasSize(2);
         assertThat(api.calls().get(1).idempotencyKey()).isEqualTo(api.calls().get(0).idempotencyKey());
@@ -421,15 +426,15 @@ class IssuanceServiceTest {
     }
 
     @Test
-    @DisplayName("EC-02 — confirm_retryWithAnotherEmail_sendsTheFirstEmailWithTheSameKey")
-    void confirm_retryWithAnotherEmail_sendsTheFirstEmailWithTheSameKey() {
+    @DisplayName("EC-05 — confirm_retryAfterAFailure_sendsTheVerifiedEmailAgainWithTheSameKey")
+    void confirm_retryAfterAFailure_sendsTheVerifiedEmailAgainWithTheSameKey() {
         configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
         SessionId session = entitledJourney();
         api.failWith(new IssuanceUnavailableException(IssuanceUnavailableException.Reason.NETWORK));
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).isInstanceOf(ProblemException.class);
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).isInstanceOf(ProblemException.class);
         api.recover();
 
-        service.confirm(CGCOM, session, "other.address@example.test");
+        service.confirm(CGCOM, session);
 
         assertThat(api.calls()).extracting(c -> c.request().email()).containsExactly(EMAIL, EMAIL);
         assertThat(api.calls().get(1).idempotencyKey()).isEqualTo(api.calls().get(0).idempotencyKey());
@@ -438,19 +443,19 @@ class IssuanceServiceTest {
     }
 
     @Test
-    @DisplayName("EC-01 — confirm_retryWithInvalidEmail_isStillRejectedAndKeepsTheFirstEmail")
-    void confirm_retryWithInvalidEmail_isStillRejectedAndKeepsTheFirstEmail() {
+    @DisplayName("AC-07 — confirm_retryAfterANewCodeWasRequested_isStepNotAllowedUntilItIsChecked")
+    void confirm_retryAfterANewCodeWasRequested_isStepNotAllowedUntilItIsChecked() {
         configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
         SessionId session = entitledJourney();
         api.failWith(new IssuanceUnavailableException(IssuanceUnavailableException.Reason.NETWORK));
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).isInstanceOf(ProblemException.class);
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).isInstanceOf(ProblemException.class);
+        // What sending a new code does to the verified email.
+        sessions.clear(CGCOM, session, Section.EMAIL);
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, "nope")).satisfies(e -> assertProblem(e,
-                ProblemCode.EMAIL_INVALID));
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
+                ProblemCode.STEP_NOT_ALLOWED));
 
         assertThat(api.calls()).hasSize(1);
-        assertThat(EmailRecord.fromJson(sessions.read(CGCOM, session, Section.EMAIL).orElseThrow()).address())
-                .isEqualTo(EMAIL);
     }
 
     @Test
@@ -458,8 +463,8 @@ class IssuanceServiceTest {
     void confirm_differentJourneys_useDifferentKeys() {
         configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
 
-        service.confirm(CGCOM, entitledJourney(), EMAIL);
-        service.confirm(CGCOM, entitledJourney(), EMAIL);
+        service.confirm(CGCOM, entitledJourney());
+        service.confirm(CGCOM, entitledJourney());
 
         assertThat(api.calls().get(1).idempotencyKey()).isNotEqualTo(api.calls().get(0).idempotencyKey());
         assertThat(api.processes()).isEqualTo(2);
@@ -476,7 +481,7 @@ class IssuanceServiceTest {
         UUID process = UUID.randomUUID();
         journeys.recordIssuanceProcess(CGCOM, stored.id(), process);
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
                 ProblemCode.ONBOARDING_UNAVAILABLE));
 
         assertThat(api.calls()).isEmpty();
@@ -497,12 +502,12 @@ class IssuanceServiceTest {
         issuer = (tenant, key, request) -> {
             if (confirmedAgain.compareAndSet(false, true)) {
                 // The same holder confirms again while the first request is waiting for the Issuer.
-                parallel.set(service.confirm(tenant, session, EMAIL));
+                parallel.set(service.confirm(tenant, session));
             }
             return api.issue(tenant, key, request);
         };
 
-        IssuanceService.Offer offer = service.confirm(CGCOM, session, EMAIL);
+        IssuanceService.Offer offer = service.confirm(CGCOM, session);
 
         assertThat(offer).isEqualTo(parallel.get());
         assertThat(api.calls()).hasSize(2);
@@ -524,7 +529,7 @@ class IssuanceServiceTest {
             return api.issue(tenant, key, request);
         };
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
                 ProblemCode.ONBOARDING_UNAVAILABLE));
 
         Journey after = journeys.findById(CGCOM, journeyOf(session)).orElseThrow();
@@ -545,7 +550,7 @@ class IssuanceServiceTest {
             return api.issue(tenant, key, request);
         };
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
                 ProblemCode.JOURNEY_CLOSED));
 
         assertThat(journeys.findById(CGCOM, journeyOf(session)).orElseThrow().issuanceProcessId()).isEmpty();
@@ -565,7 +570,7 @@ class IssuanceServiceTest {
         withOnboarding();
         SessionId session = entitledJourney();
 
-        IssuanceService.Offer offer = service.confirm(CGCOM, session, EMAIL);
+        IssuanceService.Offer offer = service.confirm(CGCOM, session);
 
         assertThat(tickets.calls()).singleElement().satisfies(call -> {
             assertThat(call.tenant()).isEqualTo(CGCOM);
@@ -592,7 +597,7 @@ class IssuanceServiceTest {
         withOnboarding();
         SessionId session = entitledJourney();
 
-        IssuanceService.Offer offer = service.confirm(CGCOM, session, EMAIL);
+        IssuanceService.Offer offer = service.confirm(CGCOM, session);
 
         assertThat(trail.ticketRequests()).singleElement().satisfies(event -> {
             assertThat(event.result()).isEqualTo(JourneyAuditTrail.TicketOutcome.CREATED);
@@ -609,7 +614,7 @@ class IssuanceServiceTest {
         withOnboarding();
         SessionId session = entitledJourney();
 
-        IssuanceService.Offer offer = service.confirm(CGCOM, session, EMAIL);
+        IssuanceService.Offer offer = service.confirm(CGCOM, session);
 
         assertThat(tickets.calls().getFirst().expiresIn())
                 .isEqualTo(Duration.between(clock.instant(), offer.expiresAt()).minusSeconds(60))
@@ -623,7 +628,7 @@ class IssuanceServiceTest {
         configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
         SessionId session = entitledJourney();
 
-        IssuanceService.Offer offer = service.confirm(CGCOM, session, EMAIL);
+        IssuanceService.Offer offer = service.confirm(CGCOM, session);
 
         assertThat(tickets.calls()).isEmpty();
         assertThat(trail.ticketRequests()).isEmpty();
@@ -641,12 +646,12 @@ class IssuanceServiceTest {
         SessionId session = entitledJourney();
         tickets.failWith(reason);
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
                 ProblemCode.ONBOARDING_UNAVAILABLE));
 
         Journey stored = journeys.findById(CGCOM, journeyOf(session)).orElseThrow();
         assertThat(stored.state()).isEqualTo(JourneyState.IN_PROGRESS);
-        assertThat(stored.step()).isEqualTo(JourneyStep.ENTITLEMENT_CONFIRMED);
+        assertThat(stored.step()).isEqualTo(JourneyStep.EMAIL_VERIFIED);
         assertThat(stored.issuanceProcessId()).isPresent();
         IssuanceRecord issuance = IssuanceRecord.fromJson(sessions.read(CGCOM, session, Section.ISSUANCE).orElseThrow());
         assertThat(issuance.offerUri()).isEmpty();
@@ -668,11 +673,11 @@ class IssuanceServiceTest {
         withOnboarding();
         SessionId session = entitledJourney();
         tickets.failWith(OnboardingTicketException.Reason.UNAVAILABLE);
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
                 ProblemCode.ONBOARDING_UNAVAILABLE));
         tickets.recover();
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
                 ProblemCode.ONBOARDING_UNAVAILABLE));
 
         assertThat(api.calls()).hasSize(1);
@@ -687,7 +692,7 @@ class IssuanceServiceTest {
         issuer = (tenant, key, request) -> new IssuanceResult(UUID.randomUUID(), "openid-credential-offer://?x=1",
                 clock.instant().plusSeconds(60));
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
                 ProblemCode.ONBOARDING_UNAVAILABLE));
 
         assertThat(tickets.calls()).isEmpty();
@@ -706,7 +711,7 @@ class IssuanceServiceTest {
         tickets.failWith(OnboardingTicketException.Reason.REJECTED);
         trail.failFromNowOn();
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, session, EMAIL)).satisfies(e -> assertProblem(e,
+        assertThatThrownBy(() -> service.confirm(CGCOM, session)).satisfies(e -> assertProblem(e,
                 ProblemCode.ONBOARDING_UNAVAILABLE));
     }
 
@@ -720,7 +725,8 @@ class IssuanceServiceTest {
     private void assertNothingAsked(SessionId session) {
         assertThat(api.calls()).isEmpty();
         assertThat(sessions.read(CGCOM, session, Section.ISSUANCE)).isEmpty();
-        assertThat(sessions.read(CGCOM, session, Section.EMAIL)).isEmpty();
+        assertThat(EmailRecord.fromJson(sessions.read(CGCOM, session, Section.EMAIL).orElseThrow()).address())
+                .isEqualTo(EMAIL);
         Journey stored = journeys.findById(CGCOM, journeyOf(session)).orElseThrow();
         assertThat(stored.state()).isEqualTo(JourneyState.IN_PROGRESS);
         assertThat(stored.issuanceProcessId()).isEmpty();
@@ -730,7 +736,7 @@ class IssuanceServiceTest {
     private void assertStillEntitled(SessionId session) {
         Journey stored = journeys.findById(CGCOM, journeyOf(session)).orElseThrow();
         assertThat(stored.state()).isEqualTo(JourneyState.IN_PROGRESS);
-        assertThat(stored.step()).isEqualTo(JourneyStep.ENTITLEMENT_CONFIRMED);
+        assertThat(stored.step()).isEqualTo(JourneyStep.EMAIL_VERIFIED);
         assertThat(stored.issuanceProcessId()).isEmpty();
         assertThat(sessions.read(CGCOM, session, Section.ENTITLEMENT)).isPresent();
     }
@@ -747,7 +753,19 @@ class IssuanceServiceTest {
         return session;
     }
 
+    /** What the holder has before confirming: the entitlement and the email verified with a code. */
     private SessionId entitledJourney() {
+        SessionId session = entitledJourneyWithoutEmail();
+        sessions.write(CGCOM, session, Section.EMAIL, new EmailRecord(EMAIL).toJson());
+        sessions.write(CGCOM, session, Section.EMAIL_VERIFICATION, new EmailVerificationRecord(EMAIL, null, null, 0, 1,
+                clock.instant()).toJson());
+        Journey stored = journeys.findById(CGCOM, journeyOf(session)).orElseThrow();
+        stored.reach(JourneyStep.EMAIL_VERIFIED, clock.instant());
+        journeys.update(CGCOM, stored, JourneyState.IN_PROGRESS);
+        return session;
+    }
+
+    private SessionId entitledJourneyWithoutEmail() {
         SessionId session = identifiedJourney();
         sessions.write(CGCOM, session, Section.ENTITLEMENT, entitlement().toJson());
         journey.reach(CGCOM, session, JourneyProgress.Step.ENTITLEMENT_CONFIRMED);

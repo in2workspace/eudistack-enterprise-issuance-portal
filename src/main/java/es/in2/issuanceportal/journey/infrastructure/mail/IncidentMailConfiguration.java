@@ -2,37 +2,40 @@ package es.in2.issuanceportal.journey.infrastructure.mail;
 
 import es.in2.issuanceportal.journey.application.port.IncidentMailer;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
-import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
-import software.amazon.awssdk.regions.providers.DefaultAwsRegionProviderChain;
-import software.amazon.awssdk.services.sesv2.SesV2Client;
+import org.springframework.mail.javamail.JavaMailSender;
 
-import java.time.Duration;
 import java.util.function.Supplier;
 
 @Slf4j
 @Configuration
 class IncidentMailConfiguration {
 
-    /** The holder waits for the answer: SES gets this long per call before the incident counts as failed. */
-    static final Duration SES_CALL_TIMEOUT = Duration.ofSeconds(5);
+    /** The sender of every message: the {@code mail.smtp.from} of {@code spring.mail}, as in the wallet. */
+    static final String FROM_PROPERTY = "${spring.mail.properties.mail.smtp.from:}";
 
     @Bean
-    IncidentMailer incidentMailer(IncidentMailProperties properties) {
+    IncidentMailer incidentMailer(MailProperties properties, ObjectProvider<JavaMailSender> mailSender,
+                                  @Value(FROM_PROPERTY) String from) {
         log.info("Incidents sent with the {} mail provider", properties.provider());
-        return mailerFor(properties, () -> SesV2Client.builder()
-                // Region and credentials come from the ECS task environment (AWS_REGION, the task role).
-                .region(new DefaultAwsRegionProviderChain().getRegion())
-                .credentialsProvider(DefaultCredentialsProvider.builder().build())
-                .overrideConfiguration(config -> config.apiCallTimeout(SES_CALL_TIMEOUT))
-                .build());
+        return mailerFor(properties, () -> SmtpTlsPolicy.verified(mailSender.getObject()), from);
     }
 
-    static IncidentMailer mailerFor(IncidentMailProperties properties, Supplier<SesV2Client> ses) {
+    static IncidentMailer mailerFor(MailProperties properties, Supplier<JavaMailSender> mailSender, String from) {
         return switch (properties.provider()) {
-            case SES -> new SesIncidentMailer(ses.get(), properties.from());
+            case SMTP -> new SmtpIncidentMailer(new SmtpMailSender(mailSender.get(), requireFrom(from)));
             case LOCAL -> new LocalIncidentMailer();
         };
+    }
+
+    /** Fails the start, not the first send: an SMTP service without a sender cannot send anything. */
+    static String requireFrom(String from) {
+        if (from == null || from.isBlank()) {
+            throw new IllegalStateException("SMTP_FROM is required with the smtp mail provider");
+        }
+        return from;
     }
 }
