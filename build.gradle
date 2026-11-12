@@ -51,7 +51,7 @@ dependencies {
 
     // --- Cryptography ---
     // Envelope encryption of the personal data in the journey session (design.md §5).
-    implementation 'software.amazon.awssdk:kms:2.31.78'
+    implementation 'software.amazon.awssdk:kms:2.57.11'
 
     // --- Mail ---
     // Incidents and verification codes go out by SMTP (SES SMTP interface), with spring.mail and the same SMTP_*
