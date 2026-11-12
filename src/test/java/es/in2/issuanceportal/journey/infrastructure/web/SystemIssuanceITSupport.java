@@ -21,6 +21,7 @@ import es.in2.issuanceportal.session.api.JourneySessions;
 import es.in2.issuanceportal.session.api.PersonalIdentifier;
 import es.in2.issuanceportal.session.api.Section;
 import es.in2.issuanceportal.session.api.SessionId;
+import es.in2.issuanceportal.shared.security.AccessTokens;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
@@ -43,6 +44,8 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -86,7 +89,9 @@ abstract class SystemIssuanceITSupport {
     static final String MEDICAL_BOARD = "Colegio de Medicos de Prueba";
     static final String SPECIALITY = "Cardiology";
     static final String ACCESS_TOKEN = "system-token-7e1d5c0a-secret";
-    static final String HOLDER_TOKEN = "holder-access-token-2b9f41c6-secret";
+    /** The holder's Access Token as the Verifier would have signed it: valid for the whole run, so the call passes the validation. */
+    static final String HOLDER_TOKEN = AccessTokens.forTenant(SANDBOX, Instant.now())
+            .claim("exp", Instant.now().plus(Duration.ofHours(2))).sign();
     static final String OFFER = "openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fissuer.test%2Foffers%2Fsecret-4d2e";
     static final String ONBOARDING_URL = "https://sandbox.wallet.test/t/ticket-fixed-3f2a9c";
 

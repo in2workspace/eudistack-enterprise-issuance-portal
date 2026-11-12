@@ -12,6 +12,7 @@ public enum ProblemCode {
     INVALID_CODE("invalid_code", "Invalid code", 400),
     EXPIRED_CODE("expired_code", "Expired code", 400),
     TOO_MANY_ATTEMPTS("too_many_attempts", "Too many attempts", 400),
+    UNAUTHENTICATED("unauthenticated", "Unauthenticated", 401),
     REQUEST_NOT_ALLOWED("request_not_allowed", "Request not allowed", 403),
     TENANT_NOT_FOUND("tenant_not_found", "Tenant not found", 404),
     STEP_NOT_ALLOWED("step_not_allowed", "Step not allowed", 409),

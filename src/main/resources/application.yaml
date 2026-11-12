@@ -94,6 +94,15 @@ issuance-portal:
     verifier-internal-url: ${PORTAL_VERIFIER_INTERNAL_URL:}
     # How long the Verifier gets to answer.
     request-timeout: 5s
+  token-validation:
+    # How the Access Token of each call is validated (design.md AD-9). The tenant's Verifier on the internal network,
+    # with its context path: the same one as system-token, so the same variable.
+    verifier-internal-url: ${PORTAL_VERIFIER_INTERNAL_URL:}
+    # A tenant's JWKS is kept this long, and reloaded when a token names a kid it does not have, at most once per
+    # reload interval (so forged tokens cannot flood the Verifier). How long the Verifier gets to answer.
+    jwks-cache-ttl: 10m
+    jwks-min-reload-interval: 5s
+    request-timeout: 5s
   issuance-api:
     # The Issuer on the internal network, with its context path, e.g. http://issuer-service:8080/issuer.
     issuer-internal-url: ${PORTAL_ISSUER_INTERNAL_URL:}
