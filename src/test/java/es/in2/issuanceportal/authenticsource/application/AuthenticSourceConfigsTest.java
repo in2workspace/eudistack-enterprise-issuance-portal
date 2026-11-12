@@ -26,7 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class AuthenticSourceConfigsTest {
 
     private static final TenantId CGCOM = new TenantId("cgcom");
-    private static final Set<IdentifierType> BOTH = Set.of(IdentifierType.DNI, IdentifierType.COLEGIADO);
+    private static final Set<IdentifierType> BOTH = Set.of(IdentifierType.PERSONAL_ID, IdentifierType.COLEGIADO);
 
     private final Map<TenantId, AuthenticSourceConfig> rows = new HashMap<>();
     private final StubAdapter simulated = StubAdapter.searchingByBoth("simulated");
@@ -81,7 +81,7 @@ class AuthenticSourceConfigsTest {
     @DisplayName("AC-13 — current_typeTheAdapterCannotSearchBy_isConfigUnavailable")
     void current_typeTheAdapterCannotSearchBy_isConfigUnavailable() {
         AuthenticSourceConfigs dniOnly = new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
-                new AdapterRegistry(List.of(new StubAdapter("simulated", Set.of(IdentifierType.DNI)))));
+                new AdapterRegistry(List.of(new StubAdapter("simulated", Set.of(IdentifierType.PERSONAL_ID)))));
         save(Set.of(), source("simulated", BOTH));
 
         assertThatThrownBy(() -> dniOnly.current(CGCOM)).isInstanceOfSatisfying(ProblemException.class,
@@ -91,7 +91,7 @@ class AuthenticSourceConfigsTest {
     @Test
     @DisplayName("AC-13 — current_sourceNotCoveringTheDoctorIdLogin_isConfigUnavailable")
     void current_sourceNotCoveringTheDoctorIdLogin_isConfigUnavailable(CapturedOutput output) {
-        save(Set.of(IdentifierType.COLEGIADO), source("simulated", Set.of(IdentifierType.DNI)));
+        save(Set.of(IdentifierType.COLEGIADO), source("simulated", Set.of(IdentifierType.PERSONAL_ID)));
 
         assertThatThrownBy(() -> configs.current(CGCOM)).isInstanceOfSatisfying(ProblemException.class,
                 e -> assertThat(e.problem()).isEqualTo(ProblemCode.CONFIG_UNAVAILABLE));

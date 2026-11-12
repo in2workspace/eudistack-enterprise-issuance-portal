@@ -91,7 +91,7 @@ class EntitlementSimulatedIT {
     @Test
     @DisplayName("AC-03, AC-04 — postEntitlement_activeByDni_confirmsAndKeepsTheDataEncrypted")
     void postEntitlement_activeByDni_confirmsAndKeepsTheDataEncrypted() throws Exception {
-        SessionId session = journeyWith(IdentifierType.DNI, "00000001R");
+        SessionId session = journeyWith(IdentifierType.PERSONAL_ID, "00000001R");
 
         mvc.perform(entitlement(session))
                 .andExpect(status().isOk())
@@ -125,7 +125,7 @@ class EntitlementSimulatedIT {
     }
 
     @ParameterizedTest
-    @CsvSource({"DNI,00000002W,not_entitled", "DNI,00000009D,not_found", "COLEGIADO,289999999,not_found",
+    @CsvSource({"PERSONAL_ID,00000002W,not_entitled", "PERSONAL_ID,00000009D,not_found", "COLEGIADO,289999999,not_found",
         "COLEGIADO,280000002,not_entitled"})
     @DisplayName("AC-07 — postEntitlement_deregisteredOrUnknown_isNotConfirmedAndTheJourneyWithdrawn")
     void postEntitlement_deregisteredOrUnknown_isNotConfirmedAndTheJourneyWithdrawn(IdentifierType type, String value,
@@ -149,7 +149,7 @@ class EntitlementSimulatedIT {
     @DisplayName("AC-09, NFR-2 — postEntitlement_slowRecord_isUnavailableWithinTheTimeout")
     void postEntitlement_slowRecord_isUnavailableWithinTheTimeout(CapturedOutput output) throws Exception {
         int before = output.getOut().length();
-        SessionId session = journeyWith(IdentifierType.DNI, "00000003A");
+        SessionId session = journeyWith(IdentifierType.PERSONAL_ID, "00000003A");
         UUID journeyId = sessions.journeyOf(SANDBOX, session).orElseThrow();
 
         long start = System.nanoTime();
@@ -173,14 +173,14 @@ class EntitlementSimulatedIT {
     void postEntitlement_everyCheck_tracedWithoutPersonalData(CapturedOutput output) throws Exception {
         int before = output.getOut().length();
 
-        mvc.perform(entitlement(journeyWith(IdentifierType.DNI, "00000001R"))).andExpect(status().isOk());
+        mvc.perform(entitlement(journeyWith(IdentifierType.PERSONAL_ID, "00000001R"))).andExpect(status().isOk());
         mvc.perform(entitlement(journeyWith(IdentifierType.COLEGIADO, "280000002"))).andExpect(status().isOk());
-        mvc.perform(entitlement(journeyWith(IdentifierType.DNI, "00000009D"))).andExpect(status().isOk());
+        mvc.perform(entitlement(journeyWith(IdentifierType.PERSONAL_ID, "00000009D"))).andExpect(status().isOk());
 
         String logged = output.getOut().substring(before);
         List<String> traces = logged.lines().filter(line -> line.contains("\"audit.authentic_source\"")).toList();
         assertThat(traces).hasSize(3);
-        assertThat(traces.get(0)).contains("\"result\":\"confirmed\"", "\"identifier_type\":\"dni\"",
+        assertThat(traces.get(0)).contains("\"result\":\"confirmed\"", "\"identifier_type\":\"personal_id\"",
                 "\"adapter\":\"simulated\"", "\"attestation_type\":\"doctorid.sd.1\"", "\"duration_ms\":");
         assertThat(traces.get(1)).contains("\"result\":\"not_confirmed\"", "\"reason\":\"not_entitled\"",
                 "\"identifier_type\":\"colegiado\"");
@@ -191,7 +191,7 @@ class EntitlementSimulatedIT {
     @Test
     @DisplayName("NFR-1 — postEntitlement_activeHolder_p95UnderThreeHundredMilliseconds")
     void postEntitlement_activeHolder_p95UnderThreeHundredMilliseconds() throws Exception {
-        SessionId session = journeyWith(IdentifierType.DNI, "00000001R");
+        SessionId session = journeyWith(IdentifierType.PERSONAL_ID, "00000001R");
         for (int i = 0; i < 20; i++) {
             mvc.perform(entitlement(session)).andExpect(status().isOk());
         }

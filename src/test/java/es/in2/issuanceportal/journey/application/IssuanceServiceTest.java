@@ -748,7 +748,7 @@ class IssuanceServiceTest {
     private SessionId identifiedJourney() {
         SessionId session = journey.start(CGCOM, Optional.empty()).session();
         sessions.write(CGCOM, session, Section.IDENTITY, new HolderIdentity("Elena", "Ruiz Prieto",
-                new PersonalIdentifier(IdentifierType.DNI, "00000001R"), "elena.token@example.test").toJson());
+                new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R"), "elena.token@example.test").toJson());
         journey.reach(CGCOM, session, JourneyProgress.Step.IDENTIFIED);
         return session;
     }
@@ -773,7 +773,7 @@ class IssuanceServiceTest {
     }
 
     private EntitlementRecord entitlement() {
-        return new EntitlementRecord(IdentifierType.DNI, CLAIMS,
+        return new EntitlementRecord(IdentifierType.PERSONAL_ID, CLAIMS,
                 new EntitlementRecord.Preview("DoctorID", List.of(), null, true), clock.instant());
     }
 

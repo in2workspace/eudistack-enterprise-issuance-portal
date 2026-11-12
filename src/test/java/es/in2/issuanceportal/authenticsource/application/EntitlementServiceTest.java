@@ -60,7 +60,7 @@ class EntitlementServiceTest {
 
     private static final TenantId CGCOM = new TenantId("cgcom");
     private static final String DOCTORID = "doctorid.sd.1";
-    private static final PersonalIdentifier ACTIVE_DNI = new PersonalIdentifier(IdentifierType.DNI, "00000001R");
+    private static final PersonalIdentifier ACTIVE_DNI = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R");
     private static final PersonalIdentifier ACTIVE_COLEGIADO =
             new PersonalIdentifier(IdentifierType.COLEGIADO, "280000001");
     private static final List<AttributeMapping> MAPPING = List.of(
@@ -90,7 +90,7 @@ class EntitlementServiceTest {
                     "medical_boards", List.of("Madrid"),
                     "entitled_to_practise", true)));
         }
-        PersonalIdentifier deregistered = new PersonalIdentifier(IdentifierType.DNI, "00000002W");
+        PersonalIdentifier deregistered = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000002W");
         if (searched.sameAs(deregistered)) {
             return LookupResult.found(new SourceRecord(List.of(deregistered,
                     new PersonalIdentifier(IdentifierType.COLEGIADO, "280000002")), false, Map.of()));
@@ -106,7 +106,7 @@ class EntitlementServiceTest {
     private void configure(Duration timeout) {
         rows.put(CGCOM, new AuthenticSourceConfig(DOCTORID, Set.of(IdentifierType.COLEGIADO), Map.of(DOCTORID,
                 new SourceSettings("DoctorID", "simulated", null, null, timeout,
-                        Set.of(IdentifierType.DNI, IdentifierType.COLEGIADO), MAPPING, "email", null))));
+                        Set.of(IdentifierType.PERSONAL_ID, IdentifierType.COLEGIADO), MAPPING, "email", null))));
     }
 
     private SessionId journeyWith(es.in2.issuanceportal.session.api.IdentifierType type, String value,
@@ -119,7 +119,7 @@ class EntitlementServiceTest {
     }
 
     private SessionId journeyWithDni(String dni) {
-        return journeyWith(es.in2.issuanceportal.session.api.IdentifierType.DNI, dni, null);
+        return journeyWith(es.in2.issuanceportal.session.api.IdentifierType.PERSONAL_ID, dni, null);
     }
 
     private Journey stored(UUID id) {
@@ -147,7 +147,7 @@ class EntitlementServiceTest {
         assertThat(preview.emailRequired()).isTrue();
         EntitlementRecord written = EntitlementRecord.fromJson(
                 sessions.read(CGCOM, session, Section.ENTITLEMENT).orElseThrow());
-        assertThat(written.identifierTypeIfSearched()).contains(es.in2.issuanceportal.session.api.IdentifierType.DNI);
+        assertThat(written.identifierTypeIfSearched()).contains(es.in2.issuanceportal.session.api.IdentifierType.PERSONAL_ID);
         assertThat(written.claims()).containsOnlyKeys("personal_administrative_number", "medical_board",
                 "legally_entitled");
         assertThat(written.checkedAt()).isEqualTo(clock.instant());
@@ -164,7 +164,7 @@ class EntitlementServiceTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"dni,00000002W,NOT_ENTITLED", "dni,00000009Y,NOT_FOUND", "colegiado,289999999,NOT_FOUND"})
+    @CsvSource({"personal_id,00000002W,NOT_ENTITLED", "personal_id,00000009Y,NOT_FOUND", "colegiado,289999999,NOT_FOUND"})
     @DisplayName("AC-07 — check_deregisteredOrUnknown_isNotConfirmedAndWithdrawsTheJourney")
     void check_deregisteredOrUnknown_isNotConfirmedAndWithdrawsTheJourney(String type, String value,
                                                                          NotConfirmedReason reason) {
@@ -185,7 +185,7 @@ class EntitlementServiceTest {
     @DisplayName("AC-08 — check_sourceReturnsAnotherPerson_isIdentifierMismatchAndWithdraws")
     void check_sourceReturnsAnotherPerson_isIdentifierMismatchAndWithdraws() {
         adapter.answering(searched -> LookupResult.found(new SourceRecord(
-                List.of(new PersonalIdentifier(IdentifierType.DNI, "00000003A")), true, Map.of())));
+                List.of(new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000003A")), true, Map.of())));
         SessionId session = journeyWithDni("00000001R");
         UUID id = journeyId(session);
 
@@ -249,7 +249,7 @@ class EntitlementServiceTest {
     @Test
     @DisplayName("AC-10 — check_attestationTypeWithoutSource_confirmsWithoutData")
     void check_attestationTypeWithoutSource_confirmsWithoutData() {
-        SessionId session = journeyWith(es.in2.issuanceportal.session.api.IdentifierType.DNI, "00000001R",
+        SessionId session = journeyWith(es.in2.issuanceportal.session.api.IdentifierType.PERSONAL_ID, "00000001R",
                 "lucia@example.org");
         rows.put(CGCOM, new AuthenticSourceConfig("employee.sd.1", Set.of(), Map.of()));
 
@@ -330,7 +330,7 @@ class EntitlementServiceTest {
             assertThat(event.journeyId()).isEqualTo(id);
             assertThat(event.attestationType()).isEqualTo(DOCTORID);
             assertThat(event.adapter()).isEqualTo("simulated");
-            assertThat(event.identifierType()).isEqualTo(IdentifierType.DNI);
+            assertThat(event.identifierType()).isEqualTo(IdentifierType.PERSONAL_ID);
             assertThat(event.result()).isEqualTo(AuthenticSourceAuditTrail.Result.CONFIRMED);
             assertThat(event.reason()).isEmpty();
             assertThat(event.duration().isNegative()).isFalse();
@@ -343,7 +343,7 @@ class EntitlementServiceTest {
     @DisplayName("AC-08, AC-11 — check_identifierMismatch_tracesTheDetailedReason")
     void check_identifierMismatch_tracesTheDetailedReason() {
         adapter.answering(searched -> LookupResult.found(new SourceRecord(
-                List.of(new PersonalIdentifier(IdentifierType.DNI, "00000003A")), true, Map.of())));
+                List.of(new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000003A")), true, Map.of())));
         SessionId session = journeyWithDni("00000001R");
 
         service.check(CGCOM, session);
@@ -462,7 +462,7 @@ class EntitlementServiceTest {
     void check_identityTypeTheSourceIsNotSearchedBy_isConfigUnavailable() {
         SessionId session = journeyWith(es.in2.issuanceportal.session.api.IdentifierType.COLEGIADO, "280000001", null);
         rows.put(CGCOM, new AuthenticSourceConfig(DOCTORID, Set.of(), Map.of(DOCTORID,
-                new SourceSettings("DoctorID", "simulated", null, null, null, Set.of(IdentifierType.DNI), MAPPING,
+                new SourceSettings("DoctorID", "simulated", null, null, null, Set.of(IdentifierType.PERSONAL_ID), MAPPING,
                         null, null))));
 
         assertThatThrownBy(() -> service.check(CGCOM, session)).isInstanceOfSatisfying(ProblemException.class,

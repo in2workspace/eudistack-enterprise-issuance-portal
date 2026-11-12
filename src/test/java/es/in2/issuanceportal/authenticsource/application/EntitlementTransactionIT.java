@@ -49,7 +49,7 @@ class EntitlementTransactionIT {
 
     private static final TenantId SANDBOX = new TenantId("sandbox");
     private static final String DOCTORID = "doctorid.sd.1";
-    private static final PersonalIdentifier ACTIVE = new PersonalIdentifier(IdentifierType.DNI, "00000001R");
+    private static final PersonalIdentifier ACTIVE = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R");
 
     @Autowired
     private JourneyService journey;
@@ -93,7 +93,7 @@ class EntitlementTransactionIT {
 
     private EntitlementService serviceWith(JourneyProgress progress) {
         AuthenticSourceConfig config = new AuthenticSourceConfig(DOCTORID, Set.of(), Map.of(DOCTORID,
-                new SourceSettings("DoctorID", "stub", null, null, null, Set.of(IdentifierType.DNI), List.of(), null,
+                new SourceSettings("DoctorID", "stub", null, null, null, Set.of(IdentifierType.PERSONAL_ID), List.of(), null,
                         null)));
         service = new EntitlementService(journey, progress, journey, sessions,
                 new AuthenticSourceConfigs(tenant -> Optional.of(config), new AdapterRegistry(List.of(adapter))),
@@ -105,7 +105,7 @@ class EntitlementTransactionIT {
         SessionId session = journey.start(SANDBOX, Optional.empty()).session();
         sessions.write(SANDBOX, session, Section.IDENTITY, new HolderIdentity("Lucía", "Prueba",
                 new es.in2.issuanceportal.session.api.PersonalIdentifier(
-                        es.in2.issuanceportal.session.api.IdentifierType.DNI, "00000001R"), null).toJson());
+                        es.in2.issuanceportal.session.api.IdentifierType.PERSONAL_ID, "00000001R"), null).toJson());
         return session;
     }
 

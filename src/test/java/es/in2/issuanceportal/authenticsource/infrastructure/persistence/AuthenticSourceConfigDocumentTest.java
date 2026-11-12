@@ -14,8 +14,8 @@ class AuthenticSourceConfigDocumentTest {
 
     private static AuthenticSourceConfigDocument.SourceDocument source(List<AuthenticSourceConfigDocument.MappingDocument> mapping) {
         return new AuthenticSourceConfigDocument.SourceDocument("DoctorID", "simulated",
-                "https://registro.example.org/api", "eudistack/stg/cgcom/registro", 10, List.of("dni"), mapping,
-                null, Map.of("records", List.of(Map.of("dni", "00000001R"))));
+                "https://registro.example.org/api", "eudistack/stg/cgcom/registro", 10, List.of("personal_id"), mapping,
+                null, Map.of("records", List.of(Map.of("personal_id", "00000001R"))));
     }
 
     @Test

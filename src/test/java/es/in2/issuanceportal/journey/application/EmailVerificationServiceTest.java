@@ -735,14 +735,14 @@ class EmailVerificationServiceTest {
     private SessionId identifiedJourney() {
         SessionId session = journey.start(CGCOM, Optional.empty()).session();
         sessions.write(CGCOM, session, Section.IDENTITY, new HolderIdentity("Elena", "Ruiz Prieto",
-                new PersonalIdentifier(IdentifierType.DNI, "00000001R"), "elena.token@example.test").toJson());
+                new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R"), "elena.token@example.test").toJson());
         journey.reach(CGCOM, session, JourneyProgress.Step.IDENTIFIED);
         return session;
     }
 
     private SessionId entitledJourney() {
         SessionId session = identifiedJourney();
-        sessions.write(CGCOM, session, Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.DNI,
+        sessions.write(CGCOM, session, Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.PERSONAL_ID,
                 Map.of("legally_entitled", true),
                 new EntitlementRecord.Preview("DoctorID", List.of(), null, true), clock.instant()).toJson());
         journey.reach(CGCOM, session, JourneyProgress.Step.ENTITLEMENT_CONFIRMED);

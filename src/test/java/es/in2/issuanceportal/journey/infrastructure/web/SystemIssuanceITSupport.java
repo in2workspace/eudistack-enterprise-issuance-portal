@@ -288,7 +288,7 @@ abstract class SystemIssuanceITSupport {
     SessionId identifiedJourney() throws Exception {
         SessionId session = startedJourney();
         sessions.write(SANDBOX, session, Section.IDENTITY, new HolderIdentity(GIVEN_NAME, FAMILY_NAME,
-                new PersonalIdentifier(IdentifierType.DNI, DNI), TOKEN_EMAIL).toJson());
+                new PersonalIdentifier(IdentifierType.PERSONAL_ID, DNI), TOKEN_EMAIL).toJson());
         progress.reach(SANDBOX, session, JourneyProgress.Step.IDENTIFIED);
         return session;
     }
@@ -307,7 +307,7 @@ abstract class SystemIssuanceITSupport {
     /** What Identification and Authentic source leave in the journey before the holder verifies the email. */
     SessionId entitledJourneyWithoutEmail() throws Exception {
         SessionId session = identifiedJourney();
-        sessions.write(SANDBOX, session, Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.DNI, Map.of(
+        sessions.write(SANDBOX, session, Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.PERSONAL_ID, Map.of(
                 "personal_administrative_number", ADMINISTRATIVE_NUMBER,
                 "medical_board", List.of(MEDICAL_BOARD),
                 "medical_speciality", List.of(SPECIALITY),

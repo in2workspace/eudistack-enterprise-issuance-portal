@@ -22,12 +22,12 @@ import java.util.Set;
 
 /**
  * A source with synthetic people, read from the tenant's configuration (design.md AD-3), so the journey
- * can be built and tested before the tenant's real source is available. Each record is found by its DNI
- * or NIE and by its registration number. A record can be made slow or failing to try the unavailable
+ * can be built and tested before the tenant's real source is available. Each record is found by its personal
+ * identifier and by its registration number. A record can be made slow or failing to try the unavailable
  * source. Never registered in production (AuthenticSourceConfiguration).
  *
  * <p>{@code settings.records} of the tenant's source:
- * {@code [{"dni", "colegiado", "entitled", "attributes": {...}, "delay_seconds", "fail"}]}.
+ * {@code [{"personal_id", "colegiado", "entitled", "attributes": {...}, "delay_seconds", "fail"}]}.
  */
 @Component
 class SimulatedAuthenticSourceAdapter implements AuthenticSourceAdapter {
@@ -49,7 +49,7 @@ class SimulatedAuthenticSourceAdapter implements AuthenticSourceAdapter {
 
     @Override
     public Set<IdentifierType> supportedIdentifierTypes() {
-        return Set.of(IdentifierType.DNI, IdentifierType.COLEGIADO);
+        return Set.of(IdentifierType.PERSONAL_ID, IdentifierType.COLEGIADO);
     }
 
     @Override
@@ -105,7 +105,7 @@ class SimulatedAuthenticSourceAdapter implements AuthenticSourceAdapter {
 
     /** One synthetic person. Its text form carries no data. */
     @JsonIgnoreProperties(ignoreUnknown = true)
-    record SimulatedRecord(@JsonProperty("dni") String dni,
+    record SimulatedRecord(@JsonProperty("personal_id") String personalId,
                            @JsonProperty("colegiado") String colegiado,
                            @JsonProperty("entitled") boolean entitled,
                            @JsonProperty("attributes") Map<String, Object> attributes,
@@ -114,8 +114,8 @@ class SimulatedAuthenticSourceAdapter implements AuthenticSourceAdapter {
 
         SourceRecord toSourceRecord() {
             List<PersonalIdentifier> identifiers = new ArrayList<>();
-            if (dni != null && !dni.isBlank()) {
-                identifiers.add(new PersonalIdentifier(IdentifierType.DNI, dni));
+            if (personalId != null && !personalId.isBlank()) {
+                identifiers.add(new PersonalIdentifier(IdentifierType.PERSONAL_ID, personalId));
             }
             if (colegiado != null && !colegiado.isBlank()) {
                 identifiers.add(new PersonalIdentifier(IdentifierType.COLEGIADO, colegiado));

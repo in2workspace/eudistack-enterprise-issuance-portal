@@ -44,13 +44,13 @@ class JdbcAuthenticSourceConfigRepositoryIT {
                   "type_name": "DoctorID",
                   "adapter": "simulated",
                   "timeout_seconds": 5,
-                  "identifier_types": ["dni", "colegiado"],
+                  "identifier_types": ["personal_id", "colegiado"],
                   "mapping": [
                     {"attribute": "registration_number", "claim": "personal_administrative_number", "label": "Número de colegiado"},
                     {"attribute": "entitled", "claim": "legally_entitled"}
                   ],
                   "email_attribute": "email",
-                  "settings": {"records": [{"dni": "00000001R"}]}
+                  "settings": {"records": [{"personal_id": "00000001R"}]}
                 }
               }
             }""";
@@ -83,14 +83,14 @@ class JdbcAuthenticSourceConfigRepositoryIT {
         AuthenticSourceConfig config = repository.find(SANDBOX).orElseThrow();
         SourceSettings source = config.source().orElseThrow();
 
-        assertThat(config.loginIdentifierTypes()).containsExactlyInAnyOrder(IdentifierType.DNI, IdentifierType.COLEGIADO);
+        assertThat(config.loginIdentifierTypes()).containsExactlyInAnyOrder(IdentifierType.PERSONAL_ID, IdentifierType.COLEGIADO);
         assertThat(source.adapter()).isEqualTo("simulated");
         assertThat(source.timeout()).isEqualTo(Duration.ofSeconds(5));
-        assertThat(source.identifierTypes()).containsExactlyInAnyOrder(IdentifierType.DNI, IdentifierType.COLEGIADO);
+        assertThat(source.identifierTypes()).containsExactlyInAnyOrder(IdentifierType.PERSONAL_ID, IdentifierType.COLEGIADO);
         assertThat(source.mapping()).hasSize(2);
         assertThat(source.mapping().get(1).shown()).isFalse();
         assertThat(source.emailAttribute()).isEqualTo("email");
-        assertThat(source.adapterSettings()).containsEntry("records", List.of(Map.of("dni", "00000001R")));
+        assertThat(source.adapterSettings()).containsEntry("records", List.of(Map.of("personal_id", "00000001R")));
     }
 
     @Test
@@ -121,7 +121,7 @@ class JdbcAuthenticSourceConfigRepositoryIT {
     @Test
     @DisplayName("ES-03 — find_unknownIdentifierType_returnsEmpty")
     void find_unknownIdentifierType_returnsEmpty() {
-        save(SANDBOX, VALID.replace("[\"dni\", \"colegiado\"]", "[\"dni\", \"nif\"]"));
+        save(SANDBOX, VALID.replace("[\"personal_id\", \"colegiado\"]", "[\"personal_id\", \"nif\"]"));
 
         assertThat(repository.find(SANDBOX)).isEmpty();
     }

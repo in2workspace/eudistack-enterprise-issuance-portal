@@ -15,7 +15,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SourceSettingsTest {
 
-    private static final Set<IdentifierType> BOTH = Set.of(IdentifierType.DNI, IdentifierType.COLEGIADO);
+    private static final Set<IdentifierType> BOTH = Set.of(IdentifierType.PERSONAL_ID, IdentifierType.COLEGIADO);
     private static final List<AttributeMapping> MAPPING =
             List.of(new AttributeMapping("registration_number", "personal_administrative_number", "Número de colegiado"));
 
@@ -75,7 +75,7 @@ class SourceSettingsTest {
         AuthenticSourceConfig config = new AuthenticSourceConfig("doctorid.sd.1", Set.of(IdentifierType.COLEGIADO),
                 Map.of());
 
-        assertThat(config.loginIdentifierTypes()).containsExactlyInAnyOrder(IdentifierType.DNI, IdentifierType.COLEGIADO);
+        assertThat(config.loginIdentifierTypes()).containsExactlyInAnyOrder(IdentifierType.PERSONAL_ID, IdentifierType.COLEGIADO);
         assertThat(config.source()).isEmpty();
     }
 }

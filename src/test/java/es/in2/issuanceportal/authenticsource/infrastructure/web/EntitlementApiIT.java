@@ -47,7 +47,7 @@ class EntitlementApiIT {
     private static final String CONTEXT = "/issuance-portal";
     private static final String SANDBOX_HOST = "sandbox.127.0.0.1.nip.io";
     private static final TenantId SANDBOX = new TenantId("sandbox");
-    private static final PersonalIdentifier ACTIVE = new PersonalIdentifier(IdentifierType.DNI, "00000001R");
+    private static final PersonalIdentifier ACTIVE = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R");
 
     @TestConfiguration
     static class StubSource {
@@ -75,7 +75,7 @@ class EntitlementApiIT {
                 .param("config", """
                         {"attestation_type": "doctorid.sd.1",
                          "authentic_source": {"doctorid.sd.1": {
-                           "type_name": "DoctorID", "adapter": "stub", "identifier_types": ["dni", "colegiado"],
+                           "type_name": "DoctorID", "adapter": "stub", "identifier_types": ["personal_id", "colegiado"],
                            "mapping": [{"attribute": "registration_number", "claim": "personal_administrative_number",
                                         "label": "Número de colegiado"}]}}}""")
                 .update();
@@ -97,7 +97,7 @@ class EntitlementApiIT {
 
         mvc.perform(entitlement(session)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"personal_identifier\":\"00000002W\",\"dni\":\"00000002W\","
+                        .content("{\"personal_identifier\":\"00000002W\",\"personal_id\":\"00000002W\","
                                 + "\"personal_administrative_number\":\"00000002W\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result").value("confirmed"))
@@ -176,7 +176,7 @@ class EntitlementApiIT {
         SessionId session = start();
         sessions.write(SANDBOX, session, Section.IDENTITY, new HolderIdentity("Lucía", "Prueba",
                 new es.in2.issuanceportal.session.api.PersonalIdentifier(
-                        es.in2.issuanceportal.session.api.IdentifierType.DNI, dni), null).toJson());
+                        es.in2.issuanceportal.session.api.IdentifierType.PERSONAL_ID, dni), null).toJson());
         return session;
     }
 

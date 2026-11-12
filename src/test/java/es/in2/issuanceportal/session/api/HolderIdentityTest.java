@@ -13,12 +13,12 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class HolderIdentityTest {
 
     private static final HolderIdentity IDENTITY = new HolderIdentity("Lucía", "Prueba Sintética",
-            new PersonalIdentifier(IdentifierType.DNI, "00000001R"), "lucia@example.org");
+            new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R"), "lucia@example.org");
 
     @Test
     void toJson_identity_usesTheContractNames() {
         assertThat(IDENTITY.toJson()).isEqualTo("{\"given_name\":\"Lucía\",\"family_name\":\"Prueba Sintética\","
-                + "\"personal_identifier\":{\"type\":\"dni\",\"value\":\"00000001R\"},"
+                + "\"personal_identifier\":{\"type\":\"personal_id\",\"value\":\"00000001R\"},"
                 + "\"email\":\"lucia@example.org\"}");
     }
 
@@ -40,20 +40,20 @@ class HolderIdentityTest {
     @Test
     void toJson_withoutEmail_leavesItOut() {
         HolderIdentity identity = new HolderIdentity("Lucía", "Prueba",
-                new PersonalIdentifier(IdentifierType.DNI, "00000001R"), " ");
+                new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R"), " ");
 
         assertThat(identity.toJson()).doesNotContain("email");
     }
 
     @ParameterizedTest
     @CsvSource(delimiter = '|', value = {
-        "{\"family_name\":\"P\",\"personal_identifier\":{\"type\":\"dni\",\"value\":\"1\"}}|given_name",
-        "{\"given_name\":\"L\",\"family_name\":\" \",\"personal_identifier\":{\"type\":\"dni\",\"value\":\"1\"}}"
+        "{\"family_name\":\"P\",\"personal_identifier\":{\"type\":\"personal_id\",\"value\":\"1\"}}|given_name",
+        "{\"given_name\":\"L\",\"family_name\":\" \",\"personal_identifier\":{\"type\":\"personal_id\",\"value\":\"1\"}}"
                 + "|family_name",
         "{\"given_name\":\"L\",\"family_name\":\"P\"}|personal_identifier",
         "{\"given_name\":\"L\",\"family_name\":\"P\",\"personal_identifier\":{\"type\":\"nif\",\"value\":\"1\"}}"
                 + "|personal_identifier.type",
-        "{\"given_name\":\"L\",\"family_name\":\"P\",\"personal_identifier\":{\"type\":\"dni\",\"value\":\"\"}}"
+        "{\"given_name\":\"L\",\"family_name\":\"P\",\"personal_identifier\":{\"type\":\"personal_id\",\"value\":\"\"}}"
                 + "|personal_identifier.value",
         "{\"given_name\":\"L\",\"family_name\":\"P\",\"personal_identifier\":\"00000001R\"}|personal_identifier",
         "not json|$"
@@ -75,7 +75,7 @@ class HolderIdentityTest {
     @Test
     void toString_identity_hidesPersonalData() {
         assertThat(IDENTITY.toString())
-                .contains("dni")
+                .contains("personal_id")
                 .doesNotContain("00000001R", "Lucía", "Prueba", "lucia@example.org");
     }
 
@@ -88,10 +88,10 @@ class HolderIdentityTest {
     @Test
     void toString_jsonDocuments_hidePersonalData() {
         HolderIdentity.Document document = new HolderIdentity.Document("Lucía", "Prueba",
-                new HolderIdentity.IdentifierDocument("dni", "00000001R"), "lucia@example.org");
+                new HolderIdentity.IdentifierDocument("personal_id", "00000001R"), "lucia@example.org");
 
         assertThat(document + " " + document.personalIdentifier())
-                .contains("dni")
+                .contains("personal_id")
                 .doesNotContain("Lucía", "Prueba", "00000001R", "lucia@example.org");
     }
 }

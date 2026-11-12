@@ -810,7 +810,7 @@ class ConfirmationApiIT {
         SessionId session = startedJourney();
         sessions.write(SANDBOX, session, Section.IDENTITY, identity());
         progress.reach(SANDBOX, session, JourneyProgress.Step.IDENTIFIED);
-        sessions.write(SANDBOX, session, Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.DNI, Map.of(
+        sessions.write(SANDBOX, session, Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.PERSONAL_ID, Map.of(
                 "personal_administrative_number", ADMINISTRATIVE_NUMBER,
                 "medical_board", List.of("Colegio de Medicos de Prueba"),
                 "medical_speciality", List.of("Cardiology"),
@@ -821,7 +821,7 @@ class ConfirmationApiIT {
     }
 
     private static String identity() {
-        return new HolderIdentity(GIVEN_NAME, FAMILY_NAME, new PersonalIdentifier(IdentifierType.DNI, DNI),
+        return new HolderIdentity(GIVEN_NAME, FAMILY_NAME, new PersonalIdentifier(IdentifierType.PERSONAL_ID, DNI),
                 "elena.token@example.test").toJson();
     }
 

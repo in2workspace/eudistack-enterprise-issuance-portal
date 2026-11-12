@@ -739,7 +739,7 @@ class EmailVerificationApiIT {
     private SessionId identifiedJourney() throws Exception {
         SessionId session = startedJourney();
         sessions.write(SANDBOX, session, Section.IDENTITY, new HolderIdentity("Elena", "Ruiz Prieto",
-                new PersonalIdentifier(IdentifierType.DNI, "00000001R"), "elena.token@example.test").toJson());
+                new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R"), "elena.token@example.test").toJson());
         progress.reach(SANDBOX, session, JourneyProgress.Step.IDENTIFIED);
         return session;
     }
@@ -747,7 +747,7 @@ class EmailVerificationApiIT {
     /** What Identification and Authentic source leave in the journey before the holder reaches Data. */
     private SessionId entitledJourney() throws Exception {
         SessionId session = identifiedJourney();
-        sessions.write(SANDBOX, session, Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.DNI,
+        sessions.write(SANDBOX, session, Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.PERSONAL_ID,
                 Map.of("legally_entitled", true),
                 new EntitlementRecord.Preview("DoctorID", List.of(), null, true), clock.instant()).toJson());
         progress.reach(SANDBOX, session, JourneyProgress.Step.ENTITLEMENT_CONFIRMED);

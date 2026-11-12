@@ -266,7 +266,7 @@ public class EntitlementService implements AutoCloseable {
 
     private static PersonalIdentifier toDomain(HolderIdentity identity) {
         IdentifierType type = switch (identity.personalIdentifier().type()) {
-            case DNI -> IdentifierType.DNI;
+            case PERSONAL_ID -> IdentifierType.PERSONAL_ID;
             case COLEGIADO -> IdentifierType.COLEGIADO;
         };
         return new PersonalIdentifier(type, identity.personalIdentifier().value());
