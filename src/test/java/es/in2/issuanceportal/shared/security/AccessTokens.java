@@ -40,6 +40,7 @@ public final class AccessTokens {
     private AccessTokens(TenantId tenant, Instant now) {
         claims.put("iss", issuerOf(tenant));
         claims.put("sub", "holder-" + UUID.randomUUID());
+        claims.put("jti", UUID.randomUUID().toString());
         claims.put("aud", List.of(clientOf(tenant)));
         claims.put("tenant", tenant.value());
         claims.put("acr", ACR_HIGH);

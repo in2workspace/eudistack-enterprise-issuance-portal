@@ -1,6 +1,7 @@
 package es.in2.issuanceportal.shared.security;
 
 import com.nimbusds.jose.KeySourceException;
+import com.nimbusds.jose.jwk.source.RateLimitReachedException;
 import es.in2.issuanceportal.session.api.IdentifierType;
 import es.in2.issuanceportal.shared.error.ProblemCode;
 import es.in2.issuanceportal.shared.error.ProblemException;
@@ -53,8 +54,10 @@ class TenantTokenAuthenticator implements AuthenticationManagerResolver<HttpServ
     }
 
     private Authentication authenticate(TenantId tenant, BearerTokenAuthenticationToken bearer) {
-        LoginSettings settings = settingsOf(tenant);
+        // The token is judged first: a bogus bearer must not learn the state of the tenant's configuration, nor
+        // leave a warning in the log for each call.
         Jwt jwt = decode(tenant, bearer.getToken());
+        LoginSettings settings = settingsOf(tenant);
         List<String> audience = jwt.getAudience();
         if (audience == null || !audience.contains(settings.portalClientId())) {
             throw invalid("aud");
@@ -93,7 +96,11 @@ class TenantTokenAuthenticator implements AuthenticationManagerResolver<HttpServ
         } catch (BadJwtException e) {
             throw invalid(e.getClass().getSimpleName());
         } catch (JwtException e) {
-            if (causedByKeySource(e)) {
+            // A kid the cache does not have, inside the reload window: the key is not there to be found yet.
+            if (causedBy(e, RateLimitReachedException.class)) {
+                throw invalid(RateLimitReachedException.class.getSimpleName());
+            }
+            if (causedBy(e, KeySourceException.class)) {
                 log.warn("The keys of the Verifier of tenant {} are not available to validate a token", tenant);
                 throw new TokenUnavailableException(ProblemCode.SERVICE_UNAVAILABLE);
             }
@@ -116,9 +123,9 @@ class TenantTokenAuthenticator implements AuthenticationManagerResolver<HttpServ
                 credentialType, methods, type);
     }
 
-    private static boolean causedByKeySource(Throwable e) {
+    private static boolean causedBy(Throwable e, Class<? extends Throwable> type) {
         for (Throwable cause = e; cause != null; cause = cause.getCause() == cause ? null : cause.getCause()) {
-            if (cause instanceof KeySourceException) {
+            if (type.isInstance(cause)) {
                 return true;
             }
         }

@@ -197,6 +197,16 @@ class AccessTokenApiIT {
                 new Rejected("acr substantial", now -> AccessTokens.forTenant(sandbox, now)
                         .claim("acr", AccessTokens.ACR_SUBSTANTIAL).sign()),
                 new Rejected("without acr", now -> AccessTokens.forTenant(sandbox, now).without("acr").sign()),
+                new Rejected("ID token shape: no jti", now -> AccessTokens.forTenant(sandbox, now).without("jti").sign()),
+                new Rejected("ID token shape: no jti, no tenant, with nonce and auth_time", now -> AccessTokens
+                        .forTenant(sandbox, now).without("jti").without("tenant").claim("nonce", "n-0S6_WzA2Mj")
+                        .claim("auth_time", now.minusSeconds(5)).sign()),
+                new Rejected("with a jti but also a nonce", now -> AccessTokens.forTenant(sandbox, now)
+                        .claim("nonce", "n-0S6_WzA2Mj").sign()),
+                new Rejected("with a jti but also auth_time", now -> AccessTokens.forTenant(sandbox, now)
+                        .claim("auth_time", now.minusSeconds(5)).sign()),
+                new Rejected("without exp", now -> AccessTokens.forTenant(sandbox, now).without("exp").sign()),
+                new Rejected("without iat", now -> AccessTokens.forTenant(sandbox, now).without("iat").sign()),
                 new Rejected("not a JWT", now -> "not-a-token"));
     }
 
@@ -423,6 +433,51 @@ class AccessTokenApiIT {
         // Another tenant is not affected.
         mvc.perform(request(Endpoint.GET_JOURNEY, KPMG_HOST, AccessTokens.forTenant(KPMG, Instant.now()).sign()))
                 .andExpect(status().isGone());
+    }
+
+    @Test
+    @DisplayName("ES-02 — tenantWithoutPortalClientId_invalidToken_returns401WithoutWarning")
+    void tenantWithoutPortalClientId_invalidToken_returns401WithoutWarning() throws Exception {
+        save(SANDBOX, configJson("sandbox", false));
+
+        for (String token : List.of("not-a-token",
+                AccessTokens.forTenant(SANDBOX, Instant.now()).signedWith(VerifierFixture.newKey(VerifierFixture.KEY_ID))
+                        .sign(),
+                AccessTokens.forTenant(SANDBOX, Instant.now()).without("jti").sign())) {
+            mvc.perform(request(Endpoint.POST_JOURNEY, SANDBOX_HOST, token))
+                    .andExpect(status().isUnauthorized())
+                    .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, CHALLENGE_INVALID))
+                    .andExpect(jsonPath("$.type").value("unauthenticated"));
+        }
+
+        assertThat(warnings()).noneMatch(line -> line.contains("portal_client_id"));
+    }
+
+    @Test
+    @DisplayName("ES-01 — jwksUriWithAnotherHostInItsPath_returns503AndNoKeysAreRead")
+    void jwksUriWithAnotherHostInItsPath_returns503AndNoKeysAreRead() throws Exception {
+        for (String jwksUri : List.of("@evil.example/keys", "oidc/jwks", "//evil.example//keys", "")) {
+            decoders.invalidate(SANDBOX);
+            VerifierFixture.wire().stubFor(get(urlPathEqualTo(VerifierFixture.DISCOVERY_PATH))
+                    .willReturn(aResponse().withBody("{\"jwks_uri\":\"" + jwksUri + "\"}")));
+
+            mvc.perform(probe(AccessTokens.forTenant(SANDBOX, Instant.now()).sign()))
+                    .andExpect(status().isServiceUnavailable())
+                    .andExpect(jsonPath("$.type").value("service_unavailable"));
+        }
+
+        verifyJwksReads(0);
+    }
+
+    @Test
+    @DisplayName("ES-01 — jwksUriOfAnotherHost_onlyItsPathIsReadFromTheInternalAddress")
+    void jwksUriOfAnotherHost_onlyItsPathIsReadFromTheInternalAddress() throws Exception {
+        VerifierFixture.wire().stubFor(get(urlPathEqualTo(VerifierFixture.DISCOVERY_PATH)).willReturn(aResponse()
+                .withBody("{\"jwks_uri\":\"https://evil.example" + VerifierFixture.JWKS_PATH + "\"}")));
+
+        mvc.perform(probe(AccessTokens.forTenant(SANDBOX, Instant.now()).sign())).andExpect(status().isOk());
+
+        verifyJwksReads(1);
     }
 
     @Test

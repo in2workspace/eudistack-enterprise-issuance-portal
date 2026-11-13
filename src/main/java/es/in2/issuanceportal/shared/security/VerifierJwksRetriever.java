@@ -12,6 +12,7 @@ import org.springframework.web.client.RestClientException;
 import java.io.IOException;
 import java.net.MalformedURLException;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
 
 /**
@@ -19,8 +20,9 @@ import java.net.URL;
  * points to. Both go over the internal network with the tenant and its public host as headers, as the system token
  * does, so the Verifier answers as the tenant's public origin.
  *
- * <p>Only the <em>path</em> of the discovery's {@code jwks_uri} is used: its host is the public one, and the document
- * cannot send the portal to another host.
+ * <p>Only the <em>path</em> of the discovery's {@code jwks_uri} is used: its host is the public one. The path must
+ * start with {@code /} and the URL is built on the configured internal origin and checked to keep its host and port,
+ * so the document cannot send the portal to another host (for example with {@code @evil.example/keys}).
  */
 final class VerifierJwksRetriever implements ResourceRetriever {
 
@@ -58,13 +60,24 @@ final class VerifierJwksRetriever implements ResourceRetriever {
             if (!jwksUri.isTextual()) {
                 throw new IOException("The discovery document has no jwks_uri");
             }
-            URI internal = URI.create(internalUrl);
-            String origin = internal.getScheme() + "://" + internal.getRawAuthority();
-            return new Resource(get(origin + URI.create(jwksUri.asText()).getRawPath()), "application/json");
-        } catch (RestClientException | IllegalArgumentException e) {
+            return new Resource(get(jwksUrl(jwksUri.asText()).toString()), "application/json");
+        } catch (RestClientException | IllegalArgumentException | URISyntaxException e) {
             // The message may carry the URL or the body of the answer: keep the kind of failure only.
             throw new IOException("The Verifier did not give its keys: " + e.getClass().getSimpleName());
         }
+    }
+
+    private URI jwksUrl(String jwksUri) throws URISyntaxException, IOException {
+        String path = URI.create(jwksUri).getPath();
+        if (path == null || !path.startsWith("/") || path.startsWith("//")) {
+            throw new IOException("The jwks_uri of the discovery has no absolute path");
+        }
+        URI internal = URI.create(internalUrl);
+        URI url = new URI(internal.getScheme(), internal.getRawAuthority(), path, null, null);
+        if (!internal.getHost().equals(url.getHost()) || internal.getPort() != url.getPort()) {
+            throw new IOException("The jwks_uri of the discovery leaves the internal address");
+        }
+        return url;
     }
 
     private String get(String url) {
