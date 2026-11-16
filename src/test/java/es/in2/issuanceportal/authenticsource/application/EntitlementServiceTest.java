@@ -4,6 +4,7 @@ import es.in2.issuanceportal.MutableClock;
 import es.in2.issuanceportal.authenticsource.RecordingAuthenticSourceAuditTrail;
 import es.in2.issuanceportal.authenticsource.StubAdapter;
 import es.in2.issuanceportal.authenticsource.application.port.AuthenticSourceAuditTrail;
+import es.in2.issuanceportal.authenticsource.application.port.DisputeNotSupportedException;
 import es.in2.issuanceportal.authenticsource.domain.AttestationPreview;
 import es.in2.issuanceportal.authenticsource.domain.Holder;
 import es.in2.issuanceportal.authenticsource.domain.IdentifierType;
@@ -558,8 +559,16 @@ class EntitlementServiceTest {
         EntitlementService failingTrail = new EntitlementService(journey, journey, journey, sessions,
                 new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
                         new AdapterRegistry(List.of(adapter))),
-                (tenant, event) -> {
-                    throw new IllegalStateException("log sink down");
+                new AuthenticSourceAuditTrail() {
+                    @Override
+                    public void append(TenantId tenant, Event event) {
+                        throw new IllegalStateException("log sink down");
+                    }
+
+                    @Override
+                    public void appendDispute(TenantId tenant, DisputeEvent event) {
+                        throw new IllegalStateException("log sink down");
+                    }
                 }, TransactionOperations.withoutTransaction(), clock, new LookupSlots(100, 100));
 
         assertThat(failingTrail.check(CGCOM, holder)).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
@@ -845,6 +854,208 @@ class EntitlementServiceTest {
         adapter.answering(EntitlementServiceTest::source);
         assertThat(oneAtATime.check(CGCOM, next)).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
         oneAtATime.close();
+    }
+
+    private HolderRef checkedJourney() {
+        HolderRef holder = journeyWithDni("00000001R");
+        service.check(CGCOM, holder);
+        return holder;
+    }
+
+    private EntitlementRecord section(HolderRef holder) {
+        return EntitlementRecord.fromJson(sessions.read(CGCOM, journeyId(holder), Section.ENTITLEMENT).orElseThrow());
+    }
+
+    private void assertProblem(Runnable call, ProblemCode code) {
+        assertThatThrownBy(call::run).isInstanceOfSatisfying(ProblemException.class,
+                e -> assertThat(e.problem()).isEqualTo(code));
+    }
+
+    @Test
+    @DisplayName("AC-06 — dispute_availableRequest_tellsTheSourceAndBecomesUnderReview")
+    void dispute_availableRequest_tellsTheSourceAndBecomesUnderReview() {
+        HolderRef holder = checkedJourney();
+
+        service.dispute(CGCOM, holder, "r1");
+
+        assertThat(adapter.disputes()).singleElement().satisfies(dispute -> {
+            assertThat(dispute.sourceRef()).isEqualTo("SIM-1");
+            assertThat(dispute.holder().givenName()).isEqualTo("Lucía");
+            assertThat(dispute.holder().familyNames()).isEqualTo("Prueba Sintética");
+            assertThat(dispute.holder().identifier()).isEqualTo(ACTIVE_DNI);
+        });
+        EntitlementRecord.Request request = section(holder).requests().getFirst();
+        assertThat(request.status()).isEqualTo(EntitlementRecord.Status.UNDER_REVIEW);
+        assertThat(request.claims()).isNotEmpty();
+        assertThat(request.preview()).isNotNull();
+        assertThat(trail.disputes()).singleElement().satisfies(event -> {
+            assertThat(event.result()).isEqualTo(AuthenticSourceAuditTrail.DisputeResult.SENT);
+            assertThat(event.adapter()).isEqualTo("simulated");
+            assertThat(event.attestationType()).isEqualTo(DOCTORID);
+            assertThat(event.occurredAt()).isEqualTo(clock.instant());
+            assertThat(event.toString()).doesNotContain("SIM-1", "00000001R", "Lucía");
+        });
+    }
+
+    @Test
+    @DisplayName("EC-01 — dispute_requestAlreadyUnderReview_doesNothingMore")
+    void dispute_requestAlreadyUnderReview_doesNothingMore() {
+        HolderRef holder = checkedJourney();
+        service.dispute(CGCOM, holder, "r1");
+
+        service.dispute(CGCOM, holder, "r1");
+
+        assertThat(adapter.disputes()).hasSize(1);
+        assertThat(trail.disputes()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("ES-02 — dispute_unknownId_isRequestNotFound")
+    void dispute_unknownId_isRequestNotFound() {
+        HolderRef holder = checkedJourney();
+
+        assertProblem(() -> service.dispute(CGCOM, holder, "r9"), ProblemCode.REQUEST_NOT_FOUND);
+        assertThat(adapter.disputes()).isEmpty();
+        assertThat(trail.disputes()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("ES-02 — dispute_requestThatIsNotAvailable_isRequestNotAvailable")
+    void dispute_requestThatIsNotAvailable_isRequestNotAvailable() {
+        adapter.answering(searched -> SourceRequests.of(request("SIM-A", RequestStatus.IDENTITY_MISMATCH, Map.of()),
+                request("SIM-B", RequestStatus.IDENTIFIER_MISMATCH, Map.of()),
+                request("SIM-C", RequestStatus.AVAILABLE, Map.of())));
+        HolderRef holder = journeyWithDni("00000001R");
+        service.check(CGCOM, holder);
+
+        assertProblem(() -> service.dispute(CGCOM, holder, "r1"), ProblemCode.REQUEST_NOT_AVAILABLE);
+        assertProblem(() -> service.dispute(CGCOM, holder, "r2"), ProblemCode.REQUEST_NOT_AVAILABLE);
+        assertThat(adapter.disputes()).isEmpty();
+        assertThat(section(holder).requests()).extracting(EntitlementRecord.Request::status)
+                .containsExactly(EntitlementRecord.Status.IDENTITY_MISMATCH,
+                        EntitlementRecord.Status.IDENTIFIER_MISMATCH, EntitlementRecord.Status.AVAILABLE);
+    }
+
+    @Test
+    @DisplayName("AC-06 — dispute_requestsNotCheckedYet_isStepNotAllowed")
+    void dispute_requestsNotCheckedYet_isStepNotAllowed() {
+        HolderRef holder = journeyWithDni("00000001R");
+
+        assertProblem(() -> service.dispute(CGCOM, holder, "r1"), ProblemCode.STEP_NOT_ALLOWED);
+        assertThat(adapter.disputes()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("EC-09 — dispute_sourceThatDoesNotSupportIt_isTracedNotSupportedAndRecorded")
+    void dispute_sourceThatDoesNotSupportIt_isTracedNotSupportedAndRecorded() {
+        adapter.supportingDispute(false);
+        HolderRef holder = checkedJourney();
+
+        service.dispute(CGCOM, holder, "r1");
+
+        assertThat(adapter.disputes()).isEmpty();
+        assertThat(section(holder).requests().getFirst().status()).isEqualTo(EntitlementRecord.Status.UNDER_REVIEW);
+        assertThat(trail.disputes()).singleElement().satisfies(event ->
+                assertThat(event.result()).isEqualTo(AuthenticSourceAuditTrail.DisputeResult.NOT_SUPPORTED));
+    }
+
+    @Test
+    @DisplayName("EC-09 — dispute_sourceOfThisHolderRefusesIt_isTracedNotSupportedAndRecorded")
+    void dispute_sourceOfThisHolderRefusesIt_isTracedNotSupportedAndRecorded() {
+        adapter.failingTheDispute(new DisputeNotSupportedException());
+        HolderRef holder = checkedJourney();
+
+        service.dispute(CGCOM, holder, "r1");
+
+        assertThat(section(holder).requests().getFirst().status()).isEqualTo(EntitlementRecord.Status.UNDER_REVIEW);
+        assertThat(trail.disputes()).singleElement().satisfies(event ->
+                assertThat(event.result()).isEqualTo(AuthenticSourceAuditTrail.DisputeResult.NOT_SUPPORTED));
+    }
+
+    @Test
+    @DisplayName("AC-06, NFR-4 — dispute_sourceFails_isTracedFailedRecordedAndLogsNoPersonalData")
+    void dispute_sourceFails_isTracedFailedRecordedAndLogsNoPersonalData(CapturedOutput output) {
+        adapter.failingTheDispute(new IllegalStateException("source said 00000001R SIM-1 Lucía is unknown"));
+        HolderRef holder = checkedJourney();
+
+        service.dispute(CGCOM, holder, "r1");
+
+        assertThat(section(holder).requests().getFirst().status()).isEqualTo(EntitlementRecord.Status.UNDER_REVIEW);
+        assertThat(trail.disputes()).singleElement().satisfies(event ->
+                assertThat(event.result()).isEqualTo(AuthenticSourceAuditTrail.DisputeResult.FAILED));
+        assertThat(output.getAll()).contains("failed: IllegalStateException")
+                .doesNotContain("00000001R", "SIM-1", "Lucía", "Prueba Sintética");
+    }
+
+    @Test
+    @DisplayName("AC-06 — dispute_attestationTypeWithoutSource_isTracedNotSupportedAndRecorded")
+    void dispute_attestationTypeWithoutSource_isTracedNotSupportedAndRecorded() {
+        HolderRef holder = journeyWithDni("00000001R");
+        rows.put(CGCOM, new AuthenticSourceConfig("employee.sd.1", Set.of(), Map.of()));
+        service.check(CGCOM, holder);
+
+        service.dispute(CGCOM, holder, "r1");
+
+        assertThat(section(holder).requests().getFirst().status()).isEqualTo(EntitlementRecord.Status.UNDER_REVIEW);
+        assertThat(trail.disputes()).singleElement().satisfies(event -> {
+            assertThat(event.result()).isEqualTo(AuthenticSourceAuditTrail.DisputeResult.NOT_SUPPORTED);
+            assertThat(event.adapter()).isEqualTo("none");
+        });
+    }
+
+    @Test
+    @DisplayName("AC-06 — dispute_configurationBroken_isTracedFailedAndRecorded")
+    void dispute_configurationBroken_isTracedFailedAndRecorded() {
+        HolderRef holder = checkedJourney();
+        rows.remove(CGCOM);
+
+        service.dispute(CGCOM, holder, "r1");
+
+        assertThat(section(holder).requests().getFirst().status()).isEqualTo(EntitlementRecord.Status.UNDER_REVIEW);
+        assertThat(trail.disputes()).singleElement().satisfies(event ->
+                assertThat(event.result()).isEqualTo(AuthenticSourceAuditTrail.DisputeResult.FAILED));
+    }
+
+    @Test
+    @DisplayName("AC-06 — dispute_traceFails_isRecordedAnyway")
+    void dispute_traceFails_isRecordedAnyway() {
+        HolderRef holder = checkedJourney();
+        EntitlementService failingTrail = new EntitlementService(journey, journey, journey, sessions,
+                new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
+                        new AdapterRegistry(List.of(adapter))),
+                new AuthenticSourceAuditTrail() {
+                    @Override
+                    public void append(TenantId tenant, Event event) {
+                    }
+
+                    @Override
+                    public void appendDispute(TenantId tenant, DisputeEvent event) {
+                        throw new IllegalStateException("log sink down");
+                    }
+                }, TransactionOperations.withoutTransaction(), clock, new LookupSlots(100, 100));
+
+        failingTrail.dispute(CGCOM, holder, "r1");
+
+        assertThat(section(holder).requests().getFirst().status()).isEqualTo(EntitlementRecord.Status.UNDER_REVIEW);
+        failingTrail.close();
+    }
+
+    @Test
+    @DisplayName("EC-02 — dispute_thenCheckAgain_requestStaysUnderReviewAndCannotBeConfirmed")
+    void dispute_thenCheckAgain_requestStaysUnderReviewAndCannotBeConfirmed() {
+        adapter.answering(searched -> SourceRequests.of(request("SIM-A", RequestStatus.AVAILABLE, Map.of()),
+                request("SIM-B", RequestStatus.AVAILABLE, Map.of())));
+        HolderRef holder = journeyWithDni("00000001R");
+        service.check(CGCOM, holder);
+        service.dispute(CGCOM, holder, "r1");
+
+        EntitlementService.Outcome outcome = service.check(CGCOM, holder);
+
+        assertThat(outcome).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
+        assertThat(outcome.requests()).extracting(EntitlementService.CheckedRequest::id,
+                        EntitlementService.CheckedRequest::status)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("r1", RequestStatus.UNDER_REVIEW),
+                        org.assertj.core.groups.Tuple.tuple("r2", RequestStatus.AVAILABLE));
     }
 
     /** A journey opened for a new holder, as {@code POST /journey} opens it, with a default identity. */

@@ -1,6 +1,7 @@
 package es.in2.issuanceportal.authenticsource.application;
 
 import es.in2.issuanceportal.authenticsource.application.port.AuthenticSourceAuditTrail;
+import es.in2.issuanceportal.authenticsource.application.port.DisputeNotSupportedException;
 import es.in2.issuanceportal.authenticsource.domain.AttestationPreview;
 import es.in2.issuanceportal.authenticsource.domain.AttestationTranslation;
 import es.in2.issuanceportal.authenticsource.domain.EntitlementDecision;
@@ -43,6 +44,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -209,6 +211,101 @@ public class EntitlementService implements AutoCloseable {
         }
     }
 
+    /**
+     * The holder says the data of a request is not correct (design.md §3.5, AD-7). The source is told once, if
+     * it supports it, and the request becomes under review whatever happens: the notice never blocks the holder.
+     *
+     * @throws ProblemException {@code step_not_allowed} without a journey in progress or checked requests,
+     *                          {@code request_not_found} for an id the journey does not have and
+     *                          {@code request_not_available} for a request that is not available
+     */
+    public void dispute(TenantId tenant, HolderRef holder, String requestId) {
+        long started = System.nanoTime();
+        access.requireInProgress(tenant, holder);
+        UUID journeyId = sessions.journeyOf(tenant, holder)
+                .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
+        EntitlementRecord entitlement = checked(tenant, journeyId);
+        EntitlementRecord.Request request = entitlement.request(requestId)
+                .orElseThrow(() -> new ProblemException(ProblemCode.REQUEST_NOT_FOUND));
+        if (request.status() == EntitlementRecord.Status.UNDER_REVIEW) {
+            return;
+        }
+        if (request.status() != EntitlementRecord.Status.AVAILABLE) {
+            throw new ProblemException(ProblemCode.REQUEST_NOT_AVAILABLE);
+        }
+        HolderIdentity identity = identity(tenant, journeyId);
+        AuthenticSourceConfigs.Current current = current(tenant);
+        AuthenticSourceAuditTrail.DisputeResult result = tell(tenant, current, identity, request.sourceRef());
+        writeDispute(tenant, journeyId, current, result, started);
+        markUnderReview(tenant, journeyId, requestId);
+    }
+
+    /** The configuration is only read to tell the source: a broken one is a notice that failed, not an error. */
+    private AuthenticSourceConfigs.Current current(TenantId tenant) {
+        try {
+            return configs.current(tenant);
+        } catch (ProblemException _) {
+            return null;
+        }
+    }
+
+    private AuthenticSourceAuditTrail.DisputeResult tell(TenantId tenant, AuthenticSourceConfigs.Current current,
+                                                         HolderIdentity identity, String sourceRef) {
+        if (current == null) {
+            return AuthenticSourceAuditTrail.DisputeResult.FAILED;
+        }
+        if (!current.hasSource() || !current.adapter().supportsDispute(current.settings())) {
+            return AuthenticSourceAuditTrail.DisputeResult.NOT_SUPPORTED;
+        }
+        Holder person = new Holder(identity.givenName(), identity.familyName(), toDomain(identity));
+        try {
+            call(tenant, current, () -> {
+                current.adapter().dispute(tenant, current.attestationType(), person, sourceRef, current.settings(),
+                        current.settings().timeout());
+                return Boolean.TRUE;
+            });
+            return AuthenticSourceAuditTrail.DisputeResult.SENT;
+        } catch (SourceFailure failure) {
+            return failure.notSupported ? AuthenticSourceAuditTrail.DisputeResult.NOT_SUPPORTED
+                    : AuthenticSourceAuditTrail.DisputeResult.FAILED;
+        }
+    }
+
+    private void writeDispute(TenantId tenant, UUID journeyId, AuthenticSourceConfigs.Current current,
+                              AuthenticSourceAuditTrail.DisputeResult result, long started) {
+        try {
+            trail.appendDispute(tenant, new AuthenticSourceAuditTrail.DisputeEvent(UUID.randomUUID(), journeyId,
+                    current == null ? null : current.attestationType(),
+                    current != null && current.hasSource() ? current.adapter().type()
+                            : AuthenticSourceAuditTrail.NO_ADAPTER,
+                    result, Duration.ofNanos(System.nanoTime() - started), clock.instant()));
+        } catch (RuntimeException e) {
+            log.error("Could not record the dispute of journey {}", journeyId, e);
+        }
+    }
+
+    /** The section is read again so what was written while the source was told is not lost. */
+    private void markUnderReview(TenantId tenant, UUID journeyId, String requestId) {
+        EntitlementRecord entitlement = checked(tenant, journeyId);
+        List<EntitlementRecord.Request> requests = entitlement.requests().stream()
+                .map(request -> request.id().equals(requestId) ? request.withStatus(EntitlementRecord.Status.UNDER_REVIEW)
+                        : request)
+                .toList();
+        sessions.write(tenant, journeyId, Section.ENTITLEMENT, new EntitlementRecord(entitlement.identifierType(),
+                entitlement.email(), requests, entitlement.checkedAt()).toJson());
+    }
+
+    private EntitlementRecord checked(TenantId tenant, UUID journeyId) {
+        String section = sessions.read(tenant, journeyId, Section.ENTITLEMENT)
+                .orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED));
+        try {
+            return EntitlementRecord.fromJson(section);
+        } catch (InvalidSectionException e) {
+            log.warn("Entitlement of the journey session is invalid at {}", e.field());
+            throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
+        }
+    }
+
     /** One check's trace: what it was, so each outcome only adds its result. */
     private final class Trace {
 
@@ -281,19 +378,40 @@ public class EntitlementService implements AutoCloseable {
         return references;
     }
 
+    /** The source did not do what it was asked, already logged; {@code notSupported} when it cannot take the notice. */
+    private static final class SourceFailure extends RuntimeException {
+
+        private final transient boolean notSupported;
+
+        SourceFailure(boolean notSupported) {
+            super("Authentic source failure", null, false, false);
+            this.notSupported = notSupported;
+        }
+    }
+
+    private SourceRequests lookup(TenantId tenant, AuthenticSourceConfigs.Current current, Holder person) {
+        try {
+            return call(tenant, current, () -> current.adapter().lookup(tenant, current.attestationType(), person,
+                    current.settings(), current.settings().timeout()));
+        } catch (SourceFailure _) {
+            throw unavailable();
+        }
+    }
+
     /**
      * Asks the source on a virtual thread and waits at most the configured timeout. Any failure, including
-     * an adapter that does not answer, is an unavailable source: never a confirmed one (FR-05).
+     * an adapter that does not answer, is a {@link SourceFailure}: for a search an unavailable source, never a
+     * confirmed one (FR-05).
      */
-    private SourceRequests lookup(TenantId tenant, AuthenticSourceConfigs.Current current, Holder person) {
+    private <T> T call(TenantId tenant, AuthenticSourceConfigs.Current current, Callable<T> task) {
         Duration timeout = current.settings().timeout();
         // A slow source must not take every thread of the service, nor the slots of other tenants, with it.
         LookupSlots.Slot slot = lookupSlots.tryAcquire(tenant).orElseThrow(() -> {
             log.warn("Authentic source {} of tenant {} not asked: too many searches in flight",
                     current.adapter().type(), tenant);
-            return unavailable();
+            return new SourceFailure(false);
         });
-        Future<SourceRequests> answer;
+        Future<T> answer;
         try {
             answer = lookups.submit(() -> {
                 if (!slot.start()) {
@@ -301,31 +419,34 @@ public class EntitlementService implements AutoCloseable {
                     return null;
                 }
                 try {
-                    return current.adapter().lookup(tenant, current.attestationType(), person, current.settings(), timeout);
+                    return task.call();
                 } finally {
                     slot.release();
                 }
             });
         } catch (RuntimeException _) {
             slot.release();
-            throw unavailable();
+            throw new SourceFailure(false);
         }
         try {
             return Objects.requireNonNull(answer.get(timeout.toMillis(), TimeUnit.MILLISECONDS),
-                    "lookup answered nothing");
+                    "source answered nothing");
         } catch (TimeoutException _) {
             answer.cancel(true);
             log.warn("Authentic source {} of tenant {} did not answer within {}", current.adapter().type(), tenant,
                     timeout);
-            throw unavailable();
+            throw new SourceFailure(false);
         } catch (ExecutionException | RuntimeException e) {
+            if (e instanceof ExecutionException && e.getCause() instanceof DisputeNotSupportedException) {
+                throw new SourceFailure(true);
+            }
             log.warn("Authentic source {} of tenant {} failed: {}", current.adapter().type(), tenant,
                     kind(e));
-            throw unavailable();
+            throw new SourceFailure(false);
         } catch (InterruptedException _) {
             Thread.currentThread().interrupt();
             answer.cancel(true);
-            throw unavailable();
+            throw new SourceFailure(false);
         } finally {
             // A search cancelled before it started never runs its own release.
             slot.abandon();

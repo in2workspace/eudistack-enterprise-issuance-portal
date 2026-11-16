@@ -77,4 +77,34 @@ class LogAuthenticSourceAuditTrailTest {
                 UUID.randomUUID(), UUID.randomUUID(), "doctorid.sd.1", "none", IdentifierType.PERSONAL_ID,
                 AuthenticSourceAuditTrail.Result.CONFIRMED, Optional.empty(), Map.of(), Duration.ZERO, Instant.now())));
     }
+
+    @Test
+    void appendDispute_notice_writesEveryFieldOfTheTraceWithoutData() {
+        UUID journeyId = UUID.randomUUID();
+
+        trail.appendDispute(CGCOM, new AuthenticSourceAuditTrail.DisputeEvent(UUID.randomUUID(), journeyId,
+                "doctorid.sd.1", "http", AuthenticSourceAuditTrail.DisputeResult.NOT_SUPPORTED, Duration.ofMillis(7),
+                Instant.parse("2026-10-28T10:00:00Z")));
+
+        ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
+        verify(audit).info(anyString(), arguments.capture());
+        assertThat(Arrays.stream(arguments.getValue()).map(String::valueOf).toList()).containsExactly(
+                "journey_id=" + journeyId,
+                arguments.getValue()[1].toString(),
+                "tenant=cgcom",
+                "attestation_type=doctorid.sd.1",
+                "adapter=http",
+                "result=not_supported",
+                "duration_ms=7",
+                "occurred_at=2026-10-28T10:00:00Z");
+    }
+
+    @Test
+    void appendDispute_writeFails_doesNotThrow() {
+        doThrow(new IllegalStateException("log sink down")).when(audit).info(anyString(), any(Object[].class));
+
+        assertThatNoException().isThrownBy(() -> trail.appendDispute(CGCOM,
+                new AuthenticSourceAuditTrail.DisputeEvent(UUID.randomUUID(), UUID.randomUUID(), "doctorid.sd.1",
+                        "none", AuthenticSourceAuditTrail.DisputeResult.FAILED, Duration.ZERO, Instant.now())));
+    }
 }

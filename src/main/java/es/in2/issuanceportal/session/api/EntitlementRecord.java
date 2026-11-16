@@ -147,6 +147,12 @@ public record EntitlementRecord(IdentifierType identifierType, String email, Lis
             claims = claims == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(claims));
         }
 
+        /** The same request with another status: how the holder puts it under review. */
+        public Request withStatus(Status other) {
+            return new Request(id, sourceRef, other, mismatchedFields, renewal, requestedBy, requestedAt,
+                    displayIdentifier, organization, claims, preview);
+        }
+
         private RequestDocument toDocument() {
             return new RequestDocument(id, sourceRef, status.code(), mismatchedFields.isEmpty() ? null : mismatchedFields,
                     renewal, requestedBy, requestedAt, displayIdentifier, organization,

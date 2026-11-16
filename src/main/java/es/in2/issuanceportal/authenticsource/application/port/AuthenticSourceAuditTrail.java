@@ -50,5 +50,33 @@ public interface AuthenticSourceAuditTrail {
             Instant occurredAt) {
     }
 
+    /** How the notice of data not correct ended (design.md §3.6). */
+    enum DisputeResult {
+        SENT("sent"), NOT_SUPPORTED("not_supported"), FAILED("failed");
+
+        private final String code;
+
+        DisputeResult(String code) {
+            this.code = code;
+        }
+
+        public String code() {
+            return code;
+        }
+    }
+
+    /** One notice of data not correct: no identity, no reference of the request, no data. */
+    record DisputeEvent(
+            UUID eventId,
+            UUID journeyId,
+            String attestationType,
+            String adapter,
+            DisputeResult result,
+            Duration duration,
+            Instant occurredAt) {
+    }
+
     void append(TenantId tenant, Event event);
+
+    void appendDispute(TenantId tenant, DisputeEvent event);
 }

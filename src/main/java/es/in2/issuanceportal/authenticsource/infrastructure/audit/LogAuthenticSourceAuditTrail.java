@@ -33,6 +33,25 @@ class LogAuthenticSourceAuditTrail implements AuthenticSourceAuditTrail {
         this.audit = audit;
     }
 
+    /** Like a check, a notice never fails because its trace does. */
+    @Override
+    public void appendDispute(TenantId tenant, DisputeEvent event) {
+        try {
+            audit.info("entitlement dispute {} {} {} {} {} {} {} {}",
+                    kv("journey_id", event.journeyId()),
+                    kv("event_id", event.eventId()),
+                    kv("tenant", tenant.value()),
+                    kv("attestation_type", event.attestationType()),
+                    kv("adapter", event.adapter()),
+                    kv("result", event.result().code()),
+                    kv("duration_ms", event.duration().toMillis()),
+                    kv("occurred_at", event.occurredAt()));
+        } catch (RuntimeException e) {
+            audit.error("Could not record the entitlement dispute {} of journey {}", event.eventId(),
+                    event.journeyId(), e);
+        }
+    }
+
     private static Map<String, Integer> byCode(Map<RequestStatus, Integer> requestsByStatus) {
         Map<String, Integer> counts = new LinkedHashMap<>();
         for (RequestStatus status : RequestStatus.values()) {

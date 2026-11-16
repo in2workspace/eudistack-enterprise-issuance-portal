@@ -368,6 +368,74 @@
               }
             ],
             "not_found": true
+          },
+          {
+            "identifiers": [
+              {
+                "type": "personal_id",
+                "value": "00000012N"
+              },
+              {
+                "type": "colegiado",
+                "value": "280000012"
+              }
+            ],
+            "requests": [
+              {
+                "source_ref": "SIM-0012-A",
+                "status": "available",
+                "renewal": false,
+                "requested_by": "Secretaría del Colegio de Prueba",
+                "requested_at": "2026-10-01T09:00:00Z",
+                "display_identifier": "280000012",
+                "organization": "Colegio de Médicos de Prueba",
+                "attributes": {
+                  "registration_number": "280000012",
+                  "medical_boards": [
+                    "Colegio de Médicos de Prueba"
+                  ],
+                  "specialities": [
+                    "Neurology"
+                  ],
+                  "entitled_to_practise": true
+                }
+              }
+            ],
+            "dispute_supported": false
+          },
+          {
+            "identifiers": [
+              {
+                "type": "personal_id",
+                "value": "00000013J"
+              },
+              {
+                "type": "colegiado",
+                "value": "280000013"
+              }
+            ],
+            "requests": [
+              {
+                "source_ref": "SIM-0013-A",
+                "status": "available",
+                "renewal": false,
+                "requested_by": "Secretaría del Colegio de Prueba",
+                "requested_at": "2026-10-01T09:00:00Z",
+                "display_identifier": "280000013",
+                "organization": "Colegio de Médicos de Prueba",
+                "attributes": {
+                  "registration_number": "280000013",
+                  "medical_boards": [
+                    "Colegio de Médicos de Prueba"
+                  ],
+                  "specialities": [
+                    "Urology"
+                  ],
+                  "entitled_to_practise": true
+                }
+              }
+            ],
+            "dispute_fail": true
           }
         ]
       }
