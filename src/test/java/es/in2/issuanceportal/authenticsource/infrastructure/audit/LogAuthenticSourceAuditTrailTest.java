@@ -35,7 +35,7 @@ class LogAuthenticSourceAuditTrailTest {
 
         trail.append(CGCOM, new AuthenticSourceAuditTrail.Event(UUID.randomUUID(), journeyId, "doctorid.sd.1",
                 "simulated", IdentifierType.COLEGIADO, AuthenticSourceAuditTrail.Result.NOT_CONFIRMED,
-                Optional.of(NotConfirmedReason.IDENTIFIER_MISMATCH), Duration.ofMillis(42),
+                Optional.of(NotConfirmedReason.NO_REQUESTS), Duration.ofMillis(42),
                 Instant.parse("2026-10-28T10:00:00Z")));
 
         ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
@@ -48,7 +48,7 @@ class LogAuthenticSourceAuditTrailTest {
                 "adapter=simulated",
                 "identifier_type=colegiado",
                 "result=not_confirmed",
-                "reason=identifier_mismatch",
+                "reason=no_requests",
                 "duration_ms=42",
                 "occurred_at=2026-10-28T10:00:00Z");
     }

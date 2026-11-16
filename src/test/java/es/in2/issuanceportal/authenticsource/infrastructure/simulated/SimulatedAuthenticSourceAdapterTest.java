@@ -1,10 +1,13 @@
 package es.in2.issuanceportal.authenticsource.infrastructure.simulated;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import es.in2.issuanceportal.authenticsource.domain.Holder;
 import es.in2.issuanceportal.authenticsource.domain.IdentifierType;
-import es.in2.issuanceportal.authenticsource.domain.LookupResult;
+import es.in2.issuanceportal.authenticsource.domain.MismatchedField;
 import es.in2.issuanceportal.authenticsource.domain.PersonalIdentifier;
-import es.in2.issuanceportal.authenticsource.domain.SourceRecord;
+import es.in2.issuanceportal.authenticsource.domain.RequestStatus;
+import es.in2.issuanceportal.authenticsource.domain.SourceRequest;
+import es.in2.issuanceportal.authenticsource.domain.SourceRequests;
 import es.in2.issuanceportal.authenticsource.domain.config.AuthenticSourceConfig;
 import es.in2.issuanceportal.authenticsource.domain.config.SourceSettings;
 import es.in2.issuanceportal.shared.tenant.TenantId;
@@ -14,6 +17,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,90 +40,138 @@ class SimulatedAuthenticSourceAdapterTest {
     private final SimulatedAuthenticSourceAdapter adapter =
             new SimulatedAuthenticSourceAdapter(tenant -> Optional.ofNullable(rows.get(tenant)), new ObjectMapper());
 
-    private void save(TenantId tenant, List<Map<String, Object>> records) {
+    private void save(TenantId tenant, List<Map<String, Object>> people) {
         rows.put(tenant, new AuthenticSourceConfig(DOCTORID, Set.of(IdentifierType.COLEGIADO), Map.of(DOCTORID,
                 new SourceSettings("DoctorID", "simulated", null, null, null,
                         Set.of(IdentifierType.PERSONAL_ID, IdentifierType.COLEGIADO), List.of(), null,
-                        Map.of("records", records)))));
+                        Map.of("people", people)))));
     }
 
-    private static Map<String, Object> entry(String dni, String colegiado, boolean entitled) {
-        return Map.of("personal_id", dni, "colegiado", colegiado, "entitled", entitled,
-                "attributes", Map.of("registration_number", colegiado, "medical_boards", List.of("Madrid")));
+    private static Map<String, Object> identifier(String type, String value) {
+        return Map.of("type", type, "value", value);
     }
 
-    private LookupResult search(TenantId tenant, IdentifierType type, String value) {
-        return adapter.lookup(tenant, DOCTORID, new PersonalIdentifier(type, value), Duration.ofSeconds(10));
+    private static Map<String, Object> request(String ref, String status) {
+        return Map.of("source_ref", ref, "status", status, "renewal", false);
+    }
+
+    private static Map<String, Object> person(List<Map<String, Object>> requests) {
+        Map<String, Object> person = new HashMap<>();
+        person.put("identifiers", List.of(identifier("personal_id", "00000001R"), identifier("colegiado", "280000001")));
+        person.put("requests", requests);
+        return person;
+    }
+
+    private SourceRequests search(TenantId tenant, IdentifierType type, String value) {
+        return adapter.lookup(tenant, DOCTORID, new Holder("Cualquiera", "Otro Nombre", new PersonalIdentifier(type, value)),
+                Duration.ofSeconds(10));
     }
 
     @ParameterizedTest
-    @CsvSource({"PERSONAL_ID,00000001R", "COLEGIADO,280000001", "PERSONAL_ID,00000001r"})
-    @DisplayName("AC-15 — lookup_existingRecord_isFoundByEitherIdentifierWithBoth")
-    void lookup_existingRecord_isFoundByEitherIdentifierWithBoth(IdentifierType type, String value) {
-        save(CGCOM, List.of(entry("00000001R", "280000001", true)));
+    @CsvSource({"PERSONAL_ID,00000001R", "COLEGIADO,280000001", "PERSONAL_ID,00000001r", "PERSONAL_ID,' 0000 0001R '"})
+    @DisplayName("AC-01 — lookup_existingPerson_isFoundByEitherIdentifierIgnoringTheName")
+    void lookup_existingPerson_isFoundByEitherIdentifierIgnoringTheName(IdentifierType type, String value) {
+        save(CGCOM, List.of(person(List.of(request("SIM-1", "available")))));
 
-        LookupResult result = search(CGCOM, type, value);
+        SourceRequests result = search(CGCOM, type, value);
 
-        SourceRecord found = ((LookupResult.Found) result).source();
-        assertThat(found.identifiers()).containsExactly(new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R"),
-                new PersonalIdentifier(IdentifierType.COLEGIADO, "280000001"));
-        assertThat(found.entitled()).isTrue();
-        assertThat(found.attributes()).containsEntry("registration_number", "280000001");
+        assertThat(((SourceRequests.Requests) result).requests()).singleElement()
+                .satisfies(found -> assertThat(found.status()).isEqualTo(RequestStatus.AVAILABLE));
     }
 
     @Test
-    @DisplayName("AC-15 — lookup_deregistered_isFoundNotEntitled")
-    void lookup_deregistered_isFoundNotEntitled() {
-        save(CGCOM, List.of(entry("00000002W", "280000002", false)));
+    @DisplayName("AC-01 — lookup_severalRequests_keepsTheOrderAndEveryField")
+    void lookup_severalRequests_keepsTheOrderAndEveryField() {
+        Map<String, Object> mismatch = new HashMap<>(request("SIM-2", "identity_mismatch"));
+        mismatch.put("mismatched_fields", List.of("given_name", "family_names"));
+        Map<String, Object> available = new HashMap<>(request("SIM-1", "available"));
+        available.put("renewal", true);
+        available.put("requested_by", "Secretaría");
+        available.put("requested_at", "2026-10-01T09:00:00Z");
+        available.put("display_identifier", "280000001");
+        available.put("organization", "Colegio de Prueba");
+        available.put("attributes", Map.of("medical_speciality", List.of("Cardiología", "Medicina interna")));
+        save(CGCOM, List.of(person(List.of(mismatch, available))));
 
-        assertThat(((LookupResult.Found) search(CGCOM, IdentifierType.PERSONAL_ID, "00000002W")).source().entitled()).isFalse();
+        List<SourceRequest> found = ((SourceRequests.Requests) search(CGCOM, IdentifierType.PERSONAL_ID,
+                "00000001R")).requests();
+
+        assertThat(found).extracting(SourceRequest::sourceRef).containsExactly("SIM-2", "SIM-1");
+        assertThat(found.getFirst().status()).isEqualTo(RequestStatus.IDENTITY_MISMATCH);
+        assertThat(found.getFirst().mismatchedFields())
+                .containsExactly(MismatchedField.GIVEN_NAME, MismatchedField.FAMILY_NAMES);
+        SourceRequest second = found.get(1);
+        assertThat(second.renewal()).isTrue();
+        assertThat(second.requestedBy()).isEqualTo("Secretaría");
+        assertThat(second.requestedAt()).isEqualTo(Instant.parse("2026-10-01T09:00:00Z"));
+        assertThat(second.displayIdentifier()).isEqualTo("280000001");
+        assertThat(second.organization()).isEqualTo("Colegio de Prueba");
+        assertThat(second.attributes()).containsEntry("medical_speciality", List.of("Cardiología", "Medicina interna"));
     }
 
     @Test
-    @DisplayName("AC-15 — lookup_unknownDniOrRegistrationNumber_isNotFound")
-    void lookup_unknownDniOrRegistrationNumber_isNotFound() {
-        save(CGCOM, List.of(entry("00000001R", "280000001", true)));
+    @DisplayName("AC-03 — lookup_personWithoutRequests_isNoRequests")
+    void lookup_personWithoutRequests_isNoRequests() {
+        save(CGCOM, List.of(person(List.of())));
 
-        assertThat(search(CGCOM, IdentifierType.PERSONAL_ID, "00000009Y")).isInstanceOf(LookupResult.NotFound.class);
-        assertThat(search(CGCOM, IdentifierType.COLEGIADO, "289999999")).isInstanceOf(LookupResult.NotFound.class);
+        assertThat(search(CGCOM, IdentifierType.PERSONAL_ID, "00000001R")).isInstanceOf(SourceRequests.NoRequests.class);
     }
 
     @Test
-    void lookup_registrationNumberAsDni_isNotFound() {
-        save(CGCOM, List.of(entry("00000001R", "280000001", true)));
+    @DisplayName("AC-03 — lookup_personMarkedNotFound_isNotFound")
+    void lookup_personMarkedNotFound_isNotFound() {
+        Map<String, Object> person = person(List.of(request("SIM-1", "available")));
+        person.put("not_found", true);
+        save(CGCOM, List.of(person));
 
-        assertThat(search(CGCOM, IdentifierType.PERSONAL_ID, "280000001")).isInstanceOf(LookupResult.NotFound.class);
+        assertThat(search(CGCOM, IdentifierType.PERSONAL_ID, "00000001R")).isInstanceOf(SourceRequests.NotFound.class);
     }
 
     @Test
-    @DisplayName("EC-05 — lookup_recordOfAnotherTenant_isNotFound")
-    void lookup_recordOfAnotherTenant_isNotFound() {
-        save(CGCOM, List.of(entry("00000001R", "280000001", true)));
-        save(SANDBOX, List.of(entry("00000005M", "280000005", true)));
+    @DisplayName("AC-03 — lookup_unknownIdentifier_isNotFound")
+    void lookup_unknownIdentifier_isNotFound() {
+        save(CGCOM, List.of(person(List.of(request("SIM-1", "available")))));
 
-        assertThat(search(SANDBOX, IdentifierType.PERSONAL_ID, "00000001R")).isInstanceOf(LookupResult.NotFound.class);
+        assertThat(search(CGCOM, IdentifierType.PERSONAL_ID, "00000009D")).isInstanceOf(SourceRequests.NotFound.class);
+        assertThat(search(CGCOM, IdentifierType.COLEGIADO, "289999999")).isInstanceOf(SourceRequests.NotFound.class);
     }
 
     @Test
-    @DisplayName("EC-06 — lookup_failingRecord_throws")
-    void lookup_failingRecord_throws() {
-        Map<String, Object> failing = new HashMap<>(entry("00000004G", "280000004", true));
+    void lookup_registrationNumberAsPersonalId_isNotFound() {
+        save(CGCOM, List.of(person(List.of(request("SIM-1", "available")))));
+
+        assertThat(search(CGCOM, IdentifierType.PERSONAL_ID, "280000001")).isInstanceOf(SourceRequests.NotFound.class);
+    }
+
+    @Test
+    @DisplayName("EC-05 — lookup_personOfAnotherTenant_isNotFound")
+    void lookup_personOfAnotherTenant_isNotFound() {
+        save(CGCOM, List.of(person(List.of(request("SIM-1", "available")))));
+        save(SANDBOX, List.of());
+
+        assertThat(search(SANDBOX, IdentifierType.PERSONAL_ID, "00000001R")).isInstanceOf(SourceRequests.NotFound.class);
+    }
+
+    @Test
+    @DisplayName("EC-06 — lookup_failingPerson_throws")
+    void lookup_failingPerson_throws() {
+        Map<String, Object> failing = person(List.of(request("SIM-1", "available")));
         failing.put("fail", true);
         save(CGCOM, List.of(failing));
 
-        assertThatThrownBy(() -> search(CGCOM, IdentifierType.PERSONAL_ID, "00000004G"))
+        assertThatThrownBy(() -> search(CGCOM, IdentifierType.PERSONAL_ID, "00000001R"))
                 .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
-    @DisplayName("AC-09 — lookup_slowRecord_waitsUntilInterrupted")
-    void lookup_slowRecord_waitsUntilInterrupted() {
-        Map<String, Object> slow = new HashMap<>(entry("00000003A", "280000003", true));
+    @DisplayName("AC-18 — lookup_slowPerson_waitsUntilInterrupted")
+    void lookup_slowPerson_waitsUntilInterrupted() {
+        Map<String, Object> slow = person(List.of(request("SIM-1", "available")));
         slow.put("delay_seconds", 30);
         save(CGCOM, List.of(slow));
 
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var answer = executor.submit(() -> search(CGCOM, IdentifierType.PERSONAL_ID, "00000003A"));
+            var answer = executor.submit(() -> search(CGCOM, IdentifierType.PERSONAL_ID, "00000001R"));
             assertThatThrownBy(() -> answer.get(300, TimeUnit.MILLISECONDS))
                     .isInstanceOf(TimeoutException.class);
             answer.cancel(true);
@@ -127,31 +179,57 @@ class SimulatedAuthenticSourceAdapterTest {
     }
 
     @Test
-    void lookup_malformedRecords_failsWithoutQuotingThem() {
+    void lookup_malformedPeople_failsWithoutQuotingThem() {
         rows.put(CGCOM, new AuthenticSourceConfig(DOCTORID, Set.of(), Map.of(DOCTORID,
                 new SourceSettings("DoctorID", "simulated", null, null, null, Set.of(IdentifierType.PERSONAL_ID), List.of(),
-                        null, Map.of("records", "00000001R")))));
+                        null, Map.of("people", "00000001R")))));
 
         assertThatThrownBy(() -> search(CGCOM, IdentifierType.PERSONAL_ID, "00000001R"))
                 .isInstanceOf(IllegalStateException.class)
-                .hasMessage("settings.records of the simulated source is invalid");
+                .hasMessage("settings.people of the simulated source is invalid");
     }
 
     @Test
-    void lookup_noRecords_isNotFound() {
+    void lookup_requestWithAnUnknownStatus_failsWithoutQuotingIt() {
+        save(CGCOM, List.of(person(List.of(request("SIM-1", "gone_wrong")))));
+
+        assertThatThrownBy(() -> search(CGCOM, IdentifierType.PERSONAL_ID, "00000001R"))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("settings.people of the simulated source is invalid")
+                .hasMessageNotContaining("SIM-1");
+    }
+
+    @Test
+    void lookup_requestUnderReviewInTheConfiguration_isInvalid() {
+        save(CGCOM, List.of(person(List.of(request("SIM-1", "under_review")))));
+
+        assertThatThrownBy(() -> search(CGCOM, IdentifierType.PERSONAL_ID, "00000001R"))
+                .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    @Test
+    void lookup_oldRecordsFormat_isNotRead() {
+        rows.put(CGCOM, new AuthenticSourceConfig(DOCTORID, Set.of(), Map.of(DOCTORID,
+                new SourceSettings("DoctorID", "simulated", null, null, null, Set.of(IdentifierType.PERSONAL_ID), List.of(),
+                        null, Map.of("records", List.of(Map.of("personal_id", "00000001R", "entitled", true)))))));
+
+        assertThat(search(CGCOM, IdentifierType.PERSONAL_ID, "00000001R")).isInstanceOf(SourceRequests.NotFound.class);
+    }
+
+    @Test
+    void lookup_noPeople_isNotFound() {
         rows.put(CGCOM, new AuthenticSourceConfig(DOCTORID, Set.of(), Map.of(DOCTORID,
                 new SourceSettings("DoctorID", "simulated", null, null, null, Set.of(IdentifierType.PERSONAL_ID), List.of(),
                         null, null))));
 
-        assertThat(search(CGCOM, IdentifierType.PERSONAL_ID, "00000001R"))
-                .isInstanceOf(LookupResult.NotFound.class);
+        assertThat(search(CGCOM, IdentifierType.PERSONAL_ID, "00000001R")).isInstanceOf(SourceRequests.NotFound.class);
     }
 
     @Test
     void lookup_entryNoLongerChoosesTheSimulatedAdapter_throws() {
         rows.put(CGCOM, new AuthenticSourceConfig(DOCTORID, Set.of(), Map.of(DOCTORID,
                 new SourceSettings("DoctorID", "cgcom", null, null, null, Set.of(IdentifierType.PERSONAL_ID), List.of(),
-                        null, Map.of("records", List.of(entry("00000001R", "280000001", true)))))));
+                        null, Map.of("people", List.of(person(List.of(request("SIM-1", "available")))))))));
 
         assertThatThrownBy(() -> search(CGCOM, IdentifierType.PERSONAL_ID, "00000001R"))
                 .isInstanceOf(IllegalStateException.class);

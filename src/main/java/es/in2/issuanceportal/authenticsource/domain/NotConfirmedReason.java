@@ -1,14 +1,15 @@
 package es.in2.issuanceportal.authenticsource.domain;
 
-/** Why the source did not confirm the entitlement (openapi {@code EntitlementResult.reason}). */
+/**
+ * Why no request was checked (openapi {@code EntitlementResult.reason}). A holder with requests none of which
+ * is available has no reason: each request says why.
+ */
 public enum NotConfirmedReason {
 
     /** The holder is not in the source. */
     NOT_FOUND("not_found"),
-    /** The holder is in the source without entitlement, for example deregistered. */
-    NOT_ENTITLED("not_entitled"),
-    /** The source returned a person whose identifier of the searched type is not the one searched. */
-    IDENTIFIER_MISMATCH("identifier_mismatch");
+    /** The holder is in the source without any request. */
+    NO_REQUESTS("no_requests");
 
     private final String code;
 

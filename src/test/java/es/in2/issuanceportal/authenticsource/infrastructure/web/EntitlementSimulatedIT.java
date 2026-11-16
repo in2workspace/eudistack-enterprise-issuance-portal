@@ -59,7 +59,7 @@ class EntitlementSimulatedIT {
     /** Whatever personal data the checks handle: none of it may reach a log line. */
     private static final List<String> PERSONAL_DATA = List.of("00000001R", "00000002W", "00000003A", "280000001",
             "280000002", "289999999", "00000009D", "Lucía", "Prueba Activa", "Prueba Baja", "Colegio de Médicos",
-            "Cardiology", "Family and Community Medicine");
+            "Cardiology", "Family and Community Medicine", "SIM-0001-A", "Secretaría del Colegio");
 
     @Autowired
     private MockMvc mvc;
@@ -127,11 +127,11 @@ class EntitlementSimulatedIT {
     }
 
     @ParameterizedTest
-    @CsvSource({"PERSONAL_ID,00000002W,not_entitled", "PERSONAL_ID,00000009D,not_found", "COLEGIADO,289999999,not_found",
-        "COLEGIADO,280000002,not_entitled"})
-    @DisplayName("AC-07 — postEntitlement_deregisteredOrUnknown_isNotConfirmedAndTheJourneyWithdrawn")
-    void postEntitlement_deregisteredOrUnknown_isNotConfirmedAndTheJourneyWithdrawn(IdentifierType type, String value,
-                                                                                    String reason) throws Exception {
+    @CsvSource({"PERSONAL_ID,00000002W,no_requests", "PERSONAL_ID,00000009D,not_found", "COLEGIADO,289999999,not_found",
+        "COLEGIADO,280000002,no_requests", "PERSONAL_ID,00000010X,not_found"})
+    @DisplayName("AC-03 — postEntitlement_withoutRequestsOrUnknown_isNotConfirmedAndTheJourneyWithdrawn")
+    void postEntitlement_withoutRequestsOrUnknown_isNotConfirmedAndTheJourneyWithdrawn(IdentifierType type, String value,
+                                                                                       String reason) throws Exception {
         TestHolder holder = journeyWith(type, value);
         UUID journeyId = sessions.journeyOf(SANDBOX, holder.ref()).orElseThrow();
 
@@ -184,7 +184,7 @@ class EntitlementSimulatedIT {
         assertThat(traces).hasSize(3);
         assertThat(traces.get(0)).contains("\"result\":\"confirmed\"", "\"identifier_type\":\"personal_id\"",
                 "\"adapter\":\"simulated\"", "\"attestation_type\":\"doctorid.sd.1\"", "\"duration_ms\":");
-        assertThat(traces.get(1)).contains("\"result\":\"not_confirmed\"", "\"reason\":\"not_entitled\"",
+        assertThat(traces.get(1)).contains("\"result\":\"not_confirmed\"", "\"reason\":\"no_requests\"",
                 "\"identifier_type\":\"colegiado\"");
         assertThat(traces.get(2)).contains("\"reason\":\"not_found\"");
         assertThat(logged).doesNotContain(PERSONAL_DATA.toArray(String[]::new));

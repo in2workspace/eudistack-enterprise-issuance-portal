@@ -6,6 +6,7 @@ import es.in2.issuanceportal.authenticsource.domain.NotConfirmedReason;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -27,9 +28,18 @@ class EntitlementResponseTest {
     @Test
     void of_notConfirmed_carriesTheReasonOnly() {
         EntitlementResponse response = EntitlementResponse.of(
-                new EntitlementService.Outcome.NotConfirmed(NotConfirmedReason.IDENTIFIER_MISMATCH));
+                new EntitlementService.Outcome.NotConfirmed(Optional.of(NotConfirmedReason.NO_REQUESTS)));
 
-        assertThat(response.reason()).isEqualTo("identifier_mismatch");
+        assertThat(response.reason()).isEqualTo("no_requests");
         assertThat(response.attestation()).isNull();
+    }
+
+    @Test
+    void of_notConfirmedWithRequests_hasNoReason() {
+        EntitlementResponse response = EntitlementResponse.of(
+                new EntitlementService.Outcome.NotConfirmed(Optional.empty()));
+
+        assertThat(response.reason()).isNull();
+        assertThat(response.result()).isEqualTo("not_confirmed");
     }
 }

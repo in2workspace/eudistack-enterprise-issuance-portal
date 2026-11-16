@@ -3,9 +3,10 @@ package es.in2.issuanceportal.authenticsource.infrastructure.web;
 import es.in2.issuanceportal.TestcontainersConfiguration;
 import es.in2.issuanceportal.authenticsource.StubAdapter;
 import es.in2.issuanceportal.authenticsource.domain.IdentifierType;
-import es.in2.issuanceportal.authenticsource.domain.LookupResult;
 import es.in2.issuanceportal.authenticsource.domain.PersonalIdentifier;
-import es.in2.issuanceportal.authenticsource.domain.SourceRecord;
+import es.in2.issuanceportal.authenticsource.domain.RequestStatus;
+import es.in2.issuanceportal.authenticsource.domain.SourceRequest;
+import es.in2.issuanceportal.authenticsource.domain.SourceRequests;
 import es.in2.issuanceportal.journey.api.JourneyWithdrawal;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.JourneySessions;
@@ -82,9 +83,10 @@ class EntitlementApiIT {
                            "mapping": [{"attribute": "registration_number", "claim": "personal_administrative_number",
                                         "label": "Número de colegiado"}]}}}""")
                 .update();
-        adapter.answering(searched -> searched.sameAs(ACTIVE)
-                ? LookupResult.found(new SourceRecord(List.of(ACTIVE), true, Map.of("registration_number", "280000001")))
-                : LookupResult.notFound());
+        adapter.answering(searched -> searched.identifier().sameAs(ACTIVE)
+                ? SourceRequests.of(new SourceRequest("SIM-1", RequestStatus.AVAILABLE, List.of(), false, null, null,
+                        null, null, Map.of("registration_number", "280000001")))
+                : SourceRequests.notFound());
     }
 
     /** The container is shared with the other integration tests, which expect no configuration. */

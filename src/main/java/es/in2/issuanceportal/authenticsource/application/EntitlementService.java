@@ -5,11 +5,13 @@ import es.in2.issuanceportal.authenticsource.domain.AttestationPreview;
 import es.in2.issuanceportal.authenticsource.domain.AttestationTranslation;
 import es.in2.issuanceportal.authenticsource.domain.EntitlementDecision;
 import es.in2.issuanceportal.authenticsource.domain.EntitlementRules;
+import es.in2.issuanceportal.authenticsource.domain.Holder;
 import es.in2.issuanceportal.authenticsource.domain.IdentifierType;
-import es.in2.issuanceportal.authenticsource.domain.LookupResult;
 import es.in2.issuanceportal.authenticsource.domain.NotConfirmedReason;
 import es.in2.issuanceportal.authenticsource.domain.PersonalIdentifier;
-import es.in2.issuanceportal.authenticsource.domain.SourceRecord;
+import es.in2.issuanceportal.authenticsource.domain.RequestStatus;
+import es.in2.issuanceportal.authenticsource.domain.SourceRequest;
+import es.in2.issuanceportal.authenticsource.domain.SourceRequests;
 import es.in2.issuanceportal.authenticsource.domain.config.SourceSettings;
 import es.in2.issuanceportal.journey.api.JourneyAccess;
 import es.in2.issuanceportal.journey.api.JourneyProgress;
@@ -33,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -86,7 +89,7 @@ public class EntitlementService implements AutoCloseable {
         record Confirmed(AttestationPreview preview) implements Outcome {
         }
 
-        record NotConfirmed(NotConfirmedReason reason) implements Outcome {
+        record NotConfirmed(Optional<NotConfirmedReason> reason) implements Outcome {
         }
     }
 
@@ -116,21 +119,21 @@ public class EntitlementService implements AutoCloseable {
                     current.attestationType(), searched.type().code());
             throw new ProblemException(ProblemCode.CONFIG_UNAVAILABLE);
         }
-        LookupResult answer;
+        SourceRequests answer;
         try {
-            answer = lookup(tenant, current, searched);
+            answer = lookup(tenant, current, new Holder(identity.givenName(), identity.familyName(), searched));
         } catch (ProblemException unavailable) {
             trace.write(AuthenticSourceAuditTrail.Result.UNAVAILABLE, null);
             throw unavailable;
         }
         // The trace says what the source answered before acting on it, so a failure afterwards keeps it.
-        return switch (EntitlementRules.decide(searched, answer)) {
-            case EntitlementDecision.Confirmed(SourceRecord found) -> {
+        return switch (EntitlementRules.decide(answer, Set.of())) {
+            case EntitlementDecision.Confirmed(var requests) -> {
                 trace.write(AuthenticSourceAuditTrail.Result.CONFIRMED, null);
-                yield confirmed(tenant, holder, journeyId, identity, current, found);
+                yield confirmed(tenant, holder, journeyId, identity, current, firstAvailable(requests));
             }
-            case EntitlementDecision.NotConfirmed(NotConfirmedReason reason) -> {
-                trace.write(AuthenticSourceAuditTrail.Result.NOT_CONFIRMED, reason);
+            case EntitlementDecision.NotConfirmed(var reason, var _) -> {
+                trace.write(AuthenticSourceAuditTrail.Result.NOT_CONFIRMED, reason.orElse(null));
                 withdrawal.withdraw(tenant, holder, JourneyWithdrawal.Cause.NOT_ENTITLED);
                 yield new Outcome.NotConfirmed(reason);
             }
@@ -184,7 +187,7 @@ public class EntitlementService implements AutoCloseable {
      * Asks the source on a virtual thread and waits at most the configured timeout. Any failure, including
      * an adapter that does not answer, is an unavailable source: never a confirmed one (FR-05).
      */
-    private LookupResult lookup(TenantId tenant, AuthenticSourceConfigs.Current current, PersonalIdentifier searched) {
+    private SourceRequests lookup(TenantId tenant, AuthenticSourceConfigs.Current current, Holder person) {
         Duration timeout = current.settings().timeout();
         // A slow source must not take every thread of the service, nor the slots of other tenants, with it.
         LookupSlots.Slot slot = lookupSlots.tryAcquire(tenant).orElseThrow(() -> {
@@ -192,7 +195,7 @@ public class EntitlementService implements AutoCloseable {
                     current.adapter().type(), tenant);
             return unavailable();
         });
-        Future<LookupResult> answer;
+        Future<SourceRequests> answer;
         try {
             answer = lookups.submit(() -> {
                 if (!slot.start()) {
@@ -200,7 +203,7 @@ public class EntitlementService implements AutoCloseable {
                     return null;
                 }
                 try {
-                    return current.adapter().lookup(tenant, current.attestationType(), searched, timeout);
+                    return current.adapter().lookup(tenant, current.attestationType(), person, timeout);
                 } finally {
                     slot.release();
                 }
@@ -231,10 +234,16 @@ public class EntitlementService implements AutoCloseable {
         }
     }
 
+    /** The Journey module confirms one request until EUD-359 task 3: the first available one. */
+    private static SourceRequest firstAvailable(List<SourceRequest> requests) {
+        return requests.stream().filter(request -> request.status() == RequestStatus.AVAILABLE).findFirst()
+                .orElseThrow();
+    }
+
     private Outcome confirmed(TenantId tenant, HolderRef holder, UUID journeyId, HolderIdentity identity,
-                              AuthenticSourceConfigs.Current current, SourceRecord found) {
+                              AuthenticSourceConfigs.Current current, SourceRequest found) {
         SourceSettings settings = current.settings();
-        Map<String, Object> claims = AttestationTranslation.translate(settings.mapping(), found);
+        Map<String, Object> claims = AttestationTranslation.translate(settings.mapping(), found.attributes());
         Object sourceEmail = settings.emailAttribute() == null ? null : found.attributes().get(settings.emailAttribute());
         AttestationPreview preview = AttestationPreview.of(settings.typeName(), identity.givenName(),
                 identity.familyName(), settings.mapping(), claims, identity.email(), sourceEmail);

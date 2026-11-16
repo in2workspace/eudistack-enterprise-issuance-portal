@@ -1,19 +1,28 @@
 package es.in2.issuanceportal.authenticsource.domain;
 
-import java.util.Objects;
+import java.util.List;
+import java.util.Optional;
 
-/** The outcome of an answer of the source: confirmed with the person's record, or not confirmed. */
+/**
+ * The outcome of an answer of the source (design.md §3.3). The requests carry the status they have once
+ * the ones the holder already put under review are applied.
+ */
 public sealed interface EntitlementDecision {
 
-    record Confirmed(SourceRecord source) implements EntitlementDecision {
+    List<SourceRequest> requests();
+
+    /** At least one request is available. */
+    record Confirmed(List<SourceRequest> requests) implements EntitlementDecision {
         public Confirmed {
-            Objects.requireNonNull(source, "source");
+            requests = List.copyOf(requests);
         }
     }
 
-    record NotConfirmed(NotConfirmedReason reason) implements EntitlementDecision {
+    /** No request is available. {@code reason} is empty when there are requests, each saying why. */
+    record NotConfirmed(Optional<NotConfirmedReason> reason, List<SourceRequest> requests)
+            implements EntitlementDecision {
         public NotConfirmed {
-            Objects.requireNonNull(reason, "reason");
+            requests = List.copyOf(requests);
         }
     }
 }

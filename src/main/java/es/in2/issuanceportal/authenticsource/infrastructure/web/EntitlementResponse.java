@@ -4,6 +4,7 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import es.in2.issuanceportal.authenticsource.application.EntitlementService;
 import es.in2.issuanceportal.authenticsource.domain.AttestationPreview;
+import es.in2.issuanceportal.authenticsource.domain.NotConfirmedReason;
 
 import java.util.List;
 
@@ -19,7 +20,7 @@ record EntitlementResponse(String result, Attestation attestation, String reason
             case EntitlementService.Outcome.Confirmed(AttestationPreview preview) ->
                     new EntitlementResponse("confirmed", Attestation.of(preview), null);
             case EntitlementService.Outcome.NotConfirmed(var reason) ->
-                    new EntitlementResponse("not_confirmed", null, reason.code());
+                    new EntitlementResponse("not_confirmed", null, reason.map(NotConfirmedReason::code).orElse(null));
         };
     }
 

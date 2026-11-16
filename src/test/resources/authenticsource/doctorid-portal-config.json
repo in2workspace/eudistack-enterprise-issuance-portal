@@ -47,46 +47,327 @@
       ],
       "email_attribute": "email",
       "settings": {
-        "records": [
+        "people": [
           {
-            "personal_id": "00000001R",
-            "colegiado": "280000001",
-            "entitled": true,
-            "attributes": {
-              "given_name": "Lucía",
-              "family_name": "Prueba Activa",
-              "registration_number": "280000001",
-              "medical_boards": ["Colegio de Médicos de Prueba"],
-              "specialities": ["Family and Community Medicine", "Cardiology"],
-              "entitled_to_practise": true
-            }
+            "identifiers": [
+              {
+                "type": "personal_id",
+                "value": "00000001R"
+              },
+              {
+                "type": "colegiado",
+                "value": "280000001"
+              }
+            ],
+            "requests": [
+              {
+                "source_ref": "SIM-0001-A",
+                "status": "available",
+                "renewal": false,
+                "requested_by": "Secretaría del Colegio de Prueba",
+                "requested_at": "2026-10-01T09:00:00Z",
+                "display_identifier": "280000001",
+                "organization": "Colegio de Médicos de Prueba",
+                "attributes": {
+                  "registration_number": "280000001",
+                  "medical_boards": [
+                    "Colegio de Médicos de Prueba"
+                  ],
+                  "specialities": [
+                    "Family and Community Medicine",
+                    "Cardiology"
+                  ],
+                  "entitled_to_practise": true
+                }
+              }
+            ]
           },
           {
-            "personal_id": "00000002W",
-            "colegiado": "280000002",
-            "entitled": false,
-            "attributes": {
-              "given_name": "Mario",
-              "family_name": "Prueba Baja",
-              "registration_number": "280000002",
-              "medical_boards": ["Colegio de Médicos de Prueba"],
-              "specialities": ["Internal Medicine"],
-              "entitled_to_practise": false
-            }
+            "identifiers": [
+              {
+                "type": "personal_id",
+                "value": "00000002W"
+              },
+              {
+                "type": "colegiado",
+                "value": "280000002"
+              }
+            ],
+            "requests": []
           },
           {
-            "personal_id": "00000003A",
-            "colegiado": "280000003",
-            "entitled": true,
-            "delay_seconds": 15,
-            "attributes": {
-              "given_name": "Sara",
-              "family_name": "Prueba Lenta",
-              "registration_number": "280000003",
-              "medical_boards": ["Colegio de Médicos de Prueba"],
-              "specialities": ["Geriatrics"],
-              "entitled_to_practise": true
-            }
+            "identifiers": [
+              {
+                "type": "personal_id",
+                "value": "00000003A"
+              },
+              {
+                "type": "colegiado",
+                "value": "280000003"
+              }
+            ],
+            "requests": [
+              {
+                "source_ref": "SIM-0003-A",
+                "status": "available",
+                "renewal": false,
+                "requested_by": "Secretaría del Colegio de Prueba",
+                "requested_at": "2026-10-01T09:00:00Z",
+                "display_identifier": "280000003",
+                "organization": "Colegio de Médicos de Prueba",
+                "attributes": {
+                  "registration_number": "280000003",
+                  "medical_boards": [
+                    "Colegio de Médicos de Prueba"
+                  ],
+                  "specialities": [
+                    "Geriatrics"
+                  ],
+                  "entitled_to_practise": true
+                }
+              }
+            ],
+            "delay_seconds": 15
+          },
+          {
+            "identifiers": [
+              {
+                "type": "personal_id",
+                "value": "00000004G"
+              },
+              {
+                "type": "colegiado",
+                "value": "280000004"
+              }
+            ],
+            "requests": [
+              {
+                "source_ref": "SIM-0004-A",
+                "status": "available",
+                "renewal": false,
+                "requested_by": "Secretaría del Colegio de Prueba",
+                "requested_at": "2026-10-01T09:00:00Z",
+                "display_identifier": "280000004-1",
+                "organization": "Colegio de Médicos de Prueba",
+                "attributes": {
+                  "registration_number": "280000004",
+                  "medical_boards": [
+                    "Colegio de Médicos de Prueba"
+                  ],
+                  "specialities": [
+                    "Pediatrics"
+                  ],
+                  "entitled_to_practise": true
+                }
+              },
+              {
+                "source_ref": "SIM-0004-B",
+                "status": "identity_mismatch",
+                "mismatched_fields": [
+                  "family_names"
+                ],
+                "renewal": false,
+                "requested_by": "Secretaría del Colegio de Prueba",
+                "requested_at": "2026-09-15T10:30:00Z",
+                "display_identifier": "280000004-2",
+                "organization": "Colegio de Médicos de Prueba"
+              }
+            ]
+          },
+          {
+            "identifiers": [
+              {
+                "type": "personal_id",
+                "value": "00000005M"
+              },
+              {
+                "type": "colegiado",
+                "value": "280000005"
+              }
+            ],
+            "requests": [
+              {
+                "source_ref": "SIM-0005-A",
+                "status": "available",
+                "renewal": false,
+                "requested_by": "Secretaría del Colegio de Prueba",
+                "requested_at": "2026-10-01T09:00:00Z",
+                "display_identifier": "280000005-1",
+                "organization": "Colegio de Médicos de Prueba",
+                "attributes": {
+                  "registration_number": "280000005",
+                  "medical_boards": [
+                    "Colegio de Médicos de Prueba"
+                  ],
+                  "specialities": [
+                    "Dermatology"
+                  ],
+                  "entitled_to_practise": true
+                }
+              },
+              {
+                "source_ref": "SIM-0005-B",
+                "status": "identity_mismatch",
+                "mismatched_fields": [
+                  "given_name"
+                ],
+                "renewal": false,
+                "requested_by": "Secretaría del Colegio de Prueba",
+                "requested_at": "2026-09-20T11:00:00Z",
+                "display_identifier": "280000005-2",
+                "organization": "Colegio de Médicos de Prueba"
+              },
+              {
+                "source_ref": "SIM-0005-C",
+                "status": "available",
+                "renewal": false,
+                "requested_by": "Secretaría del Colegio de Prueba",
+                "requested_at": "2026-10-05T08:15:00Z",
+                "display_identifier": "280000005-3",
+                "organization": "Colegio de Médicos de Prueba (Sección Sur)",
+                "attributes": {
+                  "registration_number": "280000005",
+                  "medical_boards": [
+                    "Colegio de Médicos de Prueba"
+                  ],
+                  "specialities": [
+                    "Psychiatry"
+                  ],
+                  "entitled_to_practise": true
+                }
+              }
+            ]
+          },
+          {
+            "identifiers": [
+              {
+                "type": "personal_id",
+                "value": "00000006Y"
+              },
+              {
+                "type": "colegiado",
+                "value": "280000006"
+              }
+            ],
+            "requests": [
+              {
+                "source_ref": "SIM-0006-A",
+                "status": "identity_mismatch",
+                "mismatched_fields": [
+                  "given_name",
+                  "family_names"
+                ],
+                "renewal": false,
+                "requested_by": "Secretaría del Colegio de Prueba",
+                "requested_at": "2026-10-01T09:00:00Z",
+                "display_identifier": "280000006",
+                "organization": "Colegio de Médicos de Prueba"
+              }
+            ]
+          },
+          {
+            "identifiers": [
+              {
+                "type": "personal_id",
+                "value": "00000007F"
+              },
+              {
+                "type": "colegiado",
+                "value": "280000007"
+              }
+            ],
+            "requests": [
+              {
+                "source_ref": "SIM-0007-A",
+                "status": "identifier_mismatch",
+                "renewal": false,
+                "requested_by": "Secretaría del Colegio de Prueba",
+                "requested_at": "2026-10-01T09:00:00Z",
+                "display_identifier": "280000007",
+                "organization": "Colegio de Médicos de Prueba"
+              }
+            ]
+          },
+          {
+            "identifiers": [
+              {
+                "type": "personal_id",
+                "value": "00000008P"
+              },
+              {
+                "type": "colegiado",
+                "value": "280000008"
+              }
+            ],
+            "requests": [
+              {
+                "source_ref": "SIM-0008-A",
+                "status": "available",
+                "renewal": true,
+                "requested_by": "Secretaría del Colegio de Prueba",
+                "requested_at": "2026-10-01T09:00:00Z",
+                "display_identifier": "280000008",
+                "organization": "Colegio de Médicos de Prueba",
+                "attributes": {
+                  "registration_number": "280000008",
+                  "medical_boards": [
+                    "Colegio de Médicos de Prueba"
+                  ],
+                  "specialities": [
+                    "Radiology"
+                  ],
+                  "entitled_to_practise": true
+                }
+              }
+            ]
+          },
+          {
+            "identifiers": [
+              {
+                "type": "personal_id",
+                "value": "00000011B"
+              },
+              {
+                "type": "colegiado",
+                "value": "280000011"
+              }
+            ],
+            "requests": [
+              {
+                "source_ref": "SIM-0011-A",
+                "status": "available",
+                "renewal": false,
+                "requested_by": "Secretaría del Colegio de Prueba",
+                "requested_at": "2026-10-01T09:00:00Z",
+                "display_identifier": "280000011",
+                "organization": "Colegio de Médicos de Prueba",
+                "attributes": {
+                  "registration_number": "280000011",
+                  "medical_boards": [
+                    "Colegio de Médicos de Prueba",
+                    "Colegio de Médicos de Prueba (Sección Norte)"
+                  ],
+                  "specialities": [
+                    "Cardiología",
+                    "Medicina interna"
+                  ],
+                  "entitled_to_practise": true
+                }
+              }
+            ]
+          },
+          {
+            "identifiers": [
+              {
+                "type": "personal_id",
+                "value": "00000010X"
+              },
+              {
+                "type": "colegiado",
+                "value": "280000010"
+              }
+            ],
+            "not_found": true
           }
         ]
       }

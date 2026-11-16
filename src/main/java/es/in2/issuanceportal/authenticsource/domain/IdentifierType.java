@@ -1,5 +1,8 @@
 package es.in2.issuanceportal.authenticsource.domain;
 
+import java.util.Arrays;
+import java.util.Optional;
+
 /** What a personal identifier is, and so how the source is searched (design.md §3.1). */
 public enum IdentifierType {
 
@@ -16,5 +19,9 @@ public enum IdentifierType {
 
     public String code() {
         return code;
+    }
+
+    public static Optional<IdentifierType> fromCode(String code) {
+        return Arrays.stream(values()).filter(type -> type.code.equals(code)).findFirst();
     }
 }

@@ -5,11 +5,13 @@ import es.in2.issuanceportal.authenticsource.RecordingAuthenticSourceAuditTrail;
 import es.in2.issuanceportal.authenticsource.StubAdapter;
 import es.in2.issuanceportal.authenticsource.application.port.AuthenticSourceAuditTrail;
 import es.in2.issuanceportal.authenticsource.domain.AttestationPreview;
+import es.in2.issuanceportal.authenticsource.domain.Holder;
 import es.in2.issuanceportal.authenticsource.domain.IdentifierType;
-import es.in2.issuanceportal.authenticsource.domain.LookupResult;
 import es.in2.issuanceportal.authenticsource.domain.NotConfirmedReason;
 import es.in2.issuanceportal.authenticsource.domain.PersonalIdentifier;
-import es.in2.issuanceportal.authenticsource.domain.SourceRecord;
+import es.in2.issuanceportal.authenticsource.domain.RequestStatus;
+import es.in2.issuanceportal.authenticsource.domain.SourceRequest;
+import es.in2.issuanceportal.authenticsource.domain.SourceRequests;
 import es.in2.issuanceportal.authenticsource.domain.config.AttributeMapping;
 import es.in2.issuanceportal.authenticsource.domain.config.AuthenticSourceConfig;
 import es.in2.issuanceportal.authenticsource.domain.config.SourceSettings;
@@ -83,20 +85,23 @@ class EntitlementServiceTest {
                     new AdapterRegistry(List.of(adapter))),
             trail, TransactionOperations.withoutTransaction(), clock, new LookupSlots(100, 100));
 
-    /** Two people: the active one, findable by DNI and by registration number; one deregistered. */
-    private static LookupResult source(PersonalIdentifier searched) {
-        if (searched.sameAs(ACTIVE_DNI) || searched.sameAs(ACTIVE_COLEGIADO)) {
-            return LookupResult.found(new SourceRecord(List.of(ACTIVE_DNI, ACTIVE_COLEGIADO), true, Map.of(
+    private static SourceRequest request(String ref, RequestStatus status, Map<String, Object> attributes) {
+        return new SourceRequest(ref, status, List.of(), false, null, null, null, null, attributes);
+    }
+
+    /** Two people: the active one, findable by DNI and by registration number, and one without requests. */
+    private static SourceRequests source(Holder searched) {
+        PersonalIdentifier identifier = searched.identifier();
+        if (identifier.sameAs(ACTIVE_DNI) || identifier.sameAs(ACTIVE_COLEGIADO)) {
+            return SourceRequests.of(request("SIM-1", RequestStatus.AVAILABLE, Map.of(
                     "registration_number", "280000001",
                     "medical_boards", List.of("Madrid"),
                     "entitled_to_practise", true)));
         }
-        PersonalIdentifier deregistered = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000002W");
-        if (searched.sameAs(deregistered)) {
-            return LookupResult.found(new SourceRecord(List.of(deregistered,
-                    new PersonalIdentifier(IdentifierType.COLEGIADO, "280000002")), false, Map.of()));
+        if (identifier.sameAs(new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000002W"))) {
+            return SourceRequests.noRequests();
         }
-        return LookupResult.notFound();
+        return SourceRequests.notFound();
     }
 
     @AfterEach
@@ -165,15 +170,16 @@ class EntitlementServiceTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"personal_id,00000002W,NOT_ENTITLED", "personal_id,00000009Y,NOT_FOUND", "colegiado,289999999,NOT_FOUND"})
-    @DisplayName("AC-07 — check_deregisteredOrUnknown_isNotConfirmedAndWithdrawsTheJourney")
-    void check_deregisteredOrUnknown_isNotConfirmedAndWithdrawsTheJourney(String type, String value,
-                                                                         NotConfirmedReason reason) {
+    @CsvSource({"personal_id,00000002W,NO_REQUESTS", "personal_id,00000009Y,NOT_FOUND", "colegiado,289999999,NOT_FOUND"})
+    @DisplayName("AC-03 — check_withoutRequestsOrUnknown_isNotConfirmedAndWithdrawsTheJourney")
+    void check_withoutRequestsOrUnknown_isNotConfirmedAndWithdrawsTheJourney(String type, String value,
+                                                                            NotConfirmedReason reason) {
         HolderRef holder = journeyWith(es.in2.issuanceportal.session.api.IdentifierType.fromCode(type).orElseThrow(),
                 value, null);
         UUID id = journeyId(holder);
 
-        assertThat(service.check(CGCOM, holder)).isEqualTo(new EntitlementService.Outcome.NotConfirmed(reason));
+        assertThat(service.check(CGCOM, holder))
+                .isEqualTo(new EntitlementService.Outcome.NotConfirmed(Optional.of(reason)));
 
         Journey withdrawn = stored(id);
         assertThat(withdrawn.state()).isEqualTo(JourneyState.WITHDRAWN);
@@ -183,16 +189,45 @@ class EntitlementServiceTest {
     }
 
     @Test
-    @DisplayName("AC-08 — check_sourceReturnsAnotherPerson_isIdentifierMismatchAndWithdraws")
-    void check_sourceReturnsAnotherPerson_isIdentifierMismatchAndWithdraws() {
-        adapter.answering(searched -> LookupResult.found(new SourceRecord(
-                List.of(new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000003A")), true, Map.of())));
+    @DisplayName("AC-04 — check_noRequestAvailable_isNotConfirmedWithoutReasonAndWithdraws")
+    void check_noRequestAvailable_isNotConfirmedWithoutReasonAndWithdraws() {
+        adapter.answering(searched -> SourceRequests.of(request("SIM-1", RequestStatus.IDENTITY_MISMATCH, Map.of()),
+                request("SIM-2", RequestStatus.IDENTIFIER_MISMATCH, Map.of())));
         HolderRef holder = journeyWithDni("00000001R");
         UUID id = journeyId(holder);
 
         assertThat(service.check(CGCOM, holder))
-                .isEqualTo(new EntitlementService.Outcome.NotConfirmed(NotConfirmedReason.IDENTIFIER_MISMATCH));
+                .isEqualTo(new EntitlementService.Outcome.NotConfirmed(Optional.empty()));
         assertThat(stored(id).withdrawalReason()).contains(WithdrawalReason.NOT_ENTITLED);
+        assertThat(sessions.journeyOf(CGCOM, holder)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("EC-08 — check_oneAvailableAndOneMismatch_isConfirmedWithTheAvailableOneData")
+    void check_oneAvailableAndOneMismatch_isConfirmedWithTheAvailableOneData() {
+        adapter.answering(searched -> SourceRequests.of(
+                request("SIM-1", RequestStatus.IDENTITY_MISMATCH, Map.of("registration_number", "280000009")),
+                request("SIM-2", RequestStatus.AVAILABLE, Map.of("registration_number", "280000001"))));
+        HolderRef holder = journeyWithDni("00000001R");
+
+        AttestationPreview preview = ((EntitlementService.Outcome.Confirmed) service.check(CGCOM, holder)).preview();
+
+        assertThat(preview.fields()).extracting(AttestationPreview.Field::value)
+                .contains("280000001").doesNotContain("280000009");
+    }
+
+    @Test
+    @DisplayName("AC-16 — check_certificateLogin_theSourceGetsTheNameTheFamilyNamesAndThePersonalId")
+    void check_certificateLogin_theSourceGetsTheNameTheFamilyNamesAndThePersonalId() {
+        HolderRef holder = journeyWithDni("00000001R");
+
+        service.check(CGCOM, holder);
+
+        assertThat(adapter.holders()).singleElement().satisfies(searched -> {
+            assertThat(searched.givenName()).isEqualTo("Lucía");
+            assertThat(searched.familyNames()).isEqualTo("Prueba Sintética");
+            assertThat(searched.identifier()).isEqualTo(ACTIVE_DNI);
+        });
     }
 
     @Test
@@ -342,17 +377,15 @@ class EntitlementServiceTest {
     }
 
     @Test
-    @DisplayName("AC-08, AC-11 — check_identifierMismatch_tracesTheDetailedReason")
-    void check_identifierMismatch_tracesTheDetailedReason() {
-        adapter.answering(searched -> LookupResult.found(new SourceRecord(
-                List.of(new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000003A")), true, Map.of())));
-        HolderRef holder = journeyWithDni("00000001R");
+    @DisplayName("AC-03, AC-11 — check_holderWithoutRequests_tracesTheReason")
+    void check_holderWithoutRequests_tracesTheReason() {
+        HolderRef holder = journeyWithDni("00000002W");
 
         service.check(CGCOM, holder);
 
         assertThat(trail.events()).singleElement().satisfies(event -> {
             assertThat(event.result()).isEqualTo(AuthenticSourceAuditTrail.Result.NOT_CONFIRMED);
-            assertThat(event.reason()).contains(NotConfirmedReason.IDENTIFIER_MISMATCH);
+            assertThat(event.reason()).contains(NotConfirmedReason.NO_REQUESTS);
         });
     }
 
