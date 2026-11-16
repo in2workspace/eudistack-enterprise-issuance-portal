@@ -88,7 +88,13 @@ public class JourneyViewService {
      */
     public record RequestView(String id, RequestStatus status, Optional<String> notAvailableReason,
                               Optional<String> requestedBy, Optional<Instant> requestedAt, boolean renewal,
+                              Optional<String> displayIdentifier, Optional<String> organization,
                               Optional<Attestation> attestation, Optional<IssuanceService.Offer> offer) {
+
+        @Override
+        public String toString() {
+            return "RequestView[id=" + id + ", status=" + status.code() + ", personal data and offer redacted]";
+        }
     }
 
     public View current(TenantId tenant, HolderRef holder) {
@@ -127,7 +133,9 @@ public class JourneyViewService {
                 ? issuance.entry(request.id()).flatMap(entry -> offer(tenant, journeyId, entry))
                 : Optional.empty();
         return new RequestView(request.id(), status, reason, Optional.ofNullable(request.requestedBy()),
-                Optional.ofNullable(request.requestedAt()), request.renewal(), attestation, offer);
+                Optional.ofNullable(request.requestedAt()), request.renewal(),
+                Optional.ofNullable(request.displayIdentifier()), Optional.ofNullable(request.organization()),
+                attestation, offer);
     }
 
     private static EmailVerification verification(String section) {

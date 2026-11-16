@@ -57,6 +57,8 @@ record JourneyResponse(
             @JsonProperty("requested_by") String requestedBy,
             @JsonProperty("requested_at") String requestedAt,
             boolean renewal,
+            @JsonProperty("display_identifier") String displayIdentifier,
+            String organization,
             AttestationPreviewResponse attestation,
             OfferResponse offer) {
 
@@ -64,6 +66,7 @@ record JourneyResponse(
             return new RequestResponse(request.id(), request.status().code(),
                     request.notAvailableReason().orElse(null), request.requestedBy().orElse(null),
                     request.requestedAt().map(Object::toString).orElse(null), request.renewal(),
+                    request.displayIdentifier().orElse(null), request.organization().orElse(null),
                     request.attestation().map(AttestationPreviewResponse::of).orElse(null),
                     request.offer().map(OfferResponse::of).orElse(null));
         }

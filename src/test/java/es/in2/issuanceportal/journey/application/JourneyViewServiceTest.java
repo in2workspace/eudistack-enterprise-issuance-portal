@@ -168,6 +168,27 @@ class JourneyViewServiceTest {
     }
 
     @Test
+    @DisplayName("AC-01 — the organization and the display identifier come when the source gives them, and never the source reference")
+    void current_requestWithOrganizationAndDisplayIdentifier_carriesThemAndHidesThemInTheTextForm() {
+        HolderRef holder = confirmed();
+        EntitlementRecord known = entitlementOf(holder);
+        EntitlementRecord.Request given = known.requests().getFirst();
+        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, new EntitlementRecord(known.identifierType(),
+                known.email(), List.of(new EntitlementRecord.Request("r1", "SIM-SECRET", given.status(),
+                        given.mismatchedFields(), false, null, null, "280000001-A", "Colegio de Prueba",
+                        given.claims(), given.preview()), withId(given, "r2")), known.checkedAt()).toJson());
+
+        List<JourneyViewService.RequestView> requests = service.current(SANDBOX, holder).requests();
+
+        assertThat(requests.get(0).displayIdentifier()).contains("280000001-A");
+        assertThat(requests.get(0).organization()).contains("Colegio de Prueba");
+        assertThat(requests.get(1).displayIdentifier()).isEmpty();
+        assertThat(requests.get(1).organization()).isEmpty();
+        assertThat(requests.toString()).doesNotContain("280000001-A", "Colegio de Prueba", "SIM-SECRET");
+        assertThat(messages()).noneMatch(message -> message.contains("280000001-A") || message.contains("Colegio de Prueba"));
+    }
+
+    @Test
     @DisplayName("AC-05 — a request with a process is in_offer, with its offer and onboarding address and still its data")
     void current_requestWithProcessAndOffer_isInOfferWithItsOffer() {
         HolderRef holder = confirmed();

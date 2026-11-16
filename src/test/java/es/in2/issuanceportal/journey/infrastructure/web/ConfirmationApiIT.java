@@ -866,9 +866,14 @@ class ConfirmationApiIT {
                     return mvc.perform(confirmationOf(holder, id)).andReturn().getResponse().getStatus();
                 }));
             }
+            List<Integer> statuses = new ArrayList<>();
             for (Future<Integer> answer : answers) {
-                assertThat(answer.get(20, TimeUnit.SECONDS)).isEqualTo(200);
+                statuses.add(answer.get(20, TimeUnit.SECONDS));
             }
+            // The duplicate of r1 answers the stored offer (200) or, if it arrives after the first finished, the
+            // onboarding_unavailable of a request that has its process (until EUD-359 task 4): never a second process.
+            assertThat(statuses).isSubsetOf(200, 503);
+            assertThat(statuses.stream().filter(status -> status == 200).count()).isGreaterThanOrEqualTo(2L);
         }
 
         assertThat(jdbc.sql("SELECT count(*) FROM \"sandbox_issuance_portal\".journey_issuance WHERE journey_id = :id")

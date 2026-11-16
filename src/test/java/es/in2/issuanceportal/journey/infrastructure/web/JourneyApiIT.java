@@ -583,6 +583,10 @@ class JourneyApiIT {
                 .andExpect(jsonPath("$.requests[0].renewal").value(true))
                 .andExpect(jsonPath("$.requests[0].requested_by").value("Hospital Ejemplo"))
                 .andExpect(jsonPath("$.requests[0].requested_at").value("2026-11-03T08:00:00Z"))
+                .andExpect(jsonPath("$.requests[0].display_identifier").value("280000001"))
+                .andExpect(jsonPath("$.requests[0].organization").value("Colegio de Prueba"))
+                .andExpect(jsonPath("$.requests[1].display_identifier").value("280000002"))
+                .andExpect(jsonPath("$.requests[1].organization").doesNotExist())
                 .andExpect(jsonPath("$.requests[0].attestation.type_name").value("DoctorID"))
                 .andExpect(jsonPath("$.requests[0].attestation.fields[0].label").value("Nombre y apellidos"))
                 .andExpect(jsonPath("$.requests[0].attestation.fields[0].value").value("Lucía Prueba Sintética"))
@@ -596,7 +600,7 @@ class JourneyApiIT {
                 .andExpect(jsonPath("$.offer").doesNotExist())
                 .andReturn().getResponse().getContentAsString();
 
-        assertThat(body).doesNotContain("SIM-1", "SIM-2", "source_ref", "display_identifier", "organization");
+        assertThat(body).doesNotContain("SIM-1", "SIM-2", "source_ref");
     }
 
     @Test
