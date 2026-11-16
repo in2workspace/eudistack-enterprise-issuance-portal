@@ -17,6 +17,7 @@ import es.in2.issuanceportal.journey.application.port.OnboardingTicketException;
 import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
 import es.in2.issuanceportal.session.api.EmailRecord;
 import es.in2.issuanceportal.session.api.EmailVerificationRecord;
+import es.in2.issuanceportal.session.EntitlementRecords;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.IdentifierType;
@@ -812,12 +813,12 @@ class ConfirmationApiIT {
         TestHolder holder = startedJourney();
         sessions.write(SANDBOX, journeyOf(holder), Section.IDENTITY, identity());
         progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.IDENTIFIED);
-        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.PERSONAL_ID, Map.of(
+        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, EntitlementRecords.available(IdentifierType.PERSONAL_ID, Map.of(
                 "personal_administrative_number", ADMINISTRATIVE_NUMBER,
                 "medical_board", List.of("Colegio de Medicos de Prueba"),
                 "medical_speciality", List.of("Cardiology"),
                 "legally_entitled", true),
-                new EntitlementRecord.Preview("DoctorID", List.of(), null, true), clock.instant()).toJson());
+                new EntitlementRecord.Preview("DoctorID", List.of()), null, clock.instant()).toJson());
         progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
         return holder;
     }

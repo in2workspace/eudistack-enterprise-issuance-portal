@@ -26,6 +26,7 @@ import es.in2.issuanceportal.journey.domain.config.Support;
 import es.in2.issuanceportal.session.InMemoryJourneySessions;
 import es.in2.issuanceportal.session.api.EmailRecord;
 import es.in2.issuanceportal.session.api.EmailVerificationRecord;
+import es.in2.issuanceportal.session.EntitlementRecords;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.IdentifierType;
@@ -774,8 +775,8 @@ class IssuanceServiceTest {
     }
 
     private EntitlementRecord entitlement() {
-        return new EntitlementRecord(IdentifierType.PERSONAL_ID, CLAIMS,
-                new EntitlementRecord.Preview("DoctorID", List.of(), null, true), clock.instant());
+        return EntitlementRecords.available(IdentifierType.PERSONAL_ID, CLAIMS,
+                new EntitlementRecord.Preview("DoctorID", List.of()), null, clock.instant());
     }
 
     private static PortalConfig config(String attestationType, Map<String, String> placement, Onboarding onboarding) {

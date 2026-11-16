@@ -15,6 +15,7 @@ import es.in2.issuanceportal.shared.tenant.TenantId;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
@@ -45,20 +46,41 @@ public class JourneyViewService {
      * The journey and, when the session still has them, its preview (AC-16), its offer (AC-17) and its email
      * verification, from the first code sent until the journey obtains its offer or ends (EUD-358).
      */
-    public record View(Journey journey, Optional<EntitlementRecord.Preview> attestation,
+    public record View(Journey journey, Optional<Attestation> attestation,
                        Optional<IssuanceService.Offer> offer, Optional<EmailVerification> emailVerification) {
+    }
+
+    /**
+     * What the Data step shows: the preview of one request and the email the holder is known by. Until
+     * EUD-359 task 3 it is the preview of the first available request.
+     */
+    public record Attestation(String typeName, List<EntitlementRecord.Field> fields, String email,
+                              boolean emailRequired) {
+
+        @Override
+        public String toString() {
+            return "Attestation[typeName=" + typeName + ", fields=" + fields.size() + ", emailRequired="
+                    + emailRequired + ", personal data redacted]";
+        }
     }
 
     public View current(TenantId tenant, HolderRef holder) {
         Journey journey = journeys.current(tenant, holder);
-        Optional<EntitlementRecord.Preview> attestation = read(tenant, journey.id(), Section.ENTITLEMENT,
-                EntitlementRecord::fromJson).map(EntitlementRecord::preview);
+        // EUD-359 task 3 replaces this with per-request confirmation
+        Optional<Attestation> attestation = read(tenant, journey.id(), Section.ENTITLEMENT,
+                EntitlementRecord::fromJson).flatMap(JourneyViewService::attestation);
         Optional<IssuanceService.Offer> offer = read(tenant, journey.id(), Section.ISSUANCE,
                 IssuanceRecord::fromJson).flatMap(issuance -> offer(tenant, journey.id(), issuance));
         Optional<EmailVerification> emailVerification = journey.state() == JourneyState.IN_PROGRESS
                 ? read(tenant, journey.id(), Section.EMAIL_VERIFICATION, JourneyViewService::verification)
                 : Optional.empty();
         return new View(journey, attestation, offer, emailVerification);
+    }
+
+    private static Optional<Attestation> attestation(EntitlementRecord entitlement) {
+        return entitlement.firstAvailable().map(EntitlementRecord.Request::preview)
+                .map(preview -> new Attestation(preview.typeName(), preview.fields(), entitlement.email(),
+                        entitlement.email() == null));
     }
 
     private static EmailVerification verification(String section) {

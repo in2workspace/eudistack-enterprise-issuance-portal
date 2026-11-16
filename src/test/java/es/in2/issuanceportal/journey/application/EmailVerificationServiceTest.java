@@ -20,6 +20,7 @@ import es.in2.issuanceportal.journey.domain.config.Support;
 import es.in2.issuanceportal.session.InMemoryJourneySessions;
 import es.in2.issuanceportal.session.api.EmailRecord;
 import es.in2.issuanceportal.session.api.EmailVerificationRecord;
+import es.in2.issuanceportal.session.EntitlementRecords;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.IdentifierType;
@@ -744,9 +745,9 @@ class EmailVerificationServiceTest {
 
     private HolderRef entitledJourney() {
         HolderRef holder = identifiedJourney();
-        sessions.write(CGCOM, journeyOf(holder), Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.PERSONAL_ID,
+        sessions.write(CGCOM, journeyOf(holder), Section.ENTITLEMENT, EntitlementRecords.available(IdentifierType.PERSONAL_ID,
                 Map.of("legally_entitled", true),
-                new EntitlementRecord.Preview("DoctorID", List.of(), null, true), clock.instant()).toJson());
+                new EntitlementRecord.Preview("DoctorID", List.of()), null, clock.instant()).toJson());
         journey.reach(CGCOM, holder, JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
         return holder;
     }

@@ -5,7 +5,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import es.in2.issuanceportal.journey.application.JourneyViewService;
 import es.in2.issuanceportal.journey.domain.Journey;
 import es.in2.issuanceportal.journey.domain.WithdrawalReason;
-import es.in2.issuanceportal.session.api.EntitlementRecord;
 
 import java.util.List;
 
@@ -54,7 +53,7 @@ record JourneyResponse(
             @JsonInclude(JsonInclude.Include.NON_NULL) @JsonProperty("email") String email,
             @JsonProperty("email_required") boolean emailRequired) {
 
-        static AttestationPreviewResponse of(EntitlementRecord.Preview preview) {
+        static AttestationPreviewResponse of(JourneyViewService.Attestation preview) {
             return new AttestationPreviewResponse(preview.typeName(),
                     preview.fields().stream().map(field -> new FieldResponse(field.label(), field.value())).toList(),
                     preview.email(), preview.emailRequired());

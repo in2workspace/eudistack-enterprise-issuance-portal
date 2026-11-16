@@ -98,15 +98,22 @@ class EntitlementSimulatedIT {
         mvc.perform(entitlement(holder))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result").value("confirmed"))
-                .andExpect(jsonPath("$.attestation.type_name").value("DoctorID"))
-                .andExpect(jsonPath("$.attestation.fields[0].value").value("Lucía Prueba Activa"))
-                .andExpect(jsonPath("$.attestation.fields[1].label").value("Número de colegiado"))
-                .andExpect(jsonPath("$.attestation.fields[1].value").value("280000001"))
-                .andExpect(jsonPath("$.attestation.fields[2].value").value("Colegio de Médicos de Prueba"))
-                .andExpect(jsonPath("$.attestation.fields[3].value").value("Family and Community Medicine, Cardiology"))
-                .andExpect(jsonPath("$.attestation.fields[4].value").value("Sí"))
-                .andExpect(jsonPath("$.attestation.email_required").value(true))
-                .andExpect(jsonPath("$.attestation.fields[?(@.value == '00000001R')]").isEmpty());
+                .andExpect(jsonPath("$.requests.length()").value(1))
+                .andExpect(jsonPath("$.requests[0].id").value("r1"))
+                .andExpect(jsonPath("$.requests[0].status").value("available"))
+                .andExpect(jsonPath("$.requests[0].display_identifier").value("280000001"))
+                .andExpect(jsonPath("$.requests[0].organization").value("Colegio de Médicos de Prueba"))
+                .andExpect(jsonPath("$.requests[0].requested_at").value("2026-10-01T09:00:00Z"))
+                .andExpect(jsonPath("$.requests[0].attestation.type_name").value("DoctorID"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[0].value").value("Lucía Prueba Activa"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[1].label").value("Número de colegiado"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[1].value").value("280000001"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[2].value").value("Colegio de Médicos de Prueba"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[3].value")
+                        .value("Family and Community Medicine, Cardiology"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[4].value").value("Sí"))
+                .andExpect(jsonPath("$..source_ref").isEmpty())
+                .andExpect(jsonPath("$.requests[0].attestation.fields[?(@.value == '00000001R')]").isEmpty());
 
         UUID journeyId = sessions.journeyOf(SANDBOX, holder.ref()).orElseThrow();
         assertThat(journeyRow(journeyId)).containsEntry("step", "entitlement_confirmed");
@@ -138,13 +145,107 @@ class EntitlementSimulatedIT {
         mvc.perform(entitlement(holder))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result").value("not_confirmed"))
-                .andExpect(jsonPath("$.reason").value(reason));
+                .andExpect(jsonPath("$.reason").value(reason))
+                .andExpect(jsonPath("$.requests").isEmpty());
 
         assertThat(journeyRow(journeyId))
                 .containsEntry("state", "withdrawn")
                 .containsEntry("withdrawal_reason", "not_entitled");
         assertThat(jdbc.sql("SELECT count(*) FROM \"sandbox_issuance_portal\".journey_session WHERE journey_id = :id")
                 .param("id", journeyId).query(Integer.class).single()).isZero();
+    }
+
+    @Test
+    @DisplayName("AC-01 — postEntitlement_threeRequests_confirmsWithTheThreeInTheOrderOfTheSource")
+    void postEntitlement_threeRequests_confirmsWithTheThreeInTheOrderOfTheSource() throws Exception {
+        TestHolder holder = journeyWith(IdentifierType.PERSONAL_ID, "00000005M");
+
+        mvc.perform(entitlement(holder))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result").value("confirmed"))
+                .andExpect(jsonPath("$.reason").doesNotExist())
+                .andExpect(jsonPath("$.requests.length()").value(3))
+                .andExpect(jsonPath("$.requests[0].id").value("r1"))
+                .andExpect(jsonPath("$.requests[0].status").value("available"))
+                .andExpect(jsonPath("$.requests[0].display_identifier").value("280000005-1"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[3].value").value("Dermatology"))
+                .andExpect(jsonPath("$.requests[1].id").value("r2"))
+                .andExpect(jsonPath("$.requests[1].status").value("identity_mismatch"))
+                .andExpect(jsonPath("$.requests[1].mismatched_fields[0]").value("given_name"))
+                .andExpect(jsonPath("$.requests[1].attestation").doesNotExist())
+                .andExpect(jsonPath("$.requests[2].id").value("r3"))
+                .andExpect(jsonPath("$.requests[2].status").value("available"))
+                .andExpect(jsonPath("$.requests[2].organization").value("Colegio de Médicos de Prueba (Sección Sur)"))
+                .andExpect(jsonPath("$.requests[2].attestation.fields[3].value").value("Psychiatry"))
+                .andExpect(jsonPath("$..source_ref").isEmpty());
+
+        assertThat(journeyRow(journeyOf(holder))).containsEntry("step", "entitlement_confirmed");
+    }
+
+    @Test
+    @DisplayName("EC-08 — postEntitlement_oneAvailableAndOneMismatch_isConfirmedWithBoth")
+    void postEntitlement_oneAvailableAndOneMismatch_isConfirmedWithBoth() throws Exception {
+        TestHolder holder = journeyWith(IdentifierType.COLEGIADO, "280000004");
+
+        mvc.perform(entitlement(holder))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result").value("confirmed"))
+                .andExpect(jsonPath("$.requests[0].status").value("available"))
+                .andExpect(jsonPath("$.requests[1].status").value("identity_mismatch"))
+                .andExpect(jsonPath("$.requests[1].mismatched_fields[0]").value("family_names"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"00000006Y,identity_mismatch", "00000007F,identifier_mismatch"})
+    @DisplayName("AC-04 — postEntitlement_onlyRequestDoesNotMatch_isNotConfirmedWithoutReasonAndWithdraws")
+    void postEntitlement_onlyRequestDoesNotMatch_isNotConfirmedWithoutReasonAndWithdraws(String dni, String status)
+            throws Exception {
+        TestHolder holder = journeyWith(IdentifierType.PERSONAL_ID, dni);
+        UUID journeyId = journeyOf(holder);
+
+        mvc.perform(entitlement(holder))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result").value("not_confirmed"))
+                .andExpect(jsonPath("$.reason").doesNotExist())
+                .andExpect(jsonPath("$.requests.length()").value(1))
+                .andExpect(jsonPath("$.requests[0].id").value("r1"))
+                .andExpect(jsonPath("$.requests[0].status").value(status))
+                .andExpect(jsonPath("$.requests[0].attestation").doesNotExist());
+
+        assertThat(journeyRow(journeyId)).containsEntry("state", "withdrawn")
+                .containsEntry("withdrawal_reason", "not_entitled");
+    }
+
+    @Test
+    @DisplayName("AC-04 — postEntitlement_identityMismatch_saysWhichDataDoesNotMatch")
+    void postEntitlement_identityMismatch_saysWhichDataDoesNotMatch() throws Exception {
+        mvc.perform(entitlement(journeyWith(IdentifierType.PERSONAL_ID, "00000006Y")))
+                .andExpect(jsonPath("$.requests[0].mismatched_fields.length()").value(2))
+                .andExpect(jsonPath("$.requests[0].mismatched_fields[0]").value("given_name"))
+                .andExpect(jsonPath("$.requests[0].mismatched_fields[1]").value("family_names"));
+    }
+
+    @Test
+    @DisplayName("EC-05 — postEntitlement_renewal_isShownAsRenewal")
+    void postEntitlement_renewal_isShownAsRenewal() throws Exception {
+        mvc.perform(entitlement(journeyWith(IdentifierType.PERSONAL_ID, "00000008P")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.result").value("confirmed"))
+                .andExpect(jsonPath("$.requests[0].status").value("available"))
+                .andExpect(jsonPath("$.requests[0].renewal").value(true));
+    }
+
+    @Test
+    @DisplayName("EC-04 — postEntitlement_valuesInTheFormOfAList_areShownJoined")
+    void postEntitlement_valuesInTheFormOfAList_areShownJoined() throws Exception {
+        TestHolder holder = journeyWith(IdentifierType.PERSONAL_ID, "00000011B");
+
+        mvc.perform(entitlement(holder))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.requests[0].attestation.fields[2].value")
+                        .value("Colegio de Médicos de Prueba, Colegio de Médicos de Prueba (Sección Norte)"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[3].label").value("Especialidad"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[3].value").value("Cardiología, Medicina interna"));
     }
 
     @Test
@@ -184,8 +285,9 @@ class EntitlementSimulatedIT {
         assertThat(traces).hasSize(3);
         assertThat(traces.get(0)).contains("\"result\":\"confirmed\"", "\"identifier_type\":\"personal_id\"",
                 "\"adapter\":\"simulated\"", "\"attestation_type\":\"doctorid.sd.1\"", "\"duration_ms\":");
+        assertThat(traces.get(0)).contains("\"requests_by_status\":{\"available\":1}");
         assertThat(traces.get(1)).contains("\"result\":\"not_confirmed\"", "\"reason\":\"no_requests\"",
-                "\"identifier_type\":\"colegiado\"");
+                "\"identifier_type\":\"colegiado\"", "\"requests_by_status\":{}");
         assertThat(traces.get(2)).contains("\"reason\":\"not_found\"");
         assertThat(logged).doesNotContain(PERSONAL_DATA.toArray(String[]::new));
     }

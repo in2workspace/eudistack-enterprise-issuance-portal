@@ -2,11 +2,15 @@ package es.in2.issuanceportal.authenticsource.infrastructure.audit;
 
 import es.in2.issuanceportal.authenticsource.application.port.AuthenticSourceAuditTrail;
 import es.in2.issuanceportal.authenticsource.domain.NotConfirmedReason;
+import es.in2.issuanceportal.authenticsource.domain.RequestStatus;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static net.logstash.logback.argument.StructuredArguments.kv;
 
@@ -29,11 +33,22 @@ class LogAuthenticSourceAuditTrail implements AuthenticSourceAuditTrail {
         this.audit = audit;
     }
 
+    private static Map<String, Integer> byCode(Map<RequestStatus, Integer> requestsByStatus) {
+        Map<String, Integer> counts = new LinkedHashMap<>();
+        for (RequestStatus status : RequestStatus.values()) {
+            Integer count = requestsByStatus.get(status);
+            if (count != null && count > 0) {
+                counts.put(status.code(), count);
+            }
+        }
+        return counts;
+    }
+
     /** The trail never decides the outcome of a check: a failure is only logged, without personal data. */
     @Override
     public void append(TenantId tenant, Event event) {
         try {
-            audit.info("entitlement check {} {} {} {} {} {} {} {} {} {}",
+            audit.info("entitlement check {} {} {} {} {} {} {} {} {} {} {}",
                     kv("journey_id", event.journeyId()),
                     kv("event_id", event.eventId()),
                     kv("tenant", tenant.value()),
@@ -42,6 +57,7 @@ class LogAuthenticSourceAuditTrail implements AuthenticSourceAuditTrail {
                     kv("identifier_type", event.identifierType().code()),
                     kv("result", event.result().code()),
                     kv("reason", event.reason().map(NotConfirmedReason::code).orElse(null)),
+                    kv("requests_by_status", byCode(event.requestsByStatus())),
                     kv("duration_ms", event.duration().toMillis()),
                     kv("occurred_at", event.occurredAt()));
         } catch (RuntimeException e) {

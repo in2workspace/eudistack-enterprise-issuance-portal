@@ -3,6 +3,7 @@ package es.in2.issuanceportal.authenticsource.infrastructure.audit;
 import es.in2.issuanceportal.authenticsource.application.port.AuthenticSourceAuditTrail;
 import es.in2.issuanceportal.authenticsource.domain.IdentifierType;
 import es.in2.issuanceportal.authenticsource.domain.NotConfirmedReason;
+import es.in2.issuanceportal.authenticsource.domain.RequestStatus;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -11,6 +12,7 @@ import org.slf4j.Logger;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -35,8 +37,8 @@ class LogAuthenticSourceAuditTrailTest {
 
         trail.append(CGCOM, new AuthenticSourceAuditTrail.Event(UUID.randomUUID(), journeyId, "doctorid.sd.1",
                 "simulated", IdentifierType.COLEGIADO, AuthenticSourceAuditTrail.Result.NOT_CONFIRMED,
-                Optional.of(NotConfirmedReason.NO_REQUESTS), Duration.ofMillis(42),
-                Instant.parse("2026-10-28T10:00:00Z")));
+                Optional.empty(), Map.of(RequestStatus.IDENTITY_MISMATCH, 1, RequestStatus.AVAILABLE, 2),
+                Duration.ofMillis(42), Instant.parse("2026-10-28T10:00:00Z")));
 
         ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
         verify(audit).info(anyString(), arguments.capture());
@@ -48,9 +50,23 @@ class LogAuthenticSourceAuditTrailTest {
                 "adapter=simulated",
                 "identifier_type=colegiado",
                 "result=not_confirmed",
-                "reason=no_requests",
+                "reason=null",
+                "requests_by_status={available=2, identity_mismatch=1}",
                 "duration_ms=42",
                 "occurred_at=2026-10-28T10:00:00Z");
+    }
+
+    @Test
+    void append_checkWithoutRequests_writesTheReasonAndAnEmptyCount() {
+        trail.append(CGCOM, new AuthenticSourceAuditTrail.Event(UUID.randomUUID(), UUID.randomUUID(),
+                "doctorid.sd.1", "simulated", IdentifierType.PERSONAL_ID,
+                AuthenticSourceAuditTrail.Result.NOT_CONFIRMED, Optional.of(NotConfirmedReason.NO_REQUESTS), Map.of(),
+                Duration.ZERO, Instant.now()));
+
+        ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
+        verify(audit).info(anyString(), arguments.capture());
+        assertThat(Arrays.stream(arguments.getValue()).map(String::valueOf).toList())
+                .contains("reason=no_requests", "requests_by_status={}");
     }
 
     @Test
@@ -59,6 +75,6 @@ class LogAuthenticSourceAuditTrailTest {
 
         assertThatNoException().isThrownBy(() -> trail.append(CGCOM, new AuthenticSourceAuditTrail.Event(
                 UUID.randomUUID(), UUID.randomUUID(), "doctorid.sd.1", "none", IdentifierType.PERSONAL_ID,
-                AuthenticSourceAuditTrail.Result.CONFIRMED, Optional.empty(), Duration.ZERO, Instant.now())));
+                AuthenticSourceAuditTrail.Result.CONFIRMED, Optional.empty(), Map.of(), Duration.ZERO, Instant.now())));
     }
 }

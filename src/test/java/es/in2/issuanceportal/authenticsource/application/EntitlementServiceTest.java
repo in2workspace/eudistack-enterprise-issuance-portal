@@ -145,17 +145,26 @@ class EntitlementServiceTest {
         EntitlementService.Outcome outcome = service.check(CGCOM, holder);
 
         assertThat(adapter.searches()).containsExactly(ACTIVE_DNI);
-        AttestationPreview preview = ((EntitlementService.Outcome.Confirmed) outcome).preview();
+        EntitlementService.CheckedRequest request = ((EntitlementService.Outcome.Confirmed) outcome).requests()
+                .getFirst();
+        assertThat(request.id()).isEqualTo("r1");
+        assertThat(request.status()).isEqualTo(RequestStatus.AVAILABLE);
+        AttestationPreview preview = request.preview().orElseThrow();
         assertThat(preview.typeName()).isEqualTo("DoctorID");
         assertThat(preview.fields()).extracting(AttestationPreview.Field::value)
                 .contains("Lucía Prueba Sintética", "280000001", "Madrid", "Sí")
                 .doesNotContain("00000001R");
-        assertThat(preview.emailRequired()).isTrue();
         EntitlementRecord written = EntitlementRecord.fromJson(
                 sessions.read(CGCOM, journeyId(holder), Section.ENTITLEMENT).orElseThrow());
         assertThat(written.identifierTypeIfSearched()).contains(es.in2.issuanceportal.session.api.IdentifierType.PERSONAL_ID);
-        assertThat(written.claims()).containsOnlyKeys("personal_administrative_number", "medical_board",
-                "legally_entitled");
+        assertThat(written.emailIfKnown()).isEmpty();
+        assertThat(written.requests()).singleElement().satisfies(entry -> {
+            assertThat(entry.id()).isEqualTo("r1");
+            assertThat(entry.sourceRef()).isEqualTo("SIM-1");
+            assertThat(entry.claims()).containsOnlyKeys("personal_administrative_number", "medical_board",
+                    "legally_entitled");
+            assertThat(entry.preview().fields()).hasSize(4);
+        });
         assertThat(written.checkedAt()).isEqualTo(clock.instant());
         assertThat(stored(id).step()).isEqualTo(JourneyStep.ENTITLEMENT_CONFIRMED);
     }
@@ -179,7 +188,7 @@ class EntitlementServiceTest {
         UUID id = journeyId(holder);
 
         assertThat(service.check(CGCOM, holder))
-                .isEqualTo(new EntitlementService.Outcome.NotConfirmed(Optional.of(reason)));
+                .isEqualTo(new EntitlementService.Outcome.NotConfirmed(Optional.of(reason), List.of()));
 
         Journey withdrawn = stored(id);
         assertThat(withdrawn.state()).isEqualTo(JourneyState.WITHDRAWN);
@@ -196,8 +205,14 @@ class EntitlementServiceTest {
         HolderRef holder = journeyWithDni("00000001R");
         UUID id = journeyId(holder);
 
-        assertThat(service.check(CGCOM, holder))
-                .isEqualTo(new EntitlementService.Outcome.NotConfirmed(Optional.empty()));
+        EntitlementService.Outcome outcome = service.check(CGCOM, holder);
+
+        assertThat(outcome).isInstanceOf(EntitlementService.Outcome.NotConfirmed.class);
+        assertThat(((EntitlementService.Outcome.NotConfirmed) outcome).reason()).isEmpty();
+        assertThat(outcome.requests()).extracting(EntitlementService.CheckedRequest::id, EntitlementService.CheckedRequest::status)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("r1", RequestStatus.IDENTITY_MISMATCH),
+                        org.assertj.core.groups.Tuple.tuple("r2", RequestStatus.IDENTIFIER_MISMATCH));
+        assertThat(outcome.requests()).allSatisfy(request -> assertThat(request.preview()).isEmpty());
         assertThat(stored(id).withdrawalReason()).contains(WithdrawalReason.NOT_ENTITLED);
         assertThat(sessions.journeyOf(CGCOM, holder)).isEmpty();
     }
@@ -210,10 +225,20 @@ class EntitlementServiceTest {
                 request("SIM-2", RequestStatus.AVAILABLE, Map.of("registration_number", "280000001"))));
         HolderRef holder = journeyWithDni("00000001R");
 
-        AttestationPreview preview = ((EntitlementService.Outcome.Confirmed) service.check(CGCOM, holder)).preview();
+        EntitlementService.Outcome outcome = service.check(CGCOM, holder);
 
-        assertThat(preview.fields()).extracting(AttestationPreview.Field::value)
-                .contains("280000001").doesNotContain("280000009");
+        assertThat(outcome.requests()).extracting(EntitlementService.CheckedRequest::id,
+                        EntitlementService.CheckedRequest::status)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("r1", RequestStatus.IDENTITY_MISMATCH),
+                        org.assertj.core.groups.Tuple.tuple("r2", RequestStatus.AVAILABLE));
+        assertThat(outcome.requests().get(0).preview()).isEmpty();
+        assertThat(outcome.requests().get(1).preview().orElseThrow().fields())
+                .extracting(AttestationPreview.Field::value).contains("280000001").doesNotContain("280000009");
+        EntitlementRecord written = EntitlementRecord.fromJson(
+                sessions.read(CGCOM, journeyId(holder), Section.ENTITLEMENT).orElseThrow());
+        assertThat(written.requests()).extracting(EntitlementRecord.Request::claims)
+                .satisfiesExactly(first -> assertThat(first).isEmpty(),
+                        second -> assertThat(second).containsKey("personal_administrative_number"));
     }
 
     @Test
@@ -291,14 +316,19 @@ class EntitlementServiceTest {
 
         EntitlementService.Outcome outcome = service.check(CGCOM, holder);
 
-        AttestationPreview preview = ((EntitlementService.Outcome.Confirmed) outcome).preview();
-        assertThat(preview.fields()).hasSize(1);
-        assertThat(preview.email()).isEqualTo("lucia@example.org");
-        assertThat(preview.emailRequired()).isFalse();
+        assertThat(outcome.requests()).singleElement().satisfies(request -> {
+            assertThat(request.id()).isEqualTo("r1");
+            assertThat(request.status()).isEqualTo(RequestStatus.AVAILABLE);
+            assertThat(request.preview().orElseThrow().fields()).hasSize(1);
+            assertThat(request.mismatchedFields()).isEmpty();
+            assertThat(request.renewal()).isFalse();
+        });
         assertThat(adapter.searches()).isEmpty();
         EntitlementRecord written = EntitlementRecord.fromJson(
                 sessions.read(CGCOM, journeyId(holder), Section.ENTITLEMENT).orElseThrow());
-        assertThat(written.claims()).isEmpty();
+        assertThat(written.requests()).singleElement()
+                .satisfies(entry -> assertThat(entry.claims()).isEmpty());
+        assertThat(written.emailIfKnown()).contains("lucia@example.org");
         assertThat(written.identifierTypeIfSearched()).isEmpty();
     }
 
@@ -331,8 +361,8 @@ class EntitlementServiceTest {
     }
 
     @Test
-    @DisplayName("EC-01 — check_again_replacesTheEntitlement")
-    void check_again_replacesTheEntitlement() {
+    @DisplayName("EC-02 — check_again_replacesTheEntitlementAndKeepsTheIds")
+    void check_again_replacesTheEntitlementAndKeepsTheIds() {
         HolderRef holder = journeyWithDni("00000001R");
         service.check(CGCOM, holder);
         clock.advance(Duration.ofMinutes(1));
@@ -342,7 +372,96 @@ class EntitlementServiceTest {
         EntitlementRecord written = EntitlementRecord.fromJson(
                 sessions.read(CGCOM, journeyId(holder), Section.ENTITLEMENT).orElseThrow());
         assertThat(written.checkedAt()).isEqualTo(clock.instant());
+        assertThat(written.requests()).extracting(EntitlementRecord.Request::id).containsExactly("r1");
         assertThat(stored(journeyId(holder)).step()).isEqualTo(JourneyStep.ENTITLEMENT_CONFIRMED);
+    }
+
+    @Test
+    @DisplayName("EC-02 — check_again_requestsOfTheSameSourceReferenceKeepTheirIdWhateverTheOrder")
+    void check_again_requestsOfTheSameSourceReferenceKeepTheirIdWhateverTheOrder() {
+        HolderRef holder = journeyWithDni("00000001R");
+        adapter.answering(searched -> SourceRequests.of(request("SIM-A", RequestStatus.AVAILABLE, Map.of()),
+                request("SIM-B", RequestStatus.AVAILABLE, Map.of())));
+        service.check(CGCOM, holder);
+        adapter.answering(searched -> SourceRequests.of(request("SIM-C", RequestStatus.AVAILABLE, Map.of()),
+                request("SIM-B", RequestStatus.AVAILABLE, Map.of()), request("SIM-A", RequestStatus.AVAILABLE, Map.of())));
+
+        service.check(CGCOM, holder);
+
+        EntitlementRecord written = EntitlementRecord.fromJson(
+                sessions.read(CGCOM, journeyId(holder), Section.ENTITLEMENT).orElseThrow());
+        assertThat(written.requests()).extracting(EntitlementRecord.Request::sourceRef, EntitlementRecord.Request::id)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("SIM-C", "r3"),
+                        org.assertj.core.groups.Tuple.tuple("SIM-B", "r2"),
+                        org.assertj.core.groups.Tuple.tuple("SIM-A", "r1"));
+    }
+
+    @Test
+    @DisplayName("EC-02 — check_again_aRequestUnderReviewStaysUnderReviewEvenIfTheSourceGivesItAvailable")
+    void check_again_aRequestUnderReviewStaysUnderReviewEvenIfTheSourceGivesItAvailable() {
+        HolderRef holder = journeyWithDni("00000001R");
+        adapter.answering(searched -> SourceRequests.of(request("SIM-A", RequestStatus.AVAILABLE, Map.of()),
+                request("SIM-B", RequestStatus.AVAILABLE, Map.of())));
+        service.check(CGCOM, holder);
+        EntitlementRecord first = EntitlementRecord.fromJson(
+                sessions.read(CGCOM, journeyId(holder), Section.ENTITLEMENT).orElseThrow());
+        sessions.write(CGCOM, journeyId(holder), Section.ENTITLEMENT, new EntitlementRecord(first.identifierType(),
+                first.email(), first.requests().stream().map(entry -> entry.sourceRef().equals("SIM-A")
+                        ? new EntitlementRecord.Request(entry.id(), entry.sourceRef(),
+                        EntitlementRecord.Status.UNDER_REVIEW, entry.mismatchedFields(), entry.renewal(),
+                        entry.requestedBy(), entry.requestedAt(), entry.displayIdentifier(), entry.organization(),
+                        entry.claims(), entry.preview())
+                        : entry).toList(), first.checkedAt()).toJson());
+
+        EntitlementService.Outcome outcome = service.check(CGCOM, holder);
+
+        assertThat(outcome).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
+        assertThat(outcome.requests()).extracting(EntitlementService.CheckedRequest::id,
+                        EntitlementService.CheckedRequest::status)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple("r1", RequestStatus.UNDER_REVIEW),
+                        org.assertj.core.groups.Tuple.tuple("r2", RequestStatus.AVAILABLE));
+        assertThat(outcome.requests().getFirst().preview()).isPresent();
+        EntitlementRecord written = EntitlementRecord.fromJson(
+                sessions.read(CGCOM, journeyId(holder), Section.ENTITLEMENT).orElseThrow());
+        assertThat(written.requests().getFirst().status()).isEqualTo(EntitlementRecord.Status.UNDER_REVIEW);
+    }
+
+    @Test
+    @DisplayName("EC-02 — check_again_onlyRequestUnderReview_isNotConfirmedAndWithdraws")
+    void check_again_onlyRequestUnderReview_isNotConfirmedAndWithdraws() {
+        HolderRef holder = journeyWithDni("00000001R");
+        adapter.answering(searched -> SourceRequests.of(request("SIM-A", RequestStatus.AVAILABLE, Map.of())));
+        service.check(CGCOM, holder);
+        EntitlementRecord first = EntitlementRecord.fromJson(
+                sessions.read(CGCOM, journeyId(holder), Section.ENTITLEMENT).orElseThrow());
+        EntitlementRecord.Request entry = first.requests().getFirst();
+        sessions.write(CGCOM, journeyId(holder), Section.ENTITLEMENT, new EntitlementRecord(first.identifierType(),
+                first.email(), List.of(new EntitlementRecord.Request(entry.id(), entry.sourceRef(),
+                EntitlementRecord.Status.UNDER_REVIEW, entry.mismatchedFields(), entry.renewal(),
+                entry.requestedBy(), entry.requestedAt(), entry.displayIdentifier(), entry.organization(),
+                entry.claims(), entry.preview())), first.checkedAt()).toJson());
+        UUID id = journeyId(holder);
+
+        EntitlementService.Outcome outcome = service.check(CGCOM, holder);
+
+        assertThat(outcome).isInstanceOf(EntitlementService.Outcome.NotConfirmed.class);
+        assertThat(outcome.requests()).extracting(EntitlementService.CheckedRequest::status)
+                .containsExactly(RequestStatus.UNDER_REVIEW);
+        assertThat(stored(id).withdrawalReason()).contains(WithdrawalReason.NOT_ENTITLED);
+    }
+
+    @Test
+    @DisplayName("EC-02 — check_earlierSectionInThePreviousShape_isReplaced")
+    void check_earlierSectionInThePreviousShape_isReplaced() {
+        HolderRef holder = journeyWithDni("00000001R");
+        sessions.write(CGCOM, journeyId(holder), Section.ENTITLEMENT, "{\"result\":\"confirmed\","
+                + "\"claims\":{},\"preview\":{\"type_name\":\"DoctorID\",\"fields\":[]},"
+                + "\"checked_at\":\"2026-10-28T10:00:00Z\"}");
+
+        assertThat(service.check(CGCOM, holder)).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
+
+        assertThat(EntitlementRecord.fromJson(sessions.read(CGCOM, journeyId(holder), Section.ENTITLEMENT)
+                .orElseThrow()).requests()).extracting(EntitlementRecord.Request::id).containsExactly("r1");
     }
 
     @Test
@@ -493,17 +612,117 @@ class EntitlementServiceTest {
     }
 
     @Test
-    @DisplayName("AC-13 — check_identityTypeTheSourceIsNotSearchedBy_isConfigUnavailable")
-    void check_identityTypeTheSourceIsNotSearchedBy_isConfigUnavailable() {
+    @DisplayName("AC-20 — check_identityTypeTheSourceDoesNotAccept_isNotFoundWithoutAskingAndWithdraws")
+    void check_identityTypeTheSourceDoesNotAccept_isNotFoundWithoutAskingAndWithdraws(CapturedOutput output) {
         HolderRef holder = journeyWith(es.in2.issuanceportal.session.api.IdentifierType.COLEGIADO, "280000001", null);
         rows.put(CGCOM, new AuthenticSourceConfig(DOCTORID, Set.of(), Map.of(DOCTORID,
                 new SourceSettings("DoctorID", "simulated", null, null, null, Set.of(IdentifierType.PERSONAL_ID), MAPPING,
                         null, null))));
 
-        assertThatThrownBy(() -> service.check(CGCOM, holder)).isInstanceOfSatisfying(ProblemException.class,
-                e -> assertThat(e.problem()).isEqualTo(ProblemCode.CONFIG_UNAVAILABLE));
+        UUID id = journeyId(holder);
+
+        assertThat(service.check(CGCOM, holder)).isEqualTo(
+                new EntitlementService.Outcome.NotConfirmed(Optional.of(NotConfirmedReason.NOT_FOUND), List.of()));
+
         assertThat(adapter.searches()).isEmpty();
+        assertThat(stored(id).state()).isEqualTo(JourneyState.WITHDRAWN);
+        assertThat(stored(id).withdrawalReason()).contains(WithdrawalReason.NOT_ENTITLED);
+        assertThat(trail.events()).singleElement().satisfies(event -> {
+            assertThat(event.result()).isEqualTo(AuthenticSourceAuditTrail.Result.NOT_CONFIRMED);
+            assertThat(event.reason()).contains(NotConfirmedReason.NOT_FOUND);
+            assertThat(event.identifierType()).isEqualTo(IdentifierType.COLEGIADO);
+            assertThat(event.requestsByStatus()).isEmpty();
+            assertThat(event.toString()).doesNotContain("280000001", "Lucía");
+        });
+        assertThat(output.getAll()).doesNotContain("280000001");
+    }
+
+    @Test
+    @DisplayName("AC-16 — check_passportNumberFromACertificateLogin_reachesTheSourceAsPersonalId")
+    void check_passportNumberFromACertificateLogin_reachesTheSourceAsPersonalId() {
+        HolderRef holder = journeyWithDni("AB1234567");
+
+        service.check(CGCOM, holder);
+
+        assertThat(adapter.holders()).singleElement().satisfies(searched ->
+                assertThat(searched.identifier()).isEqualTo(
+                        new PersonalIdentifier(IdentifierType.PERSONAL_ID, "AB1234567")));
+    }
+
+    @Test
+    @DisplayName("AC-01, AC-11 — check_severalRequests_tracesTheCountPerStatusWithoutData")
+    void check_severalRequests_tracesTheCountPerStatusWithoutData(CapturedOutput output) {
+        adapter.answering(searched -> SourceRequests.of(
+                request("SIM-A", RequestStatus.AVAILABLE, Map.of("registration_number", "280000001")),
+                request("SIM-B", RequestStatus.IDENTITY_MISMATCH, Map.of()),
+                request("SIM-C", RequestStatus.AVAILABLE, Map.of("registration_number", "280000001"))));
+        HolderRef holder = journeyWithDni("00000001R");
+
+        service.check(CGCOM, holder);
+
+        assertThat(trail.events()).singleElement().satisfies(event -> {
+            assertThat(event.result()).isEqualTo(AuthenticSourceAuditTrail.Result.CONFIRMED);
+            assertThat(event.requestsByStatus()).containsOnly(Map.entry(RequestStatus.AVAILABLE, 2),
+                    Map.entry(RequestStatus.IDENTITY_MISMATCH, 1));
+            assertThat(event.toString()).doesNotContain("SIM-A", "SIM-B", "280000001", "Lucía");
+        });
+        assertThat(output.getAll()).doesNotContain("SIM-A", "SIM-B", "SIM-C");
+    }
+
+    @Test
+    @DisplayName("AC-01 — check_severalRequests_confirmsWithAnIdEachInTheOrderOfTheSource")
+    void check_severalRequests_confirmsWithAnIdEachInTheOrderOfTheSource() {
+        adapter.answering(searched -> SourceRequests.of(
+                request("SIM-A", RequestStatus.AVAILABLE, Map.of("registration_number", "280000001")),
+                request("SIM-B", RequestStatus.IDENTITY_MISMATCH, Map.of()),
+                request("SIM-C", RequestStatus.AVAILABLE, Map.of("registration_number", "280000003"))));
+        HolderRef holder = journeyWithDni("00000001R");
+
+        EntitlementService.Outcome outcome = service.check(CGCOM, holder);
+
+        assertThat(outcome).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
+        assertThat(outcome.requests()).extracting(EntitlementService.CheckedRequest::id).containsExactly("r1", "r2", "r3");
+        assertThat(outcome.toString()).doesNotContain("SIM-").doesNotContain("280000001");
+    }
+
+    @Test
+    @DisplayName("ES-04 — check_twoRequestsWithTheSameReference_isUnavailable")
+    void check_twoRequestsWithTheSameReference_isUnavailable() {
+        adapter.answering(searched -> SourceRequests.of(request("SIM-A", RequestStatus.AVAILABLE, Map.of()),
+                request("SIM-A", RequestStatus.AVAILABLE, Map.of())));
+        HolderRef holder = journeyWithDni("00000001R");
+
+        assertThatThrownBy(() -> service.check(CGCOM, holder)).isInstanceOfSatisfying(ProblemException.class,
+                e -> assertThat(e.problem()).isEqualTo(ProblemCode.AUTHENTIC_SOURCE_UNAVAILABLE));
         assertThat(stored(journeyId(holder)).state()).isEqualTo(JourneyState.IN_PROGRESS);
+    }
+
+    @Test
+    @DisplayName("EC-04 — check_valuesInTheFormOfAList_arePlacedAsTheSourceGivesThemAndShownJoined")
+    void check_valuesInTheFormOfAList_arePlacedAsTheSourceGivesThemAndShownJoined() {
+        adapter.answering(searched -> SourceRequests.of(request("SIM-A", RequestStatus.AVAILABLE, Map.of(
+                "medical_boards", List.of("Madrid", "Toledo")))));
+        HolderRef holder = journeyWithDni("00000001R");
+
+        EntitlementService.Outcome outcome = service.check(CGCOM, holder);
+
+        assertThat(outcome.requests().getFirst().preview().orElseThrow().fields())
+                .extracting(AttestationPreview.Field::value).contains("Madrid, Toledo");
+        assertThat(EntitlementRecord.fromJson(sessions.read(CGCOM, journeyId(holder), Section.ENTITLEMENT)
+                .orElseThrow()).requests().getFirst().claims()).containsEntry("medical_board", List.of("Madrid", "Toledo"));
+    }
+
+    @Test
+    @DisplayName("AC-14 — check_emailOfTheSource_prefillsTheEmailStepWhenTheTokenHasNone")
+    void check_emailOfTheSource_prefillsTheEmailStepWhenTheTokenHasNone() {
+        adapter.answering(searched -> SourceRequests.of(request("SIM-A", RequestStatus.AVAILABLE, Map.of(
+                "email", "fuente@example.org"))));
+        HolderRef holder = journeyWithDni("00000001R");
+
+        service.check(CGCOM, holder);
+
+        assertThat(EntitlementRecord.fromJson(sessions.read(CGCOM, journeyId(holder), Section.ENTITLEMENT)
+                .orElseThrow()).emailIfKnown()).contains("fuente@example.org");
     }
 
     @Test

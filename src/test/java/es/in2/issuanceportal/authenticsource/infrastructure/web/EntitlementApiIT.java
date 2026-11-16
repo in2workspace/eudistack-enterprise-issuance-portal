@@ -107,12 +107,17 @@ class EntitlementApiIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result").value("confirmed"))
                 .andExpect(jsonPath("$.reason").doesNotExist())
-                .andExpect(jsonPath("$.attestation.type_name").value("DoctorID"))
-                .andExpect(jsonPath("$.attestation.fields[0].label").value("Nombre y apellidos"))
-                .andExpect(jsonPath("$.attestation.fields[0].value").value("Lucía Prueba"))
-                .andExpect(jsonPath("$.attestation.fields[1].value").value("280000001"))
-                .andExpect(jsonPath("$.attestation.email").doesNotExist())
-                .andExpect(jsonPath("$.attestation.email_required").value(true));
+                .andExpect(jsonPath("$.requests.length()").value(1))
+                .andExpect(jsonPath("$.requests[0].id").value("r1"))
+                .andExpect(jsonPath("$.requests[0].status").value("available"))
+                .andExpect(jsonPath("$.requests[0].renewal").value(false))
+                .andExpect(jsonPath("$.requests[0].source_ref").doesNotExist())
+                .andExpect(jsonPath("$.requests[0].attestation.type_name").value("DoctorID"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[0].label").value("Nombre y apellidos"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[0].value").value("Lucía Prueba"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[1].value").value("280000001"))
+                .andExpect(jsonPath("$.requests[0].attestation.email").doesNotExist())
+                .andExpect(jsonPath("$.requests[0].attestation.email_required").doesNotExist());
 
         assertThat(adapter.searches()).last().isEqualTo(ACTIVE);
     }
@@ -126,6 +131,7 @@ class EntitlementApiIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result").value("not_confirmed"))
                 .andExpect(jsonPath("$.reason").value("not_found"))
+                .andExpect(jsonPath("$.requests").isEmpty())
                 .andExpect(jsonPath("$.attestation").doesNotExist());
 
         mvc.perform(entitlement(holder))

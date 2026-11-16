@@ -2,16 +2,21 @@ package es.in2.issuanceportal.authenticsource.application.port;
 
 import es.in2.issuanceportal.authenticsource.domain.IdentifierType;
 import es.in2.issuanceportal.authenticsource.domain.NotConfirmedReason;
+import es.in2.issuanceportal.authenticsource.domain.RequestStatus;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Trace of every entitlement check (prd.md FR-07, design.md §3.4). Events carry identifiers and codes
- * only: never the personal identifier nor anything the source returned.
+ * Trace of every entitlement check (prd.md FR-07, design.md §3.6). Events carry identifiers, codes and
+ * counts only: never the identity, the source's references nor anything the source returned.
+ *
+ * <p>{@code requestsByStatus} is how many requests the check ended with in each status; a status without
+ * requests is absent, and so is the whole map when no request was checked.
  */
 public interface AuthenticSourceAuditTrail {
 
@@ -40,6 +45,7 @@ public interface AuthenticSourceAuditTrail {
             IdentifierType identifierType,
             Result result,
             Optional<NotConfirmedReason> reason,
+            Map<RequestStatus, Integer> requestsByStatus,
             Duration duration,
             Instant occurredAt) {
     }

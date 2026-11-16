@@ -15,6 +15,7 @@ import es.in2.issuanceportal.journey.domain.config.ServiceSettings;
 import es.in2.issuanceportal.journey.domain.config.Support;
 import es.in2.issuanceportal.session.Holders;
 import es.in2.issuanceportal.session.InMemoryJourneySessions;
+import es.in2.issuanceportal.session.EntitlementRecords;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.IdentifierType;
@@ -100,14 +101,58 @@ class JourneyViewServiceTest {
 
         JourneyViewService.View view = service.current(SANDBOX, holder);
 
-        EntitlementRecord.Preview preview = view.attestation().orElseThrow();
+        JourneyViewService.Attestation preview = view.attestation().orElseThrow();
         assertThat(preview.typeName()).isEqualTo("DoctorID");
         assertThat(preview.fields()).extracting(EntitlementRecord.Field::label, EntitlementRecord.Field::value)
                 .containsExactly(org.assertj.core.groups.Tuple.tuple("Nombre y apellidos", HOLDER_NAME),
                         org.assertj.core.groups.Tuple.tuple("Número de colegiado", "280000001"));
         assertThat(preview.email()).isEqualTo(HOLDER_EMAIL);
-        assertThat(preview.emailRequired()).isTrue();
+        assertThat(preview.emailRequired()).isFalse();
         assertThat(view.offer()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("EUD-359 1b — current_entitlementWithoutEmail_requiresOne")
+    void current_entitlementWithoutEmail_requiresOne() {
+        HolderRef holder = confirmed();
+        EntitlementRecord known = EntitlementRecord.fromJson(
+                sessions.read(SANDBOX, journeyOf(holder), Section.ENTITLEMENT).orElseThrow());
+        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, new EntitlementRecord(known.identifierType(),
+                null, known.requests(), known.checkedAt()).toJson());
+
+        JourneyViewService.Attestation preview = service.current(SANDBOX, holder).attestation().orElseThrow();
+
+        assertThat(preview.email()).isNull();
+        assertThat(preview.emailRequired()).isTrue();
+    }
+
+    @Test
+    @DisplayName("EUD-359 1b — current_severalRequests_showsThePreviewOfTheFirstAvailableOne")
+    void current_severalRequests_showsThePreviewOfTheFirstAvailableOne() {
+        HolderRef holder = confirmed();
+        EntitlementRecord known = EntitlementRecord.fromJson(
+                sessions.read(SANDBOX, journeyOf(holder), Section.ENTITLEMENT).orElseThrow());
+        EntitlementRecord.Request mismatch = new EntitlementRecord.Request("r1", "SIM-0", EntitlementRecord.Status
+                .IDENTITY_MISMATCH, List.of("given_name"), false, null, null, null, null, null, null);
+        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, new EntitlementRecord(known.identifierType(),
+                known.email(), List.of(mismatch, known.requests().getFirst()), known.checkedAt()).toJson());
+
+        JourneyViewService.Attestation preview = service.current(SANDBOX, holder).attestation().orElseThrow();
+
+        assertThat(preview.fields()).extracting(EntitlementRecord.Field::value).contains("280000001");
+    }
+
+    @Test
+    @DisplayName("EUD-359 1b — current_entitlementInThePreviousShape_isLeftOutWithAWarning")
+    void current_entitlementInThePreviousShape_isLeftOutWithAWarning() {
+        HolderRef holder = confirmed();
+        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, "{\"result\":\"confirmed\",\"claims\":{},"
+                + "\"preview\":{\"type_name\":\"DoctorID\",\"fields\":[]},\"checked_at\":\"2026-10-28T10:00:00Z\"}");
+
+        JourneyViewService.View view = service.current(SANDBOX, holder);
+
+        assertThat(view.attestation()).isEmpty();
+        assertThat(messages()).anyMatch(message -> message.contains("ENTITLEMENT") && message.contains("invalid at requests"));
     }
 
     @Test
@@ -245,9 +290,9 @@ class JourneyViewServiceTest {
         journeyService.reach(SANDBOX, holder, JourneyProgress.Step.IDENTIFIED);
         EntitlementRecord.Preview preview = new EntitlementRecord.Preview("DoctorID", List.of(
                 new EntitlementRecord.Field("Nombre y apellidos", HOLDER_NAME),
-                new EntitlementRecord.Field("Número de colegiado", "280000001")), HOLDER_EMAIL, true);
-        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.COLEGIADO,
-                Map.of("license_number", "280000001"), preview, NOW).toJson());
+                new EntitlementRecord.Field("Número de colegiado", "280000001")));
+        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, EntitlementRecords.available(
+                IdentifierType.COLEGIADO, Map.of("license_number", "280000001"), preview, HOLDER_EMAIL, NOW).toJson());
         journeyService.reach(SANDBOX, holder, JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
         return holder;
     }

@@ -14,6 +14,7 @@ import es.in2.issuanceportal.journey.application.port.SystemTokenProvider;
 import es.in2.issuanceportal.journey.infrastructure.systemtoken.MachineCredentialFixture;
 import es.in2.issuanceportal.session.api.EmailRecord;
 import es.in2.issuanceportal.session.api.EmailVerificationRecord;
+import es.in2.issuanceportal.session.EntitlementRecords;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.IdentifierType;
@@ -313,12 +314,12 @@ abstract class SystemIssuanceITSupport {
     /** What Identification and Authentic source leave in the journey before the holder verifies the email. */
     TestHolder entitledJourneyWithoutEmail() throws Exception {
         TestHolder holder = identifiedJourney();
-        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.PERSONAL_ID, Map.of(
+        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, EntitlementRecords.available(IdentifierType.PERSONAL_ID, Map.of(
                 "personal_administrative_number", ADMINISTRATIVE_NUMBER,
                 "medical_board", List.of(MEDICAL_BOARD),
                 "medical_speciality", List.of(SPECIALITY),
                 "legally_entitled", true),
-                new EntitlementRecord.Preview("DoctorID", List.of(), null, true), clock.instant()).toJson());
+                new EntitlementRecord.Preview("DoctorID", List.of()), null, clock.instant()).toJson());
         progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
         return holder;
     }

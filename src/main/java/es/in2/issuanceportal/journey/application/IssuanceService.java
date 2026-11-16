@@ -363,8 +363,11 @@ public class IssuanceService {
         fields.put("family_name", identity.familyName());
         fields.put("personal_identifier", identity.personalIdentifier().value());
         identity.emailIfPresent().ifPresent(address -> fields.put("email", address));
+        // EUD-359 task 3 replaces this with per-request confirmation
+        EntitlementRecord.Request confirmed = entitlement.firstAvailable()
+                .orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED));
         try {
-            return IssuancePayload.build(settings.dataPlacement(), fields, entitlement.claims());
+            return IssuancePayload.build(settings.dataPlacement(), fields, confirmed.claims());
         } catch (IncompletePlacementException e) {
             log.warn("Data placement of tenant {} for {} cannot fill {}", tenant, settings.attestationType(),
                     e.field());

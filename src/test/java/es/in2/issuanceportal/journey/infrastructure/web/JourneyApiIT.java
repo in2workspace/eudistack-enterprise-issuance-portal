@@ -9,6 +9,7 @@ import es.in2.issuanceportal.TestcontainersConfiguration;
 import es.in2.issuanceportal.journey.api.JourneyProgress;
 import es.in2.issuanceportal.journey.api.JourneyWithdrawal;
 import es.in2.issuanceportal.journey.application.JourneyService;
+import es.in2.issuanceportal.session.EntitlementRecords;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.IdentifierType;
@@ -576,7 +577,7 @@ class JourneyApiIT {
                 .andExpect(jsonPath("$.attestation.fields[0].value").value("Lucía Prueba Sintética"))
                 .andExpect(jsonPath("$.attestation.fields[1].value").value("280000001"))
                 .andExpect(jsonPath("$.attestation.email").value("lucia.prueba@example.org"))
-                .andExpect(jsonPath("$.attestation.email_required").value(true))
+                .andExpect(jsonPath("$.attestation.email_required").value(false))
                 .andExpect(jsonPath("$.offer").doesNotExist());
     }
 
@@ -620,13 +621,12 @@ class JourneyApiIT {
     }
 
     private static String entitlement() {
-        return new EntitlementRecord(
+        return EntitlementRecords.available(
                 IdentifierType.COLEGIADO, Map.of("license_number", "280000001"),
                 new EntitlementRecord.Preview("DoctorID", List.of(
                         new EntitlementRecord.Field("Nombre y apellidos", "Lucía Prueba Sintética"),
-                        new EntitlementRecord.Field("Número de colegiado", "280000001")),
-                        "lucia.prueba@example.org", true),
-                Instant.parse("2026-11-09T10:00:00Z")).toJson();
+                        new EntitlementRecord.Field("Número de colegiado", "280000001"))),
+                "lucia.prueba@example.org", Instant.parse("2026-11-09T10:00:00Z")).toJson();
     }
 
     // --- helpers ---
