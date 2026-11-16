@@ -53,10 +53,11 @@ public interface JourneyAuditTrail {
     }
 
     /**
-     * A request to the issuance API (design.md §3.5): the result and, when there was one, the process. No
-     * email, attestation data, offer or token.
+     * A request to the issuance API (design.md §3.5): the request of the journey by its opaque id, the result and,
+     * when there was one, the process. No email, attestation data, offer or token.
      */
-    record IssuanceRequested(UUID eventId, UUID journeyId, IssuanceOutcome result, Optional<UUID> issuanceProcessId,
+    record IssuanceRequested(UUID eventId, UUID journeyId, String requestId, IssuanceOutcome result,
+                             Optional<UUID> issuanceProcessId,
                              Instant occurredAt) {
     }
 

@@ -46,17 +46,19 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * The holder's confirmation: requests the issuance as a system and hands the offer back (design.md §3.3,
- * AD-12). A journey asks the Issuer once, with one idempotency key generated the first time and kept in the
- * journey, with the verified email it was created with, for every retry (EC-02), so a journey ends with at
- * most one issuance process. If the holder verifies another email before any process exists, the key is
- * replaced by a new one for that email; once the process exists the journey keeps its key and its process.
+ * The holder's confirmation of one request: requests its issuance as a system and hands the offer back
+ * (design.md §3.3, §3.7, AD-12, AD-16). Each request asks the Issuer once, with one idempotency key generated the
+ * first time and kept with the request in the journey, with the verified email it was created with, for every retry
+ * (EC-02), so a request ends with at most one issuance process, and two requests never share a key. If the holder
+ * verifies another email before a request has its process, the key is replaced by a new one for that email; once
+ * the process exists the request keeps its key and its process.
  *
  * <p>The journey's row is locked in two short transactions and never while the Issuer is asked: the first
- * checks the state and keeps the key, the second keeps the process and the offer and completes the
- * journey. No database connection waits for an external system. Two confirmations at the same time share
- * the key the first one stored (EC-03); the Issuer's idempotency gives both the same process, and the one
- * that finishes second answers with the offer the first stored.
+ * checks the state and keeps the key, the second keeps the process and the offer and, with the first offer of the
+ * journey, completes it. No database connection waits for an external system. Two confirmations of the same request
+ * at the same time share the key the first one stored (EC-03); the Issuer's idempotency gives both the same process,
+ * and the one that finishes second answers with the offer the first stored. The journey stays active after the
+ * first offer: the other requests are confirmed in the same journey, with the email verified once.
  *
  * <p>In a tenant with onboarding, the ticket is requested between the Issuer's answer and the second
  * transaction, also outside any transaction, so an offer that cannot be turned into a ticket is never stored
@@ -121,18 +123,27 @@ public class IssuanceService {
     private record Prepared(UUID idempotencyKey, IssuanceRequest request, Onboarding onboarding, String requestId) {
     }
 
-    /** The email in the request is the one the holder verified with a code (EUD-358). */
-    public Offer confirm(TenantId tenant, HolderRef holder) {
-        access.requireInProgress(tenant, holder);
+    /**
+     * The email in the request is the one the holder verified with a code (EUD-358); the data, the request's own.
+     *
+     * @param requestId the request the holder confirms, as the journey returns it; a blank one or one of more than
+     *                  64 characters is {@code bad_request}
+     */
+    public Offer confirm(TenantId tenant, HolderRef holder, String requestId) {
+        if (requestId == null || requestId.isBlank() || requestId.length() > JourneyIssuance.MAX_REQUEST_ID_LENGTH) {
+            throw new ProblemException(ProblemCode.BAD_REQUEST);
+        }
+        access.requireActive(tenant, holder);
         UUID journeyId = sessions.journeyOf(tenant, holder)
                 .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
         Prepared prepared = Objects.requireNonNull(
-                transactions.execute(status -> prepare(tenant, journeyId)));
+                transactions.execute(status -> prepare(tenant, journeyId, requestId)));
         IssuanceResult issued = request(tenant, journeyId, prepared);
         boolean ticketNeeded = prepared.onboarding().enabled();
         OnboardingTicket ticket = ticketNeeded ? requestTicket(tenant, journeyId, prepared, issued) : null;
-        trace(tenant, journeyId, ticketNeeded && ticket == null ? JourneyAuditTrail.IssuanceOutcome.ONBOARDING_FAILED
-                : JourneyAuditTrail.IssuanceOutcome.ISSUED, issued.processId());
+        trace(tenant, journeyId, requestId, ticketNeeded && ticket == null
+                ? JourneyAuditTrail.IssuanceOutcome.ONBOARDING_FAILED : JourneyAuditTrail.IssuanceOutcome.ISSUED,
+                issued.processId());
         Optional<Offer> offer = Objects.requireNonNull(transactions.execute(status -> finish(tenant,
                 journeyId, prepared, issued, ticketNeeded, ticket)));
         // The process is kept, the offer is not given: without the ticket the holder could not use it in the wallet.
@@ -140,13 +151,13 @@ public class IssuanceService {
     }
 
     /**
-     * First transaction: with the journey locked, checks what the request needs, among it the verified email,
-     * and keeps a new idempotency key if the journey has none for that email. Anything that makes it fail
-     * leaves the journey as it was.
+     * First transaction: with the journey locked, checks what the request needs, among it the verified email and
+     * that the request is one of the journey that can be issued, and keeps a new idempotency key if the request has
+     * none for that email. Anything that makes it fail leaves the journey as it was.
      */
-    private Prepared prepare(TenantId tenant, UUID journeyId) {
+    private Prepared prepare(TenantId tenant, UUID journeyId, String requestId) {
         Journey journey = lock(tenant, journeyId);
-        if (!journey.isInProgress()) {
+        if (!journey.isActive()) {
             throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
         }
         HolderIdentity identity = identity(tenant, journeyId);
@@ -154,26 +165,46 @@ public class IssuanceService {
         // Always the one in the session: a retry after onboarding_unavailable needs no new code (EC-05).
         String address = verifiedEmail(tenant, journeyId);
         ServiceSettings settings = settings(tenant);
-        if (!issuances.findByJourney(tenant, journeyId).isEmpty()) {
-            // The Issuer has no way yet to give another offer for the process (EC-04); the renewal comes with EUD-295.
-            log.info("Journey {} already has its issuance process: not requested again", journeyId);
-            throw new ProblemException(ProblemCode.ONBOARDING_UNAVAILABLE);
-        }
-        Map<String, Object> payload = payload(tenant, settings, identity, entitlement);
-        Optional<IssuanceRecord> issued = readIssuance(tenant, journeyId);
+        EntitlementRecord.Request confirmed = confirmable(tenant, journeyId, entitlement, requestId);
+        Map<String, Object> payload = payload(tenant, settings, identity, confirmed.claims());
+        IssuanceRecord section = readIssuance(tenant, journeyId).orElseGet(IssuanceRecord::empty);
+        Optional<IssuanceRecord.Entry> issued = section.entry(requestId);
         UUID key;
         if (issued.isPresent() && issued.get().isForEmail(address)) {
             key = issued.get().idempotencyKey();
         } else {
-            // First confirmation, or the holder verified another email after a failed one: the Issuer has no
-            // process for the old key (the journey has none), so a new key goes with the new email (EUD-358).
+            // First confirmation of the request, or the holder verified another email after a failed one: the Issuer
+            // has no process for the old key (the request has none), so a new key goes with the new email (EUD-358).
             key = UUID.randomUUID();
-            sessions.write(tenant, journeyId, Section.ISSUANCE, IssuanceRecord.withKey(key, address).toJson());
+            sessions.write(tenant, journeyId, Section.ISSUANCE,
+                    section.with(requestId, IssuanceRecord.Entry.withKey(key, address)).toJson());
         }
         return new Prepared(key, new IssuanceRequest(settings.attestationType(), payload, address,
-                DELIVERY, GRANT_TYPE), settings.onboarding(),
-                // EUD-359 task 3b replaces this with the request the holder confirms
-                entitlement.firstAvailable().orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED)).id());
+                DELIVERY, GRANT_TYPE), settings.onboarding(), requestId);
+    }
+
+    /**
+     * The request the holder confirms. It has to be a request of the journey that is available and has no process
+     * yet. One that is not (not of the journey, not available, or already saved) is {@code step_not_allowed}.
+     */
+    private EntitlementRecord.Request confirmable(TenantId tenant, UUID journeyId, EntitlementRecord entitlement,
+                                                  String requestId) {
+        EntitlementRecord.Request request = entitlement.request(requestId)
+                .orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED));
+        Optional<JourneyIssuance> process = issuances.findByJourney(tenant, journeyId).stream()
+                .filter(issuance -> issuance.requestId().equals(requestId)).findFirst();
+        if (process.isPresent()) {
+            if (process.get().isSaved()) {
+                throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
+            }
+            // EUD-359 task 4 routes a request that already has its process to the new offer of that process.
+            log.info("Journey {} already has the issuance process of a request: not requested again", journeyId);
+            throw new ProblemException(ProblemCode.ONBOARDING_UNAVAILABLE);
+        }
+        if (request.status() != EntitlementRecord.Status.AVAILABLE) {
+            throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
+        }
+        return request;
     }
 
     /**
@@ -208,15 +239,15 @@ public class IssuanceService {
             return issuance.issue(tenant, prepared.idempotencyKey(), prepared.request());
         } catch (SystemTokenUnavailableException e) {
             log.warn("No system token of tenant {} to issue for journey {}: {}", tenant, journeyId, e.reason());
-            trace(tenant, journeyId, JourneyAuditTrail.IssuanceOutcome.SYSTEM_TOKEN_UNAVAILABLE, null);
+            trace(tenant, journeyId, prepared.requestId(), JourneyAuditTrail.IssuanceOutcome.SYSTEM_TOKEN_UNAVAILABLE, null);
             throw new ProblemException(ProblemCode.ISSUANCE_UNAVAILABLE);
         } catch (IssuanceRejectedException e) {
             log.warn("Issuance of journey {} rejected: {}", journeyId, e.reason());
-            trace(tenant, journeyId, JourneyAuditTrail.IssuanceOutcome.REJECTED, null);
+            trace(tenant, journeyId, prepared.requestId(), JourneyAuditTrail.IssuanceOutcome.REJECTED, null);
             throw new ProblemException(ProblemCode.ISSUANCE_REJECTED);
         } catch (IssuanceUnavailableException e) {
             log.warn("Issuance of journey {} unavailable: {}", journeyId, e.reason());
-            trace(tenant, journeyId, JourneyAuditTrail.IssuanceOutcome.UNAVAILABLE, null);
+            trace(tenant, journeyId, prepared.requestId(), JourneyAuditTrail.IssuanceOutcome.UNAVAILABLE, null);
             throw new ProblemException(ProblemCode.ISSUANCE_UNAVAILABLE);
         }
     }
@@ -248,59 +279,57 @@ public class IssuanceService {
 
     /**
      * Second transaction. With the ticket, or in a tenant without onboarding, keeps the process and the offer
-     * (and the onboarding address) and completes the journey. Without a ticket that was needed, keeps only the
-     * process: no offer and no address, and the journey stays in progress. If a parallel confirmation of the
-     * same journey completed it first, answers with the offer that one stored.
+     * (and the onboarding address) of the request and, if it is the journey's first offer, completes the journey.
+     * Without a ticket that was needed, keeps only the process: no offer and no address, and the journey stays as
+     * it was (in progress with the email verified, or completed). If a parallel confirmation of the same request
+     * recorded its process first, answers with the offer that one stored.
      *
      * @param ticketNeeded whether the tenant uses onboarding tickets
      * @param ticket       {@code null} when the tenant has no onboarding or the ticket was not created
      * @return the offer to give, or empty when the ticket was needed and not created
      */
-    // Each argument is a different step of the confirmation: a record would only rename them.
-    @SuppressWarnings("java:S107")
     private Optional<Offer> finish(TenantId tenant, UUID journeyId, Prepared prepared, IssuanceResult issued,
                                    boolean ticketNeeded, OnboardingTicket ticket) {
         Journey journey = lock(tenant, journeyId);
-        if (journey.state() == JourneyState.COMPLETED) {
-            return Optional.of(storedOffer(tenant, journeyId));
-        }
-        if (!journey.isInProgress()) {
-            // Withdrawn or expired while the Issuer was asked. The process it created stays unused.
+        if (!journey.isActive()) {
+            // Withdrawn, ended or expired while the Issuer was asked. The process it created stays unused.
             log.warn("Journey {} closed while its issuance was requested", journeyId);
             throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
         }
-        Instant now = clock.instant();
-        if (!issuances.findByJourney(tenant, journeyId).isEmpty()) {
-            // The Issuer gave another process for a journey that already has one: it keeps the one it has.
-            log.warn("Journey {} already had a different issuance process: the new one is not recorded", journeyId);
-            throw new ProblemException(ProblemCode.ONBOARDING_UNAVAILABLE);
+        boolean recorded = issuances.findByJourney(tenant, journeyId).stream()
+                .anyMatch(issuance -> issuance.requestId().equals(prepared.requestId()));
+        if (recorded) {
+            return Optional.of(storedOffer(tenant, journeyId, prepared.requestId()));
         }
+        Instant now = clock.instant();
         issuances.insert(tenant, new JourneyIssuance(journeyId, prepared.requestId(), issued.processId(), now, null));
         if (ticketNeeded && ticket == null) {
-            if (!journeys.update(tenant, journey, JourneyState.IN_PROGRESS)) {
-                throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
-            }
             return Optional.empty();
         }
         String onboardingUrl = ticket == null ? null : ticket.onboardingUrl();
         Instant onboardingExpiresAt = ticket == null ? null : ticket.expiresAt();
-        sessions.write(tenant, journeyId, Section.ISSUANCE, new IssuanceRecord(prepared.idempotencyKey(),
-                prepared.request().email(), issued.credentialOfferUri(),
-                issued.offerExpiresAt(), onboardingUrl, onboardingExpiresAt).toJson());
-        journey.complete(now);
-        if (!journeys.update(tenant, journey, JourneyState.IN_PROGRESS)) {
-            throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
+        IssuanceRecord section = readIssuance(tenant, journeyId).orElseGet(IssuanceRecord::empty);
+        sessions.write(tenant, journeyId, Section.ISSUANCE, section.with(prepared.requestId(),
+                new IssuanceRecord.Entry(prepared.idempotencyKey(), prepared.request().email(),
+                        issued.credentialOfferUri(), issued.offerExpiresAt(), onboardingUrl, onboardingExpiresAt))
+                .toJson());
+        if (journey.isInProgress()) {
+            journey.complete(now);
+            if (!journeys.update(tenant, journey, JourneyState.IN_PROGRESS)) {
+                throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
+            }
+            audit(tenant, JourneyAuditTrail.Kind.COMPLETED, journey);
         }
-        audit(tenant, JourneyAuditTrail.Kind.COMPLETED, journey);
         return Optional.of(new Offer(issued.credentialOfferUri(), issued.offerExpiresAt(), onboardingUrl,
                 onboardingExpiresAt));
     }
 
-    private Offer storedOffer(TenantId tenant, UUID journeyId) {
-        IssuanceRecord stored = readIssuance(tenant, journeyId)
-                .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
-        log.info("Journey {} was completed by a parallel confirmation: answering with its offer", journeyId);
-        return new Offer(stored.offerUri().orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED)),
+    private Offer storedOffer(TenantId tenant, UUID journeyId, String requestId) {
+        IssuanceRecord.Entry stored = readIssuance(tenant, journeyId).flatMap(section -> section.entry(requestId))
+                .orElseThrow(() -> new ProblemException(ProblemCode.ONBOARDING_UNAVAILABLE));
+        log.info("The request of journey {} was confirmed by a parallel confirmation: answering with its offer",
+                journeyId);
+        return new Offer(stored.offerUri().orElseThrow(() -> new ProblemException(ProblemCode.ONBOARDING_UNAVAILABLE)),
                 stored.offerExpiresAt(), stored.onboarding().orElse(null), stored.onboardingExpiresAt());
     }
 
@@ -358,17 +387,14 @@ public class IssuanceService {
     }
 
     private Map<String, Object> payload(TenantId tenant, ServiceSettings settings, HolderIdentity identity,
-                                        EntitlementRecord entitlement) {
+                                        Map<String, Object> claims) {
         Map<String, String> fields = new HashMap<>();
         fields.put("given_name", identity.givenName());
         fields.put("family_name", identity.familyName());
         fields.put("personal_identifier", identity.personalIdentifier().value());
         identity.emailIfPresent().ifPresent(address -> fields.put("email", address));
-        // EUD-359 task 3 replaces this with per-request confirmation
-        EntitlementRecord.Request confirmed = entitlement.firstAvailable()
-                .orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED));
         try {
-            return IssuancePayload.build(settings.dataPlacement(), fields, confirmed.claims());
+            return IssuancePayload.build(settings.dataPlacement(), fields, claims);
         } catch (IncompletePlacementException e) {
             log.warn("Data placement of tenant {} for {} cannot fill {}", tenant, settings.attestationType(),
                     e.field());
@@ -377,10 +403,11 @@ public class IssuanceService {
     }
 
     /** The trail never decides the outcome of a request: a failure is logged and the confirmation goes on. */
-    private void trace(TenantId tenant, UUID journeyId, JourneyAuditTrail.IssuanceOutcome outcome, UUID processId) {
+    private void trace(TenantId tenant, UUID journeyId, String requestId, JourneyAuditTrail.IssuanceOutcome outcome,
+                       UUID processId) {
         try {
-            trail.append(tenant, new JourneyAuditTrail.IssuanceRequested(UUID.randomUUID(), journeyId, outcome,
-                    Optional.ofNullable(processId), clock.instant()));
+            trail.append(tenant, new JourneyAuditTrail.IssuanceRequested(UUID.randomUUID(), journeyId, requestId,
+                    outcome, Optional.ofNullable(processId), clock.instant()));
         } catch (RuntimeException e) {
             log.error("Could not record the issuance request of journey {}", journeyId, e);
         }

@@ -70,13 +70,13 @@ class LogJourneyAuditTrailTest {
         UUID process = UUID.randomUUID();
 
         trail.append(SANDBOX, new JourneyAuditTrail.IssuanceRequested(UUID.randomUUID(), UUID.randomUUID(),
-                JourneyAuditTrail.IssuanceOutcome.ISSUED, Optional.of(process), Instant.now()));
+                "r2", JourneyAuditTrail.IssuanceOutcome.ISSUED, Optional.of(process), Instant.now()));
 
         ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
         verify(audit).info(anyString(), arguments.capture());
         assertThat(java.util.Arrays.stream(arguments.getValue()).map(Object::toString))
                 .contains("result=issued", "issuance_process_id=" + process, "event=ISSUANCE_REQUESTED",
-                        "tenant=sandbox");
+                        "tenant=sandbox", "request_id=r2");
     }
 
     @Test
@@ -84,7 +84,7 @@ class LogJourneyAuditTrailTest {
         doThrow(new IllegalStateException("log sink down")).when(audit).info(anyString(), any(Object[].class));
 
         assertThatNoException().isThrownBy(() -> trail.append(SANDBOX, new JourneyAuditTrail.IssuanceRequested(
-                UUID.randomUUID(), UUID.randomUUID(), JourneyAuditTrail.IssuanceOutcome.UNAVAILABLE,
+                UUID.randomUUID(), UUID.randomUUID(), "r1", JourneyAuditTrail.IssuanceOutcome.UNAVAILABLE,
                 Optional.empty(), Instant.now())));
     }
 

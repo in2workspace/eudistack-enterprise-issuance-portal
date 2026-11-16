@@ -328,11 +328,17 @@ abstract class SystemIssuanceITSupport {
 
     /** The holder's call, with the holder's own token: it must never go on to another system (NFR-4). It has no body. */
     static MockHttpServletRequestBuilder confirmation(TestHolder holder) {
+        return confirmation(holder, "r1");
+    }
+
+    static MockHttpServletRequestBuilder confirmation(TestHolder holder, String requestId) {
         String token = holder.mint(Instant.now(), tokens -> tokens.claim("exp", Instant.now().plus(Duration.ofHours(2))));
         HOLDER_TOKENS.add(token);
         return MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey/confirmation")
                 .contextPath(CONTEXT)
                 .header("Authorization", "Bearer " + token)
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content("{\"request_id\":\"" + requestId + "\"}")
                 .with(host());
     }
 

@@ -667,8 +667,8 @@ class EmailVerificationApiIT {
     }
 
     @Test
-    @DisplayName("AC-09 — getJourney_offerObtained_hasNoEmailVerification")
-    void getJourney_offerObtained_hasNoEmailVerification() throws Exception {
+    @DisplayName("AC-21 — getJourney_completedAndActive_keepsTheEmailVerificationUntilTheJourneyEnds")
+    void getJourney_completedAndActive_keepsTheEmailVerificationUntilTheJourneyEnds() throws Exception {
         TestHolder holder = entitledJourney();
         sentCode(holder);
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET state = 'completed', step = 'offer_obtained', "
@@ -678,7 +678,7 @@ class EmailVerificationApiIT {
         mvc.perform(get(holder))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.state").value("completed"))
-                .andExpect(jsonPath("$.email_verification").doesNotExist());
+                .andExpect(jsonPath("$.email_verification.email").exists());
     }
 
     @Test

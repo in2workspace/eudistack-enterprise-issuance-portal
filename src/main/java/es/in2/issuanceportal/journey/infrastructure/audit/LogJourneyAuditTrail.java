@@ -57,9 +57,10 @@ class LogJourneyAuditTrail implements JourneyAuditTrail {
     @Override
     public void append(TenantId tenant, IssuanceRequested event) {
         try {
-            audit.info("issuance {} {} {} {} {} {} {}",
+            audit.info("issuance {} {} {} {} {} {} {} {}",
                     kv(EVENT, "ISSUANCE_REQUESTED"),
                     kv(JOURNEY_ID, event.journeyId()),
+                    kv("request_id", event.requestId()),
                     kv(EVENT_ID, event.eventId()),
                     kv(TENANT, tenant.value()),
                     kv(RESULT, event.result().code()),

@@ -264,8 +264,9 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         everythingWorks();
         TestHolder completed = entitledJourney();
         mvc.perform(confirmation(completed)).andExpect(status().isOk());
-        mvc.perform(confirmation(completed)).andExpect(status().isGone())
-                .andExpect(jsonPath("$.type").value("journey_closed"));
+        // Completed and active (AD-18), not closed: the request already has its process, so nothing is asked again.
+        mvc.perform(confirmation(completed)).andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
         assertThat(requestsTo(ISSUANCES_PATH)).hasSize(1);
 
         WIRE.resetRequests();
@@ -341,7 +342,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         assertThat(row).containsEntry("state", "in_progress")
                 .containsEntry("step", "email_verified")
                 .containsEntry("issuance_process_id", keyOf(holder));
-        IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow());
+        IssuanceRecord.Entry stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).entry("r1").orElseThrow();
         assertThat(stored.offerUri()).isEmpty();
         assertThat(stored.onboarding()).isEmpty();
         assertThat(requestsTo(TICKETS_PATH)).hasSize(1);
@@ -411,7 +412,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
     // --- helpers ---
 
     private UUID keyOf(TestHolder holder) {
-        return IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).idempotencyKey();
+        return IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).entry("r1").orElseThrow().idempotencyKey();
     }
 
     private long processesOfJourney(TestHolder holder) {
