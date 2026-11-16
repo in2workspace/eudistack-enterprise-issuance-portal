@@ -197,6 +197,10 @@ class AccessTokenApiIT {
                 new Rejected("acr substantial", now -> AccessTokens.forTenant(sandbox, now)
                         .claim("acr", AccessTokens.ACR_SUBSTANTIAL).sign()),
                 new Rejected("without acr", now -> AccessTokens.forTenant(sandbox, now).without("acr").sign()),
+                new Rejected("acr as an array of the right value", now -> AccessTokens.forTenant(sandbox, now)
+                        .claim("acr", List.of(AccessTokens.ACR_HIGH)).sign()),
+                new Rejected("tenant as an array of the right tenant", now -> AccessTokens.forTenant(sandbox, now)
+                        .claim("tenant", List.of("sandbox")).sign()),
                 new Rejected("ID token shape: no jti", now -> AccessTokens.forTenant(sandbox, now).without("jti").sign()),
                 new Rejected("ID token shape: no jti, no tenant, with nonce and auth_time", now -> AccessTokens
                         .forTenant(sandbox, now).without("jti").without("tenant").claim("nonce", "n-0S6_WzA2Mj")
