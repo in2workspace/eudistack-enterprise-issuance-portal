@@ -1,6 +1,7 @@
 package es.in2.issuanceportal.journey.domain;
 
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
@@ -51,7 +52,7 @@ class JourneyTest {
     }
 
     @Test
-    void complete_inProgress_reachesOfferAndEnds() {
+    void complete_inProgress_reachesOfferWithoutEnding() {
         Journey journey = Journey.start(UUID.randomUUID(), T0, null);
 
         journey.complete(T0.plusSeconds(120));
@@ -59,7 +60,9 @@ class JourneyTest {
         assertThat(journey.state()).isEqualTo(JourneyState.COMPLETED);
         assertThat(journey.step()).isEqualTo(JourneyStep.OFFER_OBTAINED);
         assertThat(journey.withdrawalReason()).isEmpty();
-        assertThat(journey.endedAt()).contains(T0.plusSeconds(120));
+        // AD-18: the first offer completes the journey, which stays active: it has no end yet.
+        assertThat(journey.endedAt()).isEmpty();
+        assertThat(journey.completedAt()).contains(T0.plusSeconds(120));
     }
 
     @Test
@@ -126,50 +129,82 @@ class JourneyTest {
     }
 
     @Test
-    void recordIssuanceProcess_inProgress_keepsItAndCountsAsActivity() {
+    @DisplayName("AC-25 — complete_inProgress_isCompletedWithItsMomentAndStaysActive")
+    void complete_inProgress_isCompletedWithItsMomentAndStaysActive() {
         Journey journey = Journey.start(UUID.randomUUID(), T0, null);
-        UUID process = UUID.randomUUID();
 
-        journey.recordIssuanceProcess(process, T0.plusSeconds(30));
+        journey.complete(T0.plusSeconds(30));
 
-        assertThat(journey.issuanceProcessId()).contains(process);
+        assertThat(journey.state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(journey.step()).isEqualTo(JourneyStep.OFFER_OBTAINED);
+        assertThat(journey.completedAt()).contains(T0.plusSeconds(30));
+        assertThat(journey.endedAt()).isEmpty();
+        assertThat(journey.isActive()).isTrue();
         assertThat(journey.lastActivity()).isEqualTo(T0.plusSeconds(30));
     }
 
     @Test
-    void recordIssuanceProcess_sameProcessAgain_changesNothing() {
+    @DisplayName("AC-25 — touch_completedAndActive_countsAsActivity")
+    void touch_completedAndActive_countsAsActivity() {
         Journey journey = Journey.start(UUID.randomUUID(), T0, null);
-        UUID process = UUID.randomUUID();
-        journey.recordIssuanceProcess(process, T0);
+        journey.complete(T0);
 
-        journey.recordIssuanceProcess(process, T0.plusSeconds(5));
+        journey.touch(T0.plusSeconds(60));
 
-        assertThat(journey.issuanceProcessId()).contains(process);
+        assertThat(journey.lastActivity()).isEqualTo(T0.plusSeconds(60));
     }
 
     @Test
-    void recordIssuanceProcess_differentProcess_isRejectedAndKeepsTheFirst() {
+    @DisplayName("AC-25 — end_completed_staysCompletedWithItsEndAndIsNoLongerActive")
+    void end_completed_staysCompletedWithItsEndAndIsNoLongerActive() {
         Journey journey = Journey.start(UUID.randomUUID(), T0, null);
-        UUID first = UUID.randomUUID();
-        journey.recordIssuanceProcess(first, T0);
+        journey.complete(T0);
 
-        UUID other = UUID.randomUUID();
-        Instant later = T0.plusSeconds(5);
+        journey.end(T0.plusSeconds(90));
 
-        assertThatThrownBy(() -> journey.recordIssuanceProcess(other, later))
-                .isInstanceOf(IssuanceProcessAlreadyRecordedException.class);
-        assertThat(journey.issuanceProcessId()).contains(first);
+        assertThat(journey.state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(journey.endedAt()).contains(T0.plusSeconds(90));
+        assertThat(journey.completedAt()).contains(T0);
+        assertThat(journey.isActive()).isFalse();
+        assertJourneyClosed(() -> journey.touch(T0.plusSeconds(100)));
+        assertJourneyClosed(() -> journey.end(T0.plusSeconds(100)));
     }
 
     @Test
-    void recordIssuanceProcess_closedJourney_throwsJourneyClosed() {
+    void end_inProgress_throwsJourneyClosed() {
+        Journey journey = Journey.start(UUID.randomUUID(), T0, null);
+
+        assertJourneyClosed(() -> journey.end(T0));
+    }
+
+    @Test
+    @DisplayName("AC-25 — isInactive_completedAfterTheLimit_endsLikeAJourneyInProgressExpires")
+    void isInactive_completedAfterTheLimit_endsLikeAJourneyInProgressExpires() {
+        Journey journey = Journey.start(UUID.randomUUID(), T0, null);
+        journey.complete(T0);
+
+        assertThat(journey.isInactive(T0.plus(Journey.INACTIVITY_LIMIT).minusSeconds(1))).isFalse();
+        assertThat(journey.isInactive(T0.plus(Journey.INACTIVITY_LIMIT))).isTrue();
+    }
+
+    @Test
+    void isInactive_endedJourney_isNotAskedAgain() {
+        Journey journey = Journey.start(UUID.randomUUID(), T0, null);
+        journey.complete(T0);
+        journey.end(T0.plusSeconds(1));
+
+        assertThat(journey.isInactive(T0.plus(Journey.INACTIVITY_LIMIT).plusSeconds(1))).isFalse();
+    }
+
+    @Test
+    void complete_closedJourney_throwsJourneyClosed() {
         Journey withdrawn = Journey.start(UUID.randomUUID(), T0, null);
         withdrawn.withdraw(WithdrawalReason.CANCELLED, T0);
         Journey completed = Journey.start(UUID.randomUUID(), T0, null);
         completed.complete(T0);
 
-        assertJourneyClosed(() -> withdrawn.recordIssuanceProcess(UUID.randomUUID(), T0));
-        assertJourneyClosed(() -> completed.recordIssuanceProcess(UUID.randomUUID(), T0));
+        assertJourneyClosed(() -> withdrawn.complete(T0));
+        assertJourneyClosed(() -> completed.complete(T0));
     }
 
     private static void assertJourneyClosed(ThrowingCallable call) {

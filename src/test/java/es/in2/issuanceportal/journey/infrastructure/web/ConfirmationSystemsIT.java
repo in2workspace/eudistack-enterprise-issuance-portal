@@ -415,7 +415,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
     }
 
     private long processesOfJourney(TestHolder holder) {
-        return jdbc.sql("SELECT count(issuance_process_id) FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
+        return jdbc.sql("SELECT count(*) FROM \"sandbox_issuance_portal\".journey_issuance WHERE journey_id = :id")
                 .param("id", journeyOf(holder)).query(Long.class).single();
     }
 

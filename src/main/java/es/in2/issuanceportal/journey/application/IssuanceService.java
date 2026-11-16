@@ -7,15 +7,16 @@ import es.in2.issuanceportal.journey.application.port.IssuanceRequest;
 import es.in2.issuanceportal.journey.application.port.IssuanceResult;
 import es.in2.issuanceportal.journey.application.port.IssuanceUnavailableException;
 import es.in2.issuanceportal.journey.application.port.JourneyAuditTrail;
+import es.in2.issuanceportal.journey.application.port.JourneyIssuanceRepository;
 import es.in2.issuanceportal.journey.application.port.JourneyRepository;
 import es.in2.issuanceportal.journey.application.port.OnboardingTicket;
 import es.in2.issuanceportal.journey.application.port.OnboardingTicketException;
 import es.in2.issuanceportal.journey.application.port.OnboardingTickets;
 import es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException;
 import es.in2.issuanceportal.journey.domain.IncompletePlacementException;
-import es.in2.issuanceportal.journey.domain.IssuanceProcessAlreadyRecordedException;
 import es.in2.issuanceportal.journey.domain.IssuancePayload;
 import es.in2.issuanceportal.journey.domain.Journey;
+import es.in2.issuanceportal.journey.domain.JourneyIssuance;
 import es.in2.issuanceportal.journey.domain.JourneyState;
 import es.in2.issuanceportal.journey.domain.config.Onboarding;
 import es.in2.issuanceportal.journey.domain.config.ServiceSettings;
@@ -73,6 +74,7 @@ public class IssuanceService {
 
     private final JourneyAccess access;
     private final JourneyRepository journeys;
+    private final JourneyIssuanceRepository issuances;
     private final JourneySessions sessions;
     private final PortalConfigService configs;
     private final IssuanceApi issuance;
@@ -81,11 +83,13 @@ public class IssuanceService {
     private final TransactionOperations transactions;
     private final Clock clock;
 
-    IssuanceService(JourneyAccess access, JourneyRepository journeys, JourneySessions sessions,
+    IssuanceService(JourneyAccess access, JourneyRepository journeys, JourneyIssuanceRepository issuances,
+                    JourneySessions sessions,
                     PortalConfigService configs, IssuanceApi issuance, OnboardingTickets tickets,
                     JourneyAuditTrail trail, TransactionOperations transactions, Clock clock) {
         this.access = access;
         this.journeys = journeys;
+        this.issuances = issuances;
         this.sessions = sessions;
         this.configs = configs;
         this.issuance = issuance;
@@ -114,7 +118,7 @@ public class IssuanceService {
     }
 
     /** What the first transaction leaves ready for the request. */
-    private record Prepared(UUID idempotencyKey, IssuanceRequest request, Onboarding onboarding) {
+    private record Prepared(UUID idempotencyKey, IssuanceRequest request, Onboarding onboarding, String requestId) {
     }
 
     /** The email in the request is the one the holder verified with a code (EUD-358). */
@@ -130,7 +134,7 @@ public class IssuanceService {
         trace(tenant, journeyId, ticketNeeded && ticket == null ? JourneyAuditTrail.IssuanceOutcome.ONBOARDING_FAILED
                 : JourneyAuditTrail.IssuanceOutcome.ISSUED, issued.processId());
         Optional<Offer> offer = Objects.requireNonNull(transactions.execute(status -> finish(tenant,
-                journeyId, prepared.idempotencyKey(), prepared.request().email(), issued, ticketNeeded, ticket)));
+                journeyId, prepared, issued, ticketNeeded, ticket)));
         // The process is kept, the offer is not given: without the ticket the holder could not use it in the wallet.
         return offer.orElseThrow(() -> new ProblemException(ProblemCode.ONBOARDING_UNAVAILABLE));
     }
@@ -150,7 +154,7 @@ public class IssuanceService {
         // Always the one in the session: a retry after onboarding_unavailable needs no new code (EC-05).
         String address = verifiedEmail(tenant, journeyId);
         ServiceSettings settings = settings(tenant);
-        if (journey.issuanceProcessId().isPresent()) {
+        if (!issuances.findByJourney(tenant, journeyId).isEmpty()) {
             // The Issuer has no way yet to give another offer for the process (EC-04); the renewal comes with EUD-295.
             log.info("Journey {} already has its issuance process: not requested again", journeyId);
             throw new ProblemException(ProblemCode.ONBOARDING_UNAVAILABLE);
@@ -167,7 +171,9 @@ public class IssuanceService {
             sessions.write(tenant, journeyId, Section.ISSUANCE, IssuanceRecord.withKey(key, address).toJson());
         }
         return new Prepared(key, new IssuanceRequest(settings.attestationType(), payload, address,
-                DELIVERY, GRANT_TYPE), settings.onboarding());
+                DELIVERY, GRANT_TYPE), settings.onboarding(),
+                // EUD-359 task 3b replaces this with the request the holder confirms
+                entitlement.firstAvailable().orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED)).id());
     }
 
     /**
@@ -252,8 +258,8 @@ public class IssuanceService {
      */
     // Each argument is a different step of the confirmation: a record would only rename them.
     @SuppressWarnings("java:S107")
-    private Optional<Offer> finish(TenantId tenant, UUID journeyId, UUID key, String email,
-                                   IssuanceResult issued, boolean ticketNeeded, OnboardingTicket ticket) {
+    private Optional<Offer> finish(TenantId tenant, UUID journeyId, Prepared prepared, IssuanceResult issued,
+                                   boolean ticketNeeded, OnboardingTicket ticket) {
         Journey journey = lock(tenant, journeyId);
         if (journey.state() == JourneyState.COMPLETED) {
             return Optional.of(storedOffer(tenant, journeyId));
@@ -264,18 +270,12 @@ public class IssuanceService {
             throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
         }
         Instant now = clock.instant();
-        try {
-            journey.recordIssuanceProcess(issued.processId(), now);
-        } catch (IssuanceProcessAlreadyRecordedException _) {
+        if (!issuances.findByJourney(tenant, journeyId).isEmpty()) {
             // The Issuer gave another process for a journey that already has one: it keeps the one it has.
             log.warn("Journey {} already had a different issuance process: the new one is not recorded", journeyId);
             throw new ProblemException(ProblemCode.ONBOARDING_UNAVAILABLE);
         }
-        // On its own and conditional: the generic update of the journey does not write the process (NFR-2).
-        if (!journeys.recordIssuanceProcess(tenant, journeyId, issued.processId())) {
-            log.warn("Journey {} already had a different issuance process: the new one is not recorded", journeyId);
-            throw new ProblemException(ProblemCode.ONBOARDING_UNAVAILABLE);
-        }
+        issuances.insert(tenant, new JourneyIssuance(journeyId, prepared.requestId(), issued.processId(), now, null));
         if (ticketNeeded && ticket == null) {
             if (!journeys.update(tenant, journey, JourneyState.IN_PROGRESS)) {
                 throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
@@ -284,7 +284,8 @@ public class IssuanceService {
         }
         String onboardingUrl = ticket == null ? null : ticket.onboardingUrl();
         Instant onboardingExpiresAt = ticket == null ? null : ticket.expiresAt();
-        sessions.write(tenant, journeyId, Section.ISSUANCE, new IssuanceRecord(key, email, issued.credentialOfferUri(),
+        sessions.write(tenant, journeyId, Section.ISSUANCE, new IssuanceRecord(prepared.idempotencyKey(),
+                prepared.request().email(), issued.credentialOfferUri(),
                 issued.offerExpiresAt(), onboardingUrl, onboardingExpiresAt).toJson());
         journey.complete(now);
         if (!journeys.update(tenant, journey, JourneyState.IN_PROGRESS)) {

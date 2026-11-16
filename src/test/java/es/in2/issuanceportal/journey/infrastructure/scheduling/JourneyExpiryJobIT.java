@@ -60,6 +60,37 @@ class JourneyExpiryJobIT {
     }
 
     @Test
+    @DisplayName("AC-25 — sweep_completedJourneyInactiveForFifteenMinutes_endsItStaysCompletedAndDeletesItsData")
+    void sweep_completedJourneyInactiveForFifteenMinutes_endsItStaysCompletedAndDeletesItsData() {
+        UUID journey = inactiveJourney();
+        jdbc.sql("UPDATE \"kpmg_issuance_portal\".journey SET state = 'completed', step = 'offer_obtained', "
+                + "completed_at = now() - interval '20 minutes' WHERE id = :id").param("id", journey).update();
+
+        assertThat(job().sweep(KPMG)).isTrue();
+
+        assertThat(journeyRow(journey)).containsEntry("state", "completed").containsEntry("withdrawal_reason", null);
+        assertThat(jdbc.sql("SELECT ended_at IS NOT NULL AND completed_at IS NOT NULL FROM \"kpmg_issuance_portal\".journey "
+                + "WHERE id = :id").param("id", journey).query(Boolean.class).single()).isTrue();
+        assertThat(sessionRows(journey)).isZero();
+    }
+
+    @Test
+    @DisplayName("AC-25 — sweep_completedJourneyWithRecentActivity_staysActive")
+    void sweep_completedJourneyWithRecentActivity_staysActive() {
+        UUID journey = inactiveJourney();
+        jdbc.sql("UPDATE \"kpmg_issuance_portal\".journey SET state = 'completed', step = 'offer_obtained', "
+                + "completed_at = now() - interval '20 minutes', last_activity = now() WHERE id = :id")
+                .param("id", journey).update();
+
+        job().sweep(KPMG);
+
+        assertThat(journeyRow(journey)).containsEntry("state", "completed");
+        assertThat(jdbc.sql("SELECT ended_at IS NULL FROM \"kpmg_issuance_portal\".journey WHERE id = :id")
+                .param("id", journey).query(Boolean.class).single()).isTrue();
+        assertThat(sessionRows(journey)).isOne();
+    }
+
+    @Test
     @DisplayName("EC-05 — sweep_lockHeldByAnotherInstance_skipsTenant")
     void sweep_lockHeldByAnotherInstance_skipsTenant() {
         UUID journey = inactiveJourney();

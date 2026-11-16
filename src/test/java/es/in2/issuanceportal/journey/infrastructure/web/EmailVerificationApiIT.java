@@ -234,7 +234,7 @@ class EmailVerificationApiIT {
     void postEmailVerification_offerAlreadyDelivered_is409StepNotAllowed() throws Exception {
         TestHolder holder = entitledJourney();
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET state = 'completed', step = 'offer_obtained', "
-                        + "ended_at = now() WHERE id = :id")
+                        + "completed_at = now() WHERE id = :id")
                 .param("id", journeyOf(holder)).update();
 
         mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null))
@@ -672,7 +672,7 @@ class EmailVerificationApiIT {
         TestHolder holder = entitledJourney();
         sentCode(holder);
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET state = 'completed', step = 'offer_obtained', "
-                        + "ended_at = now() WHERE id = :id")
+                        + "completed_at = now() WHERE id = :id")
                 .param("id", journeyOf(holder)).update();
 
         mvc.perform(get(holder))

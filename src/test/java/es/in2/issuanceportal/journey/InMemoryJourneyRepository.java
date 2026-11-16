@@ -37,22 +37,8 @@ public class InMemoryJourneyRepository implements JourneyRepository {
         if (stored == null || stored.state() != readInState) {
             return false;
         }
-        // Like the database: the process is not written by update but by recordIssuanceProcess.
-        journeys.put(key(tenant, journey.id()), copy(journey, stored.issuanceProcessId().orElse(null)));
+        journeys.put(key(tenant, journey.id()), copy(journey));
         return true;
-    }
-
-    @Override
-    public boolean recordIssuanceProcess(TenantId tenant, UUID journeyId, UUID processId) {
-        boolean[] recorded = {false};
-        journeys.computeIfPresent(key(tenant, journeyId), (k, stored) -> {
-            if (stored.issuanceProcessId().isPresent() && !stored.issuanceProcessId().get().equals(processId)) {
-                return stored;
-            }
-            recorded[0] = true;
-            return copy(stored, processId);
-        });
-        return recorded[0];
     }
 
     @Override
@@ -77,12 +63,13 @@ public class InMemoryJourneyRepository implements JourneyRepository {
     }
 
     @Override
-    public boolean updateIfInactive(TenantId tenant, Journey journey, Instant cutoff) {
+    public boolean updateIfInactive(TenantId tenant, Journey journey, JourneyState readInState, Instant cutoff) {
         Journey stored = journeys.get(key(tenant, journey.id()));
-        if (stored == null || !stored.isInProgress() || stored.lastActivity().isAfter(cutoff)) {
+        if (stored == null || stored.state() != readInState || !stored.isActive()
+                || stored.lastActivity().isAfter(cutoff)) {
             return false;
         }
-        journeys.put(key(tenant, journey.id()), copy(journey, stored.issuanceProcessId().orElse(null)));
+        journeys.put(key(tenant, journey.id()), copy(journey));
         return true;
     }
 
@@ -98,7 +85,7 @@ public class InMemoryJourneyRepository implements JourneyRepository {
 
     private static boolean isClosedOrInactive(Journey journey, Instant cutoff) {
         return journey != null
-                && (journey.state() == JourneyState.WITHDRAWN || !journey.lastActivity().isAfter(cutoff));
+                && (!journey.isActive() || !journey.lastActivity().isAfter(cutoff));
     }
 
     private static String key(TenantId tenant, UUID id) {
@@ -106,12 +93,8 @@ public class InMemoryJourneyRepository implements JourneyRepository {
     }
 
     private static Journey copy(Journey j) {
-        return copy(j, j.issuanceProcessId().orElse(null));
-    }
-
-    private static Journey copy(Journey j, UUID processId) {
         return Journey.restore(j.id(), j.state(), j.step(), j.withdrawalReason().orElse(null),
-                j.identificationMethod().orElse(null), processId,
-                j.createdAt(), j.lastActivity(), j.endedAt().orElse(null));
+                j.identificationMethod().orElse(null), j.createdAt(), j.completedAt().orElse(null),
+                j.lastActivity(), j.endedAt().orElse(null));
     }
 }

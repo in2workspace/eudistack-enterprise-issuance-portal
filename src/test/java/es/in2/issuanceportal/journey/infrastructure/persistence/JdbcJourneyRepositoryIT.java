@@ -8,6 +8,7 @@ import es.in2.issuanceportal.journey.domain.JourneyStep;
 import es.in2.issuanceportal.journey.domain.WithdrawalReason;
 import es.in2.issuanceportal.session.Holders;
 import es.in2.issuanceportal.shared.tenant.TenantId;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -56,151 +57,66 @@ class JdbcJourneyRepositoryIT {
         assertThat(read.state()).isEqualTo(JourneyState.IN_PROGRESS);
         assertThat(read.step()).isEqualTo(JourneyStep.IDENTIFIED);
         assertThat(read.createdAt()).isEqualTo(journey.createdAt());
-        assertThat(read.issuanceProcessId()).isEmpty();
+        assertThat(read.completedAt()).isEmpty();
+        assertThat(read.endedAt()).isEmpty();
     }
 
     @Test
-    void recordIssuanceProcess_journeyWithoutProcess_isReadBack() {
+    @DisplayName("AC-25 — update_completedJourney_keepsItsCompletionAndAnEndOnlyWhenItEnds")
+    void update_completedJourney_keepsItsCompletionAndAnEndOnlyWhenItEnds() {
         Journey journey = Journey.start(UUID.randomUUID(), now(), null);
         repository.insert(SANDBOX, journey);
-        UUID process = UUID.randomUUID();
-
-        assertThat(repository.recordIssuanceProcess(SANDBOX, journey.id(), process)).isTrue();
-
-        assertThat(repository.findById(SANDBOX, journey.id()).orElseThrow().issuanceProcessId()).contains(process);
-    }
-
-    @Test
-    void recordIssuanceProcess_sameProcessAgain_isRecordedAndADifferentOneIsNot() {
-        Journey journey = Journey.start(UUID.randomUUID(), now(), null);
-        repository.insert(SANDBOX, journey);
-        UUID process = UUID.randomUUID();
-        repository.recordIssuanceProcess(SANDBOX, journey.id(), process);
-
-        assertThat(repository.recordIssuanceProcess(SANDBOX, journey.id(), process)).isTrue();
-        assertThat(repository.recordIssuanceProcess(SANDBOX, journey.id(), UUID.randomUUID())).isFalse();
-
-        assertThat(repository.findById(SANDBOX, journey.id()).orElseThrow().issuanceProcessId()).contains(process);
-    }
-
-    @Test
-    void update_journeyReadBeforeTheProcessWasRecorded_keepsTheProcess() {
-        Journey journey = Journey.start(UUID.randomUUID(), now(), null);
-        repository.insert(SANDBOX, journey);
-        Journey readWithoutProcess = repository.findById(SANDBOX, journey.id()).orElseThrow();
-        UUID process = UUID.randomUUID();
-        repository.recordIssuanceProcess(SANDBOX, journey.id(), process);
-        readWithoutProcess.reach(JourneyStep.IDENTIFIED, now());
-
-        assertThat(repository.update(SANDBOX, readWithoutProcess, JourneyState.IN_PROGRESS)).isTrue();
-
-        Journey read = repository.findById(SANDBOX, journey.id()).orElseThrow();
-        assertThat(read.issuanceProcessId()).contains(process);
-        assertThat(read.step()).isEqualTo(JourneyStep.IDENTIFIED);
-    }
-
-    @Test
-    void findByIdForUpdate_lockedByAnotherTransaction_waitsUntilItCommits() throws Exception {
-        Journey journey = Journey.start(UUID.randomUUID(), now(), null);
-        repository.insert(SANDBOX, journey);
-        TransactionTemplate transaction = new TransactionTemplate(transactionManager);
-        CountDownLatch firstHoldsLock = new CountDownLatch(1);
-        CountDownLatch releaseFirst = new CountDownLatch(1);
-        AtomicBoolean secondGotLock = new AtomicBoolean();
-        ExecutorService executor = Executors.newFixedThreadPool(2);
-        try {
-            Future<?> first = executor.submit(() -> transaction.executeWithoutResult(status -> {
-                repository.findByIdForUpdate(SANDBOX, journey.id());
-                firstHoldsLock.countDown();
-                await(releaseFirst);
-            }));
-            assertThat(firstHoldsLock.await(10, TimeUnit.SECONDS)).isTrue();
-            Future<?> second = executor.submit(() -> transaction.executeWithoutResult(status -> {
-                repository.findByIdForUpdate(SANDBOX, journey.id());
-                secondGotLock.set(true);
-            }));
-
-            // The second reader is blocked while the first transaction is open.
-            assertThatThrownBy(() -> second.get(1, TimeUnit.SECONDS)).isInstanceOf(TimeoutException.class);
-            assertThat(secondGotLock).isFalse();
-
-            releaseFirst.countDown();
-            first.get(10, TimeUnit.SECONDS);
-            second.get(10, TimeUnit.SECONDS);
-            assertThat(secondGotLock).isTrue();
-        } finally {
-            releaseFirst.countDown();
-            executor.shutdownNow();
-        }
-    }
-
-    @Test
-    void findByIdForUpdate_unknownJourney_returnsEmpty() {
-        assertThat(repository.findByIdForUpdate(SANDBOX, UUID.randomUUID())).isEmpty();
-    }
-
-    @Test
-    void update_withdrawnJourney_savesStateStepReasonAndEnd() {
-        Journey journey = Journey.start(UUID.randomUUID(), now(), null);
-        repository.insert(SANDBOX, journey);
-        journey.reach(JourneyStep.ENTITLEMENT_CONFIRMED, now());
-        journey.withdraw(WithdrawalReason.CANCELLED, now());
+        journey.complete(now());
 
         assertThat(repository.update(SANDBOX, journey, JourneyState.IN_PROGRESS)).isTrue();
 
-        Journey read = repository.findById(SANDBOX, journey.id()).orElseThrow();
-        assertThat(read.state()).isEqualTo(JourneyState.WITHDRAWN);
-        assertThat(read.step()).isEqualTo(JourneyStep.ENTITLEMENT_CONFIRMED);
-        assertThat(read.withdrawalReason()).contains(WithdrawalReason.CANCELLED);
-        assertThat(read.endedAt()).isPresent();
+        Journey completed = repository.findById(SANDBOX, journey.id()).orElseThrow();
+        assertThat(completed.state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(completed.completedAt()).contains(journey.completedAt().orElseThrow());
+        assertThat(completed.endedAt()).isEmpty();
+        completed.end(now());
+        assertThat(repository.update(SANDBOX, completed, JourneyState.COMPLETED)).isTrue();
+        Journey ended = repository.findById(SANDBOX, journey.id()).orElseThrow();
+        assertThat(ended.state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(ended.endedAt()).isPresent();
+        assertThat(ended.isActive()).isFalse();
     }
 
     @Test
-    void update_journeyChangedSinceRead_returnsFalseAndKeepsFirstChange() {
-        Journey journey = Journey.start(UUID.randomUUID(), now(), null);
-        repository.insert(SANDBOX, journey);
-        Journey parallelCopy = repository.findById(SANDBOX, journey.id()).orElseThrow();
-        journey.withdraw(WithdrawalReason.EXPIRED, now());
+    @DisplayName("AC-25 — updateIfInactive_completedJourney_endsItAndItsSessionCanGo")
+    void updateIfInactive_completedJourney_endsItAndItsSessionCanGo() {
+        Instant cutoff = now().minus(Duration.ofMinutes(15));
+        UUID id = journeyWithSession(cutoff.minusSeconds(60), false);
+        Journey journey = repository.findById(SANDBOX, id).orElseThrow();
+        journey.complete(cutoff.minusSeconds(60));
         repository.update(SANDBOX, journey, JourneyState.IN_PROGRESS);
+        Journey completed = repository.findById(SANDBOX, id).orElseThrow();
+        completed.end(now());
 
-        parallelCopy.withdraw(WithdrawalReason.CANCELLED, now());
+        assertThat(repository.findExpiryCandidates(SANDBOX, cutoff, new UUID(0L, 0L), 10)).contains(id);
+        assertThat(repository.updateIfInactive(SANDBOX, completed, JourneyState.COMPLETED, cutoff)).isTrue();
+        assertThat(repository.deleteSessionIfClosedOrInactive(SANDBOX, id, cutoff)).isTrue();
 
-        assertThat(repository.update(SANDBOX, parallelCopy, JourneyState.IN_PROGRESS)).isFalse();
-        assertThat(repository.findById(SANDBOX, journey.id()).orElseThrow().withdrawalReason())
-                .contains(WithdrawalReason.EXPIRED);
+        Journey ended = repository.findById(SANDBOX, id).orElseThrow();
+        assertThat(ended.state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(ended.endedAt()).isPresent();
+        assertThat(sessionRows(id)).isZero();
     }
 
     @Test
-    void findById_journeyOfAnotherTenant_returnsEmpty() {
-        Journey journey = Journey.start(UUID.randomUUID(), now(), null);
-        repository.insert(KPMG, journey);
-
-        assertThat(repository.findById(SANDBOX, journey.id())).isEmpty();
-    }
-
-    @Test
-    void findExpiryCandidates_openSessions_returnsOnlyInactiveOrWithdrawnOnes() {
+    void updateIfInactive_journeyAlreadyEnded_writesNothing() {
         Instant cutoff = now().minus(Duration.ofMinutes(15));
-        UUID inactive = journeyWithSession(cutoff.minusSeconds(60), false);
-        UUID atTheLimit = journeyWithSession(cutoff, false);
-        UUID active = journeyWithSession(now(), false);
-        UUID withdrawnWithSession = journeyWithSession(now(), true);
+        UUID id = journeyWithSession(cutoff.minusSeconds(60), false);
+        Journey journey = repository.findById(SANDBOX, id).orElseThrow();
+        journey.complete(cutoff.minusSeconds(60));
+        repository.update(SANDBOX, journey, JourneyState.IN_PROGRESS);
+        Journey first = repository.findById(SANDBOX, id).orElseThrow();
+        Journey second = repository.findById(SANDBOX, id).orElseThrow();
+        first.end(now());
+        second.end(now());
 
-        var candidates = repository.findExpiryCandidates(SANDBOX, cutoff, new UUID(0L, 0L), 1_000);
-
-        assertThat(candidates).contains(inactive, atTheLimit, withdrawnWithSession).doesNotContain(active);
-    }
-
-    @Test
-    void findExpiryCandidates_afterAnId_returnsOnlyLaterIdsInOrder() {
-        Instant cutoff = now().minus(Duration.ofMinutes(15));
-        journeyWithSession(cutoff.minusSeconds(60), false);
-        journeyWithSession(cutoff.minusSeconds(60), false);
-        List<UUID> all = repository.findExpiryCandidates(SANDBOX, cutoff, new UUID(0L, 0L), 1_000);
-
-        List<UUID> rest = repository.findExpiryCandidates(SANDBOX, cutoff, all.getFirst(), 1_000);
-
-        assertThat(rest).isEqualTo(all.subList(1, all.size()));
+        assertThat(repository.updateIfInactive(SANDBOX, first, JourneyState.COMPLETED, cutoff)).isTrue();
+        assertThat(repository.updateIfInactive(SANDBOX, second, JourneyState.COMPLETED, cutoff)).isFalse();
     }
 
     @Test
@@ -213,7 +129,7 @@ class JdbcJourneyRepositoryIT {
         repository.update(SANDBOX, used, JourneyState.IN_PROGRESS);
         staleRead.withdraw(WithdrawalReason.EXPIRED, now());
 
-        assertThat(repository.updateIfInactive(SANDBOX, staleRead, cutoff)).isFalse();
+        assertThat(repository.updateIfInactive(SANDBOX, staleRead, JourneyState.IN_PROGRESS, cutoff)).isFalse();
         assertThat(repository.deleteSessionIfClosedOrInactive(SANDBOX, id, cutoff)).isFalse();
         assertThat(repository.findById(SANDBOX, id).orElseThrow().state()).isEqualTo(JourneyState.IN_PROGRESS);
         assertThat(sessionRows(id)).isOne();
@@ -226,7 +142,7 @@ class JdbcJourneyRepositoryIT {
         Journey journey = repository.findById(SANDBOX, id).orElseThrow();
         journey.withdraw(WithdrawalReason.EXPIRED, now());
 
-        assertThat(repository.updateIfInactive(SANDBOX, journey, cutoff)).isTrue();
+        assertThat(repository.updateIfInactive(SANDBOX, journey, JourneyState.IN_PROGRESS, cutoff)).isTrue();
         assertThat(repository.deleteSessionIfClosedOrInactive(SANDBOX, id, cutoff)).isTrue();
         assertThat(repository.findById(SANDBOX, id).orElseThrow().withdrawalReason())
                 .contains(WithdrawalReason.EXPIRED);

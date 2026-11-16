@@ -228,7 +228,7 @@ class ConfirmationApiIT {
                 .andReturn();
         assertThat(tickets.calls()).isEmpty();
 
-        UUID process = jdbc.sql("SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
+        UUID process = jdbc.sql("SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey_issuance WHERE journey_id = :id")
                 .param("id", journeyOf(holder)).query(UUID.class).single();
         assertThat(result.getResponse().getContentAsString()).doesNotContain(process.toString());
         assertThat(issuer.api().calls()).hasSize(1);
@@ -672,7 +672,8 @@ class ConfirmationApiIT {
     void postConfirmation_processAlreadyRecorded_isOnboardingUnavailableWithoutAskingTheIssuer() throws Exception {
         TestHolder holder = entitledJourney();
         UUID process = UUID.randomUUID();
-        jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET issuance_process_id = :process WHERE id = :id")
+        jdbc.sql("INSERT INTO \"sandbox_issuance_portal\".journey_issuance (journey_id, request_id, issuance_process_id, created_at) "
+                        + "VALUES (:id, 'r1', :process, now())")
                 .param("process", process).param("id", journeyOf(holder)).update();
 
         mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
@@ -754,11 +755,11 @@ class ConfirmationApiIT {
     }
 
     private void assertInProgressWithEntitlement(TestHolder holder) {
-        Map<String, Object> row = jdbc.sql("SELECT state, step, issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
+        Map<String, Object> row = jdbc.sql("SELECT state, step FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
                 .param("id", journeyOf(holder)).query().singleRow();
         assertThat(row).containsEntry("state", "in_progress")
                 .containsEntry("step", "email_verified");
-        assertThat(row.get("issuance_process_id")).isNull();
+        assertThat(processOf(holder)).isNull();
         assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.ENTITLEMENT)).isPresent();
         assertThat(IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).offerUri())
                 .isEmpty();
@@ -779,7 +780,7 @@ class ConfirmationApiIT {
     }
 
     private UUID processOf(TestHolder holder) {
-        return jdbc.sql("SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
+        return jdbc.sql("SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey_issuance WHERE journey_id = :id")
                 .param("id", journeyOf(holder)).query(UUID.class).optional().orElse(null);
     }
 

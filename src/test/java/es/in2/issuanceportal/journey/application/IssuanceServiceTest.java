@@ -2,6 +2,7 @@ package es.in2.issuanceportal.journey.application;
 
 import es.in2.issuanceportal.MutableClock;
 import es.in2.issuanceportal.journey.InMemoryIssuanceApi;
+import es.in2.issuanceportal.journey.InMemoryJourneyIssuanceRepository;
 import es.in2.issuanceportal.journey.InMemoryJourneyRepository;
 import es.in2.issuanceportal.journey.InMemoryOnboardingTickets;
 import es.in2.issuanceportal.journey.RecordingJourneyAuditTrail;
@@ -14,6 +15,7 @@ import es.in2.issuanceportal.journey.application.port.JourneyAuditTrail;
 import es.in2.issuanceportal.journey.application.port.OnboardingTicketException;
 import es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException;
 import es.in2.issuanceportal.journey.domain.Journey;
+import es.in2.issuanceportal.journey.domain.JourneyIssuance;
 import es.in2.issuanceportal.journey.domain.JourneyClosedException;
 import es.in2.issuanceportal.journey.domain.JourneyState;
 import es.in2.issuanceportal.journey.domain.JourneyStep;
@@ -79,6 +81,7 @@ class IssuanceServiceTest {
 
     private final InMemoryJourneySessions sessions = new InMemoryJourneySessions();
     private final InMemoryJourneyRepository journeys = new InMemoryJourneyRepository(sessions);
+    private final InMemoryJourneyIssuanceRepository issuances = new InMemoryJourneyIssuanceRepository();
     private final MutableClock clock = new MutableClock(Instant.parse("2026-11-05T10:00:00Z"));
     private final RecordingJourneyAuditTrail trail = new RecordingJourneyAuditTrail();
     private final JourneyService journey = new JourneyService(journeys, sessions, trail,
@@ -90,7 +93,7 @@ class IssuanceServiceTest {
     private final AtomicBoolean ticketAskedInsideTransaction = new AtomicBoolean();
     private final InMemoryOnboardingTickets tickets = new InMemoryOnboardingTickets(clock);
     private IssuanceApi issuer = api;
-    private final IssuanceService service = new IssuanceService(journey, journeys, sessions,
+    private final IssuanceService service = new IssuanceService(journey, journeys, issuances, sessions,
             new PortalConfigService(tenant -> Optional.ofNullable(configs.get(tenant))),
             (tenant, key, request) -> {
                 askedInsideTransaction.compareAndSet(false, inTransaction.get());
@@ -140,7 +143,7 @@ class IssuanceServiceTest {
         Journey stored = journeys.findById(CGCOM, journeyOf(holder)).orElseThrow();
         assertThat(stored.state()).isEqualTo(JourneyState.COMPLETED);
         assertThat(stored.step()).isEqualTo(JourneyStep.OFFER_OBTAINED);
-        assertThat(stored.issuanceProcessId()).isPresent();
+        assertThat(processOf(stored.id())).isPresent();
         assertThat(offer.credentialOfferUri()).startsWith("openid-credential-offer://");
         assertThat(offer.expiresAt()).isEqualTo(clock.instant().plus(Duration.ofMinutes(10)));
         assertThat(offer.toString()).doesNotContain("openid-credential-offer");
@@ -219,7 +222,7 @@ class IssuanceServiceTest {
         Journey after = journeys.findById(CGCOM, before.id()).orElseThrow();
         assertThat(after.state()).isEqualTo(JourneyState.IN_PROGRESS);
         assertThat(after.step()).isEqualTo(JourneyStep.IDENTIFIED);
-        assertThat(after.issuanceProcessId()).isEmpty();
+        assertThat(processOf(after.id())).isEmpty();
     }
 
     @Test
@@ -253,7 +256,7 @@ class IssuanceServiceTest {
         Journey stored = journeys.findById(CGCOM, journeyOf(holder)).orElseThrow();
         assertThat(stored.state()).isEqualTo(JourneyState.IN_PROGRESS);
         assertThat(stored.step()).isEqualTo(JourneyStep.ENTITLEMENT_CONFIRMED);
-        assertThat(stored.issuanceProcessId()).isEmpty();
+        assertThat(processOf(stored.id())).isEmpty();
     }
 
     @Test
@@ -481,7 +484,7 @@ class IssuanceServiceTest {
         HolderRef holder = entitledJourney();
         Journey stored = journeys.findById(CGCOM, journeyOf(holder)).orElseThrow();
         UUID process = UUID.randomUUID();
-        journeys.recordIssuanceProcess(CGCOM, stored.id(), process);
+        issuances.insert(CGCOM, new JourneyIssuance(stored.id(), "r1", process, clock.instant(), null));
 
         assertThatThrownBy(() -> service.confirm(CGCOM, holder)).satisfies(e -> assertProblem(e,
                 ProblemCode.ONBOARDING_UNAVAILABLE));
@@ -489,7 +492,7 @@ class IssuanceServiceTest {
         assertThat(api.calls()).isEmpty();
         Journey after = journeys.findById(CGCOM, stored.id()).orElseThrow();
         assertThat(after.state()).isEqualTo(JourneyState.IN_PROGRESS);
-        assertThat(after.issuanceProcessId()).contains(process);
+        assertThat(processOf(after.id())).contains(process);
     }
 
     // --- EC-03, NFR-2: what the second transaction does when the journey changed during the Issuer call ---
@@ -527,7 +530,7 @@ class IssuanceServiceTest {
         HolderRef holder = entitledJourney();
         UUID stored = UUID.randomUUID();
         issuer = (tenant, key, request) -> {
-            journeys.recordIssuanceProcess(tenant, journeyOf(holder), stored);
+            issuances.insert(tenant, new JourneyIssuance(journeyOf(holder), "r1", stored, clock.instant(), null));
             return api.issue(tenant, key, request);
         };
 
@@ -535,7 +538,7 @@ class IssuanceServiceTest {
                 ProblemCode.ONBOARDING_UNAVAILABLE));
 
         Journey after = journeys.findById(CGCOM, journeyOf(holder)).orElseThrow();
-        assertThat(after.issuanceProcessId()).contains(stored);
+        assertThat(processOf(after.id())).contains(stored);
         assertThat(after.state()).isEqualTo(JourneyState.IN_PROGRESS);
         assertThat(IssuanceRecord.fromJson(sessions.read(CGCOM, journeyOf(holder), Section.ISSUANCE).orElseThrow()).offerUri())
                 .isEmpty();
@@ -555,7 +558,7 @@ class IssuanceServiceTest {
         assertThatThrownBy(() -> service.confirm(CGCOM, holder)).satisfies(e -> assertProblem(e,
                 ProblemCode.JOURNEY_CLOSED));
 
-        assertThat(journeys.findById(CGCOM, journeyOf(holder)).orElseThrow().issuanceProcessId()).isEmpty();
+        assertThat(processOf(journeyOf(holder))).isEmpty();
     }
 
     // --- AC-03 (ticket), AC-10, AC-11, AC-12 ---
@@ -654,7 +657,7 @@ class IssuanceServiceTest {
         Journey stored = journeys.findById(CGCOM, journeyOf(holder)).orElseThrow();
         assertThat(stored.state()).isEqualTo(JourneyState.IN_PROGRESS);
         assertThat(stored.step()).isEqualTo(JourneyStep.EMAIL_VERIFIED);
-        assertThat(stored.issuanceProcessId()).isPresent();
+        assertThat(processOf(stored.id())).isPresent();
         IssuanceRecord issuance = IssuanceRecord.fromJson(sessions.read(CGCOM, journeyOf(holder), Section.ISSUANCE).orElseThrow());
         assertThat(issuance.offerUri()).isEmpty();
         assertThat(issuance.offerExpiresAt()).isNull();
@@ -662,7 +665,7 @@ class IssuanceServiceTest {
         assertThat(issuance.onboardingExpiresAt()).isNull();
         assertThat(trail.issuanceRequests()).singleElement().satisfies(event -> {
             assertThat(event.result()).isEqualTo(JourneyAuditTrail.IssuanceOutcome.ONBOARDING_FAILED);
-            assertThat(event.issuanceProcessId()).contains(stored.issuanceProcessId().orElseThrow());
+            assertThat(event.issuanceProcessId()).contains(processOf(stored.id()).orElseThrow());
         });
         assertThat(trail.ticketRequests()).singleElement()
                 .satisfies(event -> assertThat(event.result()).isEqualTo(JourneyAuditTrail.TicketOutcome.FAILED));
@@ -731,7 +734,7 @@ class IssuanceServiceTest {
                 .isEqualTo(EMAIL);
         Journey stored = journeys.findById(CGCOM, journeyOf(holder)).orElseThrow();
         assertThat(stored.state()).isEqualTo(JourneyState.IN_PROGRESS);
-        assertThat(stored.issuanceProcessId()).isEmpty();
+        assertThat(processOf(stored.id())).isEmpty();
     }
 
     /** ES-01, ES-02, AC-05: the journey is where the entitlement left it, without a process or an offer. */
@@ -739,7 +742,7 @@ class IssuanceServiceTest {
         Journey stored = journeys.findById(CGCOM, journeyOf(holder)).orElseThrow();
         assertThat(stored.state()).isEqualTo(JourneyState.IN_PROGRESS);
         assertThat(stored.step()).isEqualTo(JourneyStep.EMAIL_VERIFIED);
-        assertThat(stored.issuanceProcessId()).isEmpty();
+        assertThat(processOf(stored.id())).isEmpty();
         assertThat(sessions.read(CGCOM, journeyOf(holder), Section.ENTITLEMENT)).isPresent();
     }
 
@@ -791,5 +794,9 @@ class IssuanceServiceTest {
         journey.open(tenant, holder, new HolderIdentity("Lucia", "Prueba Sintetica",
                 new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R"), null), null);
         return holder;
+    }
+
+    private Optional<UUID> processOf(UUID journeyId) {
+        return issuances.findByJourney(CGCOM, journeyId).stream().map(JourneyIssuance::issuanceProcessId).findFirst();
     }
 }

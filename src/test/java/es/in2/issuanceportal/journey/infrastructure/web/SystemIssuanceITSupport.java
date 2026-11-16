@@ -272,12 +272,14 @@ abstract class SystemIssuanceITSupport {
     }
 
     UUID processOf(TestHolder holder) {
-        return jdbc.sql("SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
+        return jdbc.sql("SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey_issuance WHERE journey_id = :id")
                 .param("id", journeyOf(holder)).query(UUID.class).optional().orElse(null);
     }
 
     Map<String, Object> rowOf(TestHolder holder) {
-        return jdbc.sql("SELECT state, step, issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
+        return jdbc.sql("SELECT state, step, (SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey_issuance "
+                        + "WHERE journey_id = journey.id) AS issuance_process_id "
+                        + "FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
                 .param("id", journeyOf(holder)).query().singleRow();
     }
 

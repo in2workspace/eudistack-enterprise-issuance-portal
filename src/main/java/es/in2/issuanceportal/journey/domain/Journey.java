@@ -6,8 +6,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * The holder's journey (prd.md §3.2). It holds no personal data and is never deleted: leaving
- * {@code in_progress} only fixes its end, its last step and, when withdrawn, the reason.
+ * The holder's journey (prd.md §3.2). It holds no personal data and is never deleted: it is withdrawn before the
+ * first offer, or completed with it, and a journey that is withdrawn, ended or expired fixes its end.
  */
 public final class Journey {
 
@@ -17,24 +17,24 @@ public final class Journey {
     private final UUID id;
     private final Instant createdAt;
     private final String identificationMethod;
-    private UUID issuanceProcessId;
     private JourneyState state;
     private JourneyStep step;
     private WithdrawalReason withdrawalReason;
     private Instant lastActivity;
+    private Instant completedAt;
     private Instant endedAt;
 
     @SuppressWarnings("java:S107") // Mirrors the persisted record one to one.
     private Journey(UUID id, JourneyState state, JourneyStep step, WithdrawalReason withdrawalReason,
-                    String identificationMethod, UUID issuanceProcessId,
-                    Instant createdAt, Instant lastActivity, Instant endedAt) {
+                    String identificationMethod, Instant createdAt, Instant completedAt,
+                    Instant lastActivity, Instant endedAt) {
         this.id = id;
         this.state = state;
         this.step = step;
         this.withdrawalReason = withdrawalReason;
         this.identificationMethod = identificationMethod;
-        this.issuanceProcessId = issuanceProcessId;
         this.createdAt = createdAt;
+        this.completedAt = completedAt;
         this.lastActivity = lastActivity;
         this.endedAt = endedAt;
     }
@@ -46,25 +46,25 @@ public final class Journey {
      * @param identificationMethod how the holder logged in; {@code null} when it is not known
      */
     public static Journey start(UUID id, Instant now, String identificationMethod) {
-        return new Journey(id, JourneyState.IN_PROGRESS, JourneyStep.IDENTIFIED, null, identificationMethod, null,
-                now, now, null);
+        return new Journey(id, JourneyState.IN_PROGRESS, JourneyStep.IDENTIFIED, null, identificationMethod,
+                now, null, now, null);
     }
 
     /** Rebuilds a journey from storage. */
     @SuppressWarnings("java:S107")
     public static Journey restore(UUID id, JourneyState state, JourneyStep step, WithdrawalReason withdrawalReason,
-                                  String identificationMethod, UUID issuanceProcessId,
-                                  Instant createdAt, Instant lastActivity, Instant endedAt) {
-        return new Journey(id, state, step, withdrawalReason, identificationMethod, issuanceProcessId,
-                createdAt, lastActivity, endedAt);
+                                  String identificationMethod, Instant createdAt, Instant completedAt,
+                                  Instant lastActivity, Instant endedAt) {
+        return new Journey(id, state, step, withdrawalReason, identificationMethod, createdAt, completedAt,
+                lastActivity, endedAt);
     }
 
     /**
-     * Records activity, which pushes back the expiry. A completed journey keeps its session, to ask for
-     * a new offer, until it is closed or goes inactive (prd.md §3.2), so its activity counts too.
+     * Records activity, which pushes back the expiry. A completed journey stays active, for the other requests and
+     * new offers, until it ends or goes inactive (design.md AD-18), so its activity counts too.
      */
     public void touch(Instant now) {
-        if (state == JourneyState.WITHDRAWN) {
+        if (endedAt != null) {
             throw new JourneyClosedException();
         }
         lastActivity = now;
@@ -79,19 +79,6 @@ public final class Journey {
         lastActivity = now;
     }
 
-    /**
-     * Records the issuance process created for this journey (design.md AD-12). A journey has a single
-     * process: recording the same one again changes nothing, a different one is rejected.
-     */
-    public void recordIssuanceProcess(UUID processId, Instant now) {
-        requireInProgress();
-        if (issuanceProcessId != null && !issuanceProcessId.equals(processId)) {
-            throw new IssuanceProcessAlreadyRecordedException();
-        }
-        issuanceProcessId = processId;
-        lastActivity = now;
-    }
-
     public void withdraw(WithdrawalReason reason, Instant now) {
         requireInProgress();
         state = JourneyState.WITHDRAWN;
@@ -99,21 +86,38 @@ public final class Journey {
         endedAt = now;
     }
 
+    /** The first offer was delivered: the journey is completed and stays active, with no end (design.md AD-18). */
     public void complete(Instant now) {
         requireInProgress();
         state = JourneyState.COMPLETED;
         step = JourneyStep.OFFER_OBTAINED;
+        completedAt = now;
         lastActivity = now;
+    }
+
+    /** The holder ends a completed journey, or it goes inactive: it stays completed and is no longer active. */
+    public void end(Instant now) {
+        if (state != JourneyState.COMPLETED || endedAt != null) {
+            throw new JourneyClosedException();
+        }
         endedAt = now;
     }
 
     /**
-     * True once the inactivity limit has passed for a journey that still has a session, even if the
-     * expiry job has not handled it yet. In progress, it is withdrawn as expired; completed, only its
-     * session closes.
+     * True once the inactivity limit has passed for a journey that is still active, even if the expiry job has
+     * not handled it yet. In progress, it is withdrawn as expired; completed, it ends.
      */
     public boolean isInactive(Instant now) {
-        return state != JourneyState.WITHDRAWN && !now.isBefore(lastActivity.plus(INACTIVITY_LIMIT));
+        return endedAt == null && !now.isBefore(lastActivity.plus(INACTIVITY_LIMIT));
+    }
+
+    /** Active until it ends: in progress, or completed and not ended (design.md AD-18). */
+    public boolean isActive() {
+        return endedAt == null;
+    }
+
+    public boolean isCompleted() {
+        return state == JourneyState.COMPLETED;
     }
 
     public boolean isInProgress() {
@@ -146,16 +150,16 @@ public final class Journey {
         return Optional.ofNullable(identificationMethod);
     }
 
-    public Optional<UUID> issuanceProcessId() {
-        return Optional.ofNullable(issuanceProcessId);
-    }
-
     public Instant createdAt() {
         return createdAt;
     }
 
     public Instant lastActivity() {
         return lastActivity;
+    }
+
+    public Optional<Instant> completedAt() {
+        return Optional.ofNullable(completedAt);
     }
 
     public Optional<Instant> endedAt() {

@@ -464,12 +464,12 @@ class JourneyApiIT {
     }
 
     @Test
-    @DisplayName("EC-02 — postWithdrawal_completedJourney_onlyClosesSession")
-    void postWithdrawal_completedJourney_onlyClosesSession() throws Exception {
+    @DisplayName("AC-25 — postWithdrawal_completedJourney_endsItStaysCompletedAndDeletesTheSession")
+    void postWithdrawal_completedJourney_endsItStaysCompletedAndDeletesTheSession() throws Exception {
         TestHolder holder = start();
         UUID journeyId = journeyOf(holder);
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET state = 'completed', step = 'offer_obtained', "
-                + "ended_at = now() WHERE id = :id").param("id", journeyId).update();
+                + "completed_at = now() WHERE id = :id").param("id", journeyId).update();
 
         mvc.perform(post(JOURNEY + "/withdrawal", holder))
                 .andExpect(status().isOk())
@@ -477,7 +477,10 @@ class JourneyApiIT {
                 .andExpect(jsonPath("$.step").value("offer_obtained"));
 
         assertThat(journeyRow(journeyId)).containsEntry("state", "completed");
+        assertThat(journeyRow(journeyId).get("ended_at")).isNotNull();
         assertThat(sessionRows(journeyId)).isZero();
+        mvc.perform(get(JOURNEY, holder)).andExpect(status().isGone())
+                .andExpect(jsonPath("$.type").value("journey_closed"));
     }
 
     @Test
@@ -486,7 +489,7 @@ class JourneyApiIT {
         TestHolder holder = start();
         UUID journeyId = journeyOf(holder);
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET state = 'completed', step = 'offer_obtained', "
-                + "ended_at = now() WHERE id = :id").param("id", journeyId).update();
+                + "completed_at = now() WHERE id = :id").param("id", journeyId).update();
         sessions.write(SANDBOX, journeyId, Section.ISSUANCE, new IssuanceRecord(UUID.randomUUID(), null,
                 "openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fissuer%2Foffer%2F1",
                 Instant.parse("2030-01-01T10:10:00Z"), "https://sandbox.127.0.0.1.nip.io:4443/t/Zk3q9Xw2",

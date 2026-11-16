@@ -101,7 +101,7 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
         Optional<Journey> existing = sessions.journeyOf(tenant, holder).flatMap(id -> journeys.findById(tenant, id));
         if (existing.isPresent()) {
             Journey journey = existing.get();
-            if (journey.state() == JourneyState.WITHDRAWN) {
+            if (!journey.isActive()) {
                 sessions.close(tenant, journey.id());
             } else if (journey.isInactive(now)) {
                 expireOnRequest(tenant, journey, now);
@@ -125,15 +125,15 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
     }
 
     /**
-     * The holder cancels. In progress, the journey is withdrawn as cancelled; completed, only its
-     * session closes. Either way the personal data is deleted.
+     * The holder leaves. In progress, the journey is withdrawn as cancelled; completed, it ends and stays
+     * completed. Either way its end is fixed and the personal data is deleted.
      */
     public Journey cancel(TenantId tenant, HolderRef holder) {
         Journey journey = active(tenant, holder);
         if (journey.isInProgress()) {
             withdraw(tenant, journey, WithdrawalReason.CANCELLED);
         } else {
-            sessions.close(tenant, journey.id());
+            end(tenant, journey);
         }
         return journey;
     }
@@ -171,8 +171,8 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
     }
 
     /**
-     * Expiry sweep of a tenant (design.md AD-4): every session inactive for 15 minutes is closed, and a
-     * journey still in progress is withdrawn as expired. Only candidates are read, in pages, and each
+     * Expiry sweep of a tenant (design.md AD-4): every session inactive for 15 minutes is closed, a journey
+     * still in progress is withdrawn as expired and a completed one ends. Only candidates are read, in pages, and each
      * journey is handled in its own transaction with writes that never overwrite a request that used it
      * in the meantime. Returns how many sessions were closed.
      */
@@ -203,13 +203,8 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
 
     private boolean expireOne(TenantId tenant, UUID id, Instant now, Instant cutoff) {
         journeys.findById(tenant, id)
-                .filter(journey -> journey.isInProgress() && journey.isInactive(now))
-                .ifPresent(journey -> {
-                    journey.withdraw(WithdrawalReason.EXPIRED, now);
-                    if (journeys.updateIfInactive(tenant, journey, cutoff)) {
-                        audit(tenant, JourneyAuditTrail.Kind.WITHDRAWN, journey);
-                    }
-                });
+                .filter(journey -> journey.isInactive(now))
+                .ifPresent(journey -> endByInactivity(tenant, journey, now, cutoff));
         return journeys.deleteSessionIfClosedOrInactive(tenant, id, cutoff);
     }
 
@@ -219,8 +214,8 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
                 .flatMap(id -> journeys.findById(tenant, id))
                 .orElseThrow(JourneyClosedException::new);
         Instant now = clock.instant();
-        if (journey.state() == JourneyState.WITHDRAWN) {
-            // A withdrawn journey has no session; clean up one left behind.
+        if (!journey.isActive()) {
+            // A journey that ended has no session; clean up one left behind.
             independent.executeWithoutResult(status -> sessions.close(tenant, journey.id()));
             throw new JourneyClosedException();
         }
@@ -237,13 +232,24 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
     /** Same outcome as the sweep, for a request that arrives before it. */
     private void expireOnRequest(TenantId tenant, Journey journey, Instant now) {
         Instant cutoff = now.minus(Journey.INACTIVITY_LIMIT);
-        if (journey.isInProgress()) {
-            journey.withdraw(WithdrawalReason.EXPIRED, now);
-            if (journeys.updateIfInactive(tenant, journey, cutoff)) {
-                audit(tenant, JourneyAuditTrail.Kind.WITHDRAWN, journey);
-            }
+        if (journey.isActive()) {
+            endByInactivity(tenant, journey, now, cutoff);
         }
         journeys.deleteSessionIfClosedOrInactive(tenant, journey.id(), cutoff);
+    }
+
+    /** In progress it is withdrawn as expired; completed it ends, and stays completed (design.md AD-4). */
+    private void endByInactivity(TenantId tenant, Journey journey, Instant now, Instant cutoff) {
+        JourneyState readIn = journey.state();
+        if (journey.isInProgress()) {
+            journey.withdraw(WithdrawalReason.EXPIRED, now);
+        } else {
+            journey.end(now);
+        }
+        if (journeys.updateIfInactive(tenant, journey, readIn, cutoff)) {
+            audit(tenant, journey.state() == JourneyState.WITHDRAWN ? JourneyAuditTrail.Kind.WITHDRAWN
+                    : JourneyAuditTrail.Kind.ENDED, journey);
+        }
     }
 
     private Journey activeInProgress(TenantId tenant, HolderRef holder) {
@@ -252,6 +258,13 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
             throw new JourneyClosedException();
         }
         return journey;
+    }
+
+    private void end(TenantId tenant, Journey journey) {
+        journey.end(clock.instant());
+        save(tenant, journey, JourneyState.COMPLETED);
+        sessions.close(tenant, journey.id());
+        audit(tenant, JourneyAuditTrail.Kind.ENDED, journey);
     }
 
     private void withdraw(TenantId tenant, Journey journey, WithdrawalReason reason) {

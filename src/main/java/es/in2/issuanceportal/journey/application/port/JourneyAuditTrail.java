@@ -15,7 +15,7 @@ import java.util.UUID;
  */
 public interface JourneyAuditTrail {
 
-    enum Kind { STARTED, STEP_REACHED, COMPLETED, WITHDRAWN }
+    enum Kind { STARTED, STEP_REACHED, COMPLETED, WITHDRAWN, ENDED }
 
     record Event(
             UUID eventId,
