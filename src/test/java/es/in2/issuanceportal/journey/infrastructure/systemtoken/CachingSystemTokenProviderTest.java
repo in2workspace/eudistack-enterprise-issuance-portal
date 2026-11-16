@@ -1,8 +1,8 @@
 package es.in2.issuanceportal.journey.infrastructure.systemtoken;
 
 import es.in2.issuanceportal.MutableClock;
-import es.in2.issuanceportal.journey.application.port.SystemToken;
-import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
+import es.in2.issuanceportal.shared.systemtoken.SystemToken;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;

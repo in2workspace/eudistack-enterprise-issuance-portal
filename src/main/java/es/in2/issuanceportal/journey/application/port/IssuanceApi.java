@@ -1,5 +1,6 @@
 package es.in2.issuanceportal.journey.application.port;
 
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 
 import java.util.UUID;

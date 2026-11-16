@@ -301,7 +301,7 @@ public class EntitlementService implements AutoCloseable {
                     return null;
                 }
                 try {
-                    return current.adapter().lookup(tenant, current.attestationType(), person, timeout);
+                    return current.adapter().lookup(tenant, current.attestationType(), person, current.settings(), timeout);
                 } finally {
                     slot.release();
                 }

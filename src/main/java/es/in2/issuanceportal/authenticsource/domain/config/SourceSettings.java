@@ -22,13 +22,26 @@ import java.util.Set;
  * @param identifierTypes the identifier types the source is searched by
  * @param mapping         source attribute → attestation claim and label
  * @param emailAttribute  the source's attribute with the holder's email, if it has one
- * @param adapterSettings what only the adapter reads, e.g. the records of the simulated one
+ * @param auth            how the HTTP adapter authenticates to the source; only with {@code http}
+ * @param contract        the names and values of the HTTP source; only with {@code http}
+ * @param adapterSettings what only the adapter reads, e.g. the people of the simulated one
  */
 public record SourceSettings(String typeName, String adapter, String url, String secretRef, Duration timeout,
                              Set<IdentifierType> identifierTypes, List<AttributeMapping> mapping,
-                             String emailAttribute, Map<String, Object> adapterSettings) {
+                             String emailAttribute, SourceAuth auth, SourceContract contract,
+                             Map<String, Object> adapterSettings) {
 
     public static final Duration MAX_TIMEOUT = Duration.ofSeconds(10);
+    /** The adapter of design.md AD-4: its configuration needs the address, the authentication and the contract. */
+    public static final String HTTP_ADAPTER = "http";
+
+    /** A source without authentication nor contract, e.g. the simulated one. */
+    public SourceSettings(String typeName, String adapter, String url, String secretRef, Duration timeout,
+                          Set<IdentifierType> identifierTypes, List<AttributeMapping> mapping,
+                          String emailAttribute, Map<String, Object> adapterSettings) {
+        this(typeName, adapter, url, secretRef, timeout, identifierTypes, mapping, emailAttribute, null, null,
+                adapterSettings);
+    }
 
     public SourceSettings {
         if (typeName == null || typeName.isBlank()) {
@@ -48,8 +61,26 @@ public record SourceSettings(String typeName, String adapter, String url, String
         mapping = mapping == null ? List.of() : List.copyOf(mapping);
         requireDistinctClaims(mapping);
         emailAttribute = emailAttribute == null || emailAttribute.isBlank() ? null : emailAttribute;
+        if (HTTP_ADAPTER.equals(adapter)) {
+            requireHttpFields(url, secretRef, auth, contract);
+        }
         adapterSettings = adapterSettings == null ? Map.of()
                 : Collections.unmodifiableMap(new LinkedHashMap<>(adapterSettings));
+    }
+
+    private static void requireHttpFields(String url, String secretRef, SourceAuth auth, SourceContract contract) {
+        if (url == null || url.isBlank()) {
+            throw new InvalidSourceConfigException("url is required");
+        }
+        if (auth == null) {
+            throw new InvalidSourceConfigException("auth is required");
+        }
+        if (auth == SourceAuth.SECRET && (secretRef == null || secretRef.isBlank())) {
+            throw new InvalidSourceConfigException("secret_ref is required");
+        }
+        if (contract == null) {
+            throw new InvalidSourceConfigException("contract is required");
+        }
     }
 
     private static void requireDistinctClaims(List<AttributeMapping> mapping) {

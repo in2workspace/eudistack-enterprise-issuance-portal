@@ -1,6 +1,6 @@
 package es.in2.issuanceportal.journey.infrastructure.systemtoken;
 
-import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.services.ssm.SsmClient;

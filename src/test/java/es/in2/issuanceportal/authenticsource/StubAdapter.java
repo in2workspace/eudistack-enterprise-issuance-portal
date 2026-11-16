@@ -5,6 +5,7 @@ import es.in2.issuanceportal.authenticsource.domain.Holder;
 import es.in2.issuanceportal.authenticsource.domain.IdentifierType;
 import es.in2.issuanceportal.authenticsource.domain.PersonalIdentifier;
 import es.in2.issuanceportal.authenticsource.domain.SourceRequests;
+import es.in2.issuanceportal.authenticsource.domain.config.SourceSettings;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 
 import java.time.Duration;
@@ -22,6 +23,9 @@ public class StubAdapter implements AuthenticSourceAdapter {
     private final String type;
     private final Set<IdentifierType> supported;
     private final List<Holder> holders = new ArrayList<>();
+    private final List<Dispute> disputes = new ArrayList<>();
+    private volatile boolean supportsDispute = true;
+    private volatile RuntimeException disputeFailure;
     private volatile Function<Holder, SourceRequests> answer = holder -> SourceRequests.notFound();
 
     public StubAdapter(String type, Set<IdentifierType> supported) {
@@ -59,10 +63,45 @@ public class StubAdapter implements AuthenticSourceAdapter {
     }
 
     @Override
-    public SourceRequests lookup(TenantId tenant, String attestationType, Holder holder, Duration timeout) {
+    public SourceRequests lookup(TenantId tenant, String attestationType, Holder holder, SourceSettings settings,
+                                 Duration timeout) {
         synchronized (this) {
             holders.add(holder);
         }
         return answer.apply(holder);
+    }
+
+    @Override
+    public boolean supportsDispute(SourceSettings settings) {
+        return supportsDispute;
+    }
+
+    @Override
+    public void dispute(TenantId tenant, String attestationType, Holder holder, String sourceRef,
+                        SourceSettings settings, Duration timeout) {
+        synchronized (this) {
+            disputes.add(new Dispute(holder, sourceRef));
+        }
+        if (disputeFailure != null) {
+            throw disputeFailure;
+        }
+    }
+
+    /** What a dispute carried to the source. */
+    public record Dispute(Holder holder, String sourceRef) {
+    }
+
+    public StubAdapter supportingDispute(boolean supported) {
+        this.supportsDispute = supported;
+        return this;
+    }
+
+    public StubAdapter failingTheDispute(RuntimeException failure) {
+        this.disputeFailure = failure;
+        return this;
+    }
+
+    public synchronized List<Dispute> disputes() {
+        return List.copyOf(disputes);
     }
 }

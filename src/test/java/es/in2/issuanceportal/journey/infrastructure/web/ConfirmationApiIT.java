@@ -14,7 +14,7 @@ import es.in2.issuanceportal.journey.application.port.IssuanceRequest;
 import es.in2.issuanceportal.journey.application.port.IssuanceResult;
 import es.in2.issuanceportal.journey.application.port.IssuanceUnavailableException;
 import es.in2.issuanceportal.journey.application.port.OnboardingTicketException;
-import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException;
 import es.in2.issuanceportal.session.api.EmailRecord;
 import es.in2.issuanceportal.session.api.EmailVerificationRecord;
 import es.in2.issuanceportal.session.EntitlementRecords;

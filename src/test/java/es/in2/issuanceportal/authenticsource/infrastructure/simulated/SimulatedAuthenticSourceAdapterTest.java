@@ -11,6 +11,7 @@ import es.in2.issuanceportal.authenticsource.domain.SourceRequests;
 import es.in2.issuanceportal.authenticsource.domain.config.AuthenticSourceConfig;
 import es.in2.issuanceportal.authenticsource.domain.config.SourceSettings;
 import es.in2.issuanceportal.shared.tenant.TenantId;
+import es.in2.issuanceportal.authenticsource.application.port.DisputeNotSupportedException;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -28,6 +29,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatNoException;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class SimulatedAuthenticSourceAdapterTest {
@@ -37,8 +39,7 @@ class SimulatedAuthenticSourceAdapterTest {
     private static final String DOCTORID = "doctorid.sd.1";
 
     private final Map<TenantId, AuthenticSourceConfig> rows = new HashMap<>();
-    private final SimulatedAuthenticSourceAdapter adapter =
-            new SimulatedAuthenticSourceAdapter(tenant -> Optional.ofNullable(rows.get(tenant)), new ObjectMapper());
+    private final SimulatedAuthenticSourceAdapter adapter = new SimulatedAuthenticSourceAdapter(new ObjectMapper());
 
     private void save(TenantId tenant, List<Map<String, Object>> people) {
         rows.put(tenant, new AuthenticSourceConfig(DOCTORID, Set.of(IdentifierType.COLEGIADO), Map.of(DOCTORID,
@@ -63,8 +64,47 @@ class SimulatedAuthenticSourceAdapterTest {
     }
 
     private SourceRequests search(TenantId tenant, IdentifierType type, String value) {
-        return adapter.lookup(tenant, DOCTORID, new Holder("Cualquiera", "Otro Nombre", new PersonalIdentifier(type, value)),
-                Duration.ofSeconds(10));
+        return adapter.lookup(tenant, DOCTORID, holder(type, value), settings(tenant), Duration.ofSeconds(10));
+    }
+
+    private SourceSettings settings(TenantId tenant) {
+        return rows.get(tenant).source().orElseThrow();
+    }
+
+    private static Holder holder(IdentifierType type, String value) {
+        return new Holder("Cualquiera", "Otro Nombre", new PersonalIdentifier(type, value));
+    }
+
+    @Test
+    @DisplayName("AC-06 — dispute_personWithoutFlags_isAccepted")
+    void dispute_personWithoutFlags_isAccepted() {
+        save(CGCOM, List.of(person(List.of(request("SIM-1", "available")))));
+
+        assertThat(adapter.supportsDispute(settings(CGCOM))).isTrue();
+        assertThatNoException().isThrownBy(() -> adapter.dispute(CGCOM, DOCTORID,
+                holder(IdentifierType.PERSONAL_ID, "00000001R"), "SIM-1", settings(CGCOM), Duration.ofSeconds(10)));
+    }
+
+    @Test
+    @DisplayName("EC-09 — dispute_personWithDisputeSupportedFalse_isNotSupported")
+    void dispute_personWithDisputeSupportedFalse_isNotSupported() {
+        Map<String, Object> person = person(List.of(request("SIM-1", "available")));
+        person.put("dispute_supported", false);
+        save(CGCOM, List.of(person));
+
+        assertThatThrownBy(() -> adapter.dispute(CGCOM, DOCTORID, holder(IdentifierType.PERSONAL_ID, "00000001R"),
+                "SIM-1", settings(CGCOM), Duration.ofSeconds(10))).isInstanceOf(DisputeNotSupportedException.class);
+    }
+
+    @Test
+    @DisplayName("AC-06 — dispute_personWhoseDisputeFails_throws")
+    void dispute_personWhoseDisputeFails_throws() {
+        Map<String, Object> person = person(List.of(request("SIM-1", "available")));
+        person.put("dispute_fail", true);
+        save(CGCOM, List.of(person));
+
+        assertThatThrownBy(() -> adapter.dispute(CGCOM, DOCTORID, holder(IdentifierType.PERSONAL_ID, "00000001R"),
+                "SIM-1", settings(CGCOM), Duration.ofSeconds(10))).isInstanceOf(IllegalStateException.class);
     }
 
     @ParameterizedTest
@@ -223,15 +263,5 @@ class SimulatedAuthenticSourceAdapterTest {
                         null, null))));
 
         assertThat(search(CGCOM, IdentifierType.PERSONAL_ID, "00000001R")).isInstanceOf(SourceRequests.NotFound.class);
-    }
-
-    @Test
-    void lookup_entryNoLongerChoosesTheSimulatedAdapter_throws() {
-        rows.put(CGCOM, new AuthenticSourceConfig(DOCTORID, Set.of(), Map.of(DOCTORID,
-                new SourceSettings("DoctorID", "cgcom", null, null, null, Set.of(IdentifierType.PERSONAL_ID), List.of(),
-                        null, Map.of("people", List.of(person(List.of(request("SIM-1", "available")))))))));
-
-        assertThatThrownBy(() -> search(CGCOM, IdentifierType.PERSONAL_ID, "00000001R"))
-                .isInstanceOf(IllegalStateException.class);
     }
 }

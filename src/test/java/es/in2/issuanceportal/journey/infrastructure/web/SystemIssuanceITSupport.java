@@ -10,7 +10,7 @@ import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
 import es.in2.issuanceportal.TestcontainersConfiguration;
 import es.in2.issuanceportal.journey.api.JourneyProgress;
-import es.in2.issuanceportal.journey.application.port.SystemTokenProvider;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenProvider;
 import es.in2.issuanceportal.journey.infrastructure.systemtoken.MachineCredentialFixture;
 import es.in2.issuanceportal.session.api.EmailRecord;
 import es.in2.issuanceportal.session.api.EmailVerificationRecord;

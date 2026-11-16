@@ -11,7 +11,7 @@ import es.in2.issuanceportal.journey.application.port.JourneyRepository;
 import es.in2.issuanceportal.journey.application.port.OnboardingTicket;
 import es.in2.issuanceportal.journey.application.port.OnboardingTicketException;
 import es.in2.issuanceportal.journey.application.port.OnboardingTickets;
-import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException;
 import es.in2.issuanceportal.journey.domain.IncompletePlacementException;
 import es.in2.issuanceportal.journey.domain.IssuanceProcessAlreadyRecordedException;
 import es.in2.issuanceportal.journey.domain.IssuancePayload;

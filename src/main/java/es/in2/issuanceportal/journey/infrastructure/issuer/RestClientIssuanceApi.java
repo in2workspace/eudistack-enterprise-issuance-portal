@@ -8,8 +8,8 @@ import es.in2.issuanceportal.journey.application.port.IssuanceRejectedException.
 import es.in2.issuanceportal.journey.application.port.IssuanceRequest;
 import es.in2.issuanceportal.journey.application.port.IssuanceResult;
 import es.in2.issuanceportal.journey.application.port.IssuanceUnavailableException;
-import es.in2.issuanceportal.journey.application.port.SystemToken;
-import es.in2.issuanceportal.journey.application.port.SystemTokenProvider;
+import es.in2.issuanceportal.shared.systemtoken.SystemToken;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenProvider;
 import es.in2.issuanceportal.shared.tenant.PublicHostProperties;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import io.github.resilience4j.bulkhead.Bulkhead;

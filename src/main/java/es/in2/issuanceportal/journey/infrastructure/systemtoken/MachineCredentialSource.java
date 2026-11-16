@@ -9,7 +9,7 @@ interface MachineCredentialSource {
 
     /**
      * @return the tenant's credential, or empty when there is none or it cannot be used
-     * @throws es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException
+     * @throws es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException
      *         with {@code SECRET_STORE_UNAVAILABLE} when the store does not answer
      */
     Optional<MachineIdentity> find(TenantId tenant);

@@ -12,7 +12,7 @@ import es.in2.issuanceportal.journey.application.port.IssuanceUnavailableExcepti
 import es.in2.issuanceportal.journey.application.port.IssuanceResult;
 import es.in2.issuanceportal.journey.application.port.JourneyAuditTrail;
 import es.in2.issuanceportal.journey.application.port.OnboardingTicketException;
-import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException;
 import es.in2.issuanceportal.journey.domain.Journey;
 import es.in2.issuanceportal.journey.domain.JourneyClosedException;
 import es.in2.issuanceportal.journey.domain.JourneyState;

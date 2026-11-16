@@ -1,4 +1,4 @@
-package es.in2.issuanceportal.journey.application.port;
+package es.in2.issuanceportal.shared.systemtoken;
 
 /**
  * There is no system token for the tenant. It carries only the reason, never the cause: the messages of the

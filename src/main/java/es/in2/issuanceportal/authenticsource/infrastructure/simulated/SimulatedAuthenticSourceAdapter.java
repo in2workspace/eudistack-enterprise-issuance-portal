@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import es.in2.issuanceportal.authenticsource.application.port.AuthenticSourceAdapter;
-import es.in2.issuanceportal.authenticsource.application.port.AuthenticSourceConfigRepository;
+import es.in2.issuanceportal.authenticsource.application.port.DisputeNotSupportedException;
 import es.in2.issuanceportal.authenticsource.domain.Holder;
 import es.in2.issuanceportal.authenticsource.domain.IdentifierType;
 import es.in2.issuanceportal.authenticsource.domain.MismatchedField;
@@ -33,18 +33,17 @@ import java.util.Set;
  * <p>{@code settings.people} of the tenant's source: {@code [{"identifiers": [{"type", "value"}],
  * "not_found", "requests": [{"source_ref", "status", "mismatched_fields", "renewal", "requested_by",
  * "requested_at", "display_identifier", "organization", "attributes": {...}}], "delay_seconds", "fail",
- * "dispute_supported"}]}.
+ * "dispute_supported", "dispute_fail"}]}. {@code dispute_supported: false} makes the person's source refuse the
+ * notice of data not correct, and {@code dispute_fail: true} makes it fail.
  */
 @Component
 class SimulatedAuthenticSourceAdapter implements AuthenticSourceAdapter {
 
     static final String TYPE = "simulated";
 
-    private final AuthenticSourceConfigRepository configs;
     private final ObjectMapper json;
 
-    SimulatedAuthenticSourceAdapter(AuthenticSourceConfigRepository configs, ObjectMapper json) {
-        this.configs = configs;
+    SimulatedAuthenticSourceAdapter(ObjectMapper json) {
         this.json = json;
     }
 
@@ -59,13 +58,33 @@ class SimulatedAuthenticSourceAdapter implements AuthenticSourceAdapter {
     }
 
     @Override
-    public SourceRequests lookup(TenantId tenant, String attestationType, Holder holder, Duration timeout) {
-        for (SimulatedPerson person : people(tenant, attestationType)) {
-            if (person.hasIdentifier(holder.identifier())) {
-                return answer(person);
-            }
+    public SourceRequests lookup(TenantId tenant, String attestationType, Holder holder, SourceSettings settings,
+                                 Duration timeout) {
+        return person(settings, holder).map(SimulatedAuthenticSourceAdapter::answer)
+                .orElseGet(SourceRequests::notFound);
+    }
+
+    /** Whether it can be told depends on the person, so it is only known when it is told. */
+    @Override
+    public boolean supportsDispute(SourceSettings settings) {
+        return true;
+    }
+
+    @Override
+    public void dispute(TenantId tenant, String attestationType, Holder holder, String sourceRef,
+                        SourceSettings settings, Duration timeout) {
+        SimulatedPerson person = person(settings, holder).orElseThrow(
+                () -> new IllegalStateException("Simulated person not found"));
+        if (Boolean.FALSE.equals(person.disputeSupported())) {
+            throw new DisputeNotSupportedException();
         }
-        return SourceRequests.notFound();
+        if (Boolean.TRUE.equals(person.disputeFail())) {
+            throw new IllegalStateException("Simulated dispute failure");
+        }
+    }
+
+    private Optional<SimulatedPerson> person(SourceSettings settings, Holder holder) {
+        return people(settings).stream().filter(person -> person.hasIdentifier(holder.identifier())).findFirst();
     }
 
     private static SourceRequests answer(SimulatedPerson person) {
@@ -90,16 +109,7 @@ class SimulatedAuthenticSourceAdapter implements AuthenticSourceAdapter {
         return new SourceRequests.Requests(person.requests().stream().map(SimulatedRequest::toSourceRequest).toList());
     }
 
-    /**
-     * The people of the tenant's source, read again here because the port only carries the tenant and the
-     * type. If the configuration changed since the module checked it and no longer chooses this adapter,
-     * the search fails (an unavailable source) rather than answer with another configuration's people.
-     */
-    private List<SimulatedPerson> people(TenantId tenant, String attestationType) {
-        SourceSettings settings = configs.find(tenant)
-                .flatMap(config -> Optional.ofNullable(config.sources().get(attestationType)))
-                .filter(source -> TYPE.equals(source.adapter()))
-                .orElseThrow(() -> new IllegalStateException("No simulated source configured"));
+    private List<SimulatedPerson> people(SourceSettings settings) {
         Object people = settings.adapterSettings().get("people");
         if (people == null) {
             return List.of();
@@ -119,7 +129,8 @@ class SimulatedAuthenticSourceAdapter implements AuthenticSourceAdapter {
                            @JsonProperty("requests") List<SimulatedRequest> requests,
                            @JsonProperty("delay_seconds") Integer delaySeconds,
                            @JsonProperty("fail") Boolean fail,
-                           @JsonProperty("dispute_supported") Boolean disputeSupported) {
+                           @JsonProperty("dispute_supported") Boolean disputeSupported,
+                           @JsonProperty("dispute_fail") Boolean disputeFail) {
 
         boolean hasIdentifier(PersonalIdentifier searched) {
             return identifiers != null && identifiers.stream().anyMatch(identifier -> identifier.matches(searched));
