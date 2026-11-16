@@ -284,7 +284,7 @@ abstract class SystemIssuanceITSupport {
 
     Map<String, Object> rowOf(TestHolder holder) {
         return jdbc.sql("SELECT state, step, (SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey_issuance "
-                        + "WHERE journey_id = journey.id) AS issuance_process_id "
+                        + "WHERE journey_id = journey.id ORDER BY created_at LIMIT 1) AS issuance_process_id "
                         + "FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
                 .param("id", journeyOf(holder)).query().singleRow();
     }

@@ -92,7 +92,8 @@ class AccessTokenApiIT {
         EMAIL_CODE(HttpMethod.POST, "/journey/email-verification"),
         EMAIL_CHECK(HttpMethod.POST, "/journey/email-verification/code"),
         CONFIRMATION(HttpMethod.POST, "/journey/confirmation"),
-        OFFERS(HttpMethod.POST, "/journey/offers");
+        OFFERS(HttpMethod.POST, "/journey/offers"),
+        SAVED(HttpMethod.POST, "/journey/requests/r1/saved");
 
         final HttpMethod method;
         final String path;

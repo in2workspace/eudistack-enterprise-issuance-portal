@@ -73,6 +73,23 @@ class LogJourneyAuditTrail implements JourneyAuditTrail {
     }
 
     @Override
+    public void append(TenantId tenant, RequestSaved event) {
+        try {
+            audit.info("request saved {} {} {} {} {} {} {}",
+                    kv(EVENT, "REQUEST_SAVED"),
+                    kv(JOURNEY_ID, event.journeyId()),
+                    kv("request_id", event.requestId()),
+                    kv(EVENT_ID, event.eventId()),
+                    kv(TENANT, tenant.value()),
+                    kv("origin", event.origin().code()),
+                    kv(OCCURRED_AT, event.occurredAt()));
+        } catch (RuntimeException e) {
+            audit.error("Could not record the saved request {} of journey {}",
+                    event.eventId(), event.journeyId(), e);
+        }
+    }
+
+    @Override
     public void append(TenantId tenant, OfferRenewalRequested event) {
         try {
             audit.info("offer renewal {} {} {} {} {} {} {}",

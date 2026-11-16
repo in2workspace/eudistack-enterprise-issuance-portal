@@ -17,6 +17,7 @@ public enum ProblemCode {
     REQUEST_NOT_FOUND("request_not_found", "Request not found", 404),
     STEP_NOT_ALLOWED("step_not_allowed", "Step not allowed", 409),
     REQUEST_NOT_AVAILABLE("request_not_available", "Request not available", 409),
+    REQUEST_SAVED("request_saved", "Request saved", 409),
     JOURNEY_CLOSED("journey_closed", "Journey closed", 410),
     RESEND_TOO_SOON("resend_too_soon", "Resend too soon", 429),
     TOO_MANY_CODES("too_many_codes", "Too many codes", 429),

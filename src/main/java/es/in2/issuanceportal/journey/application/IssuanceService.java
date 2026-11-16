@@ -361,8 +361,9 @@ public class IssuanceService {
             return renewed;
         } catch (OfferNotRenewableException _) {
             traceRenewal(tenant, journeyId, plan.requestId(), JourneyAuditTrail.RenewalOutcome.REQUEST_SAVED);
-            // EUD-359 task 4b: the request becomes saved and the answer is request_saved.
-            throw new ProblemException(ProblemCode.ISSUANCE_REJECTED);
+            saveBecauseNotRenewable(tenant, journeyId, plan.requestId());
+            // Outside the transaction that saved it, so the answer does not undo it.
+            throw new ProblemException(ProblemCode.REQUEST_SAVED);
         } catch (SystemTokenUnavailableException e) {
             log.warn("No system token of tenant {} to renew an offer of journey {}: {}", tenant, journeyId, e.reason());
             traceRenewal(tenant, journeyId, plan.requestId(), JourneyAuditTrail.RenewalOutcome.UNAVAILABLE);
@@ -422,6 +423,72 @@ public class IssuanceService {
         }
         return Optional.of(new Offer(renewed.credentialOfferUri(), renewed.offerExpiresAt(), onboardingUrl,
                 onboardingExpiresAt));
+    }
+
+    /**
+     * The Issuer says the process is no longer a draft: the request is saved, whether or not the holder saved it.
+     * Its offer and onboarding address are deleted, no other issuance is ever asked for it, and a journey still in
+     * progress is completed, as with any request that has its process (design.md §3.4 step 5).
+     */
+    private void saveBecauseNotRenewable(TenantId tenant, UUID journeyId, String requestId) {
+        transactions.executeWithoutResult(status -> {
+            Journey journey = lock(tenant, journeyId);
+            if (!journey.isActive()) {
+                throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
+            }
+            markSaved(tenant, journeyId, requestId, JourneyAuditTrail.SavedOrigin.OFFER_NOT_RENEWABLE);
+            if (journey.isInProgress()) {
+                journey.complete(clock.instant());
+                if (!journeys.update(tenant, journey, JourneyState.IN_PROGRESS)) {
+                    throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
+                }
+                audit(tenant, JourneyAuditTrail.Kind.COMPLETED, journey);
+            }
+        });
+    }
+
+    /**
+     * The holder declares the attestation of a request saved (design.md §3.8, AD-17). The request must be in offer
+     * with its offer delivered; it becomes saved in this journey only. Never asks the Issuer and never checks the
+     * wallet: a declaration made without saving costs only this journey, because a new one gets the request again.
+     * Counts as activity.
+     *
+     * @throws ProblemException {@code bad_request} for an invalid id; {@code step_not_allowed} for a request that is
+     *                          not one of the journey, not in offer, saved already, or without an offer delivered
+     */
+    public void declareSaved(TenantId tenant, HolderRef holder, String requestId) {
+        requireValid(requestId);
+        access.requireActive(tenant, holder);
+        UUID journeyId = sessions.journeyOf(tenant, holder)
+                .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
+        transactions.executeWithoutResult(status -> {
+            Journey journey = lock(tenant, journeyId);
+            if (!journey.isActive()) {
+                throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
+            }
+            JourneyIssuance process = processOf(tenant, journeyId, requestId)
+                    .orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED));
+            boolean delivered = readIssuance(tenant, journeyId).flatMap(section -> section.entry(requestId))
+                    .flatMap(IssuanceRecord.Entry::offerUri).isPresent();
+            if (process.isSaved() || !delivered) {
+                throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
+            }
+            markSaved(tenant, journeyId, requestId, JourneyAuditTrail.SavedOrigin.HOLDER_DECLARED);
+        });
+    }
+
+    /** Sets {@code saved_at}, deletes the request's offer and onboarding address, and traces why. Journey locked. */
+    private void markSaved(TenantId tenant, UUID journeyId, String requestId, JourneyAuditTrail.SavedOrigin origin) {
+        issuances.markSaved(tenant, journeyId, requestId, clock.instant());
+        IssuanceRecord section = readIssuance(tenant, journeyId).orElseGet(IssuanceRecord::empty);
+        section.entry(requestId).ifPresent(entry -> sessions.write(tenant, journeyId, Section.ISSUANCE,
+                section.with(requestId, IssuanceRecord.Entry.withKey(entry.idempotencyKey(), entry.email())).toJson()));
+        try {
+            trail.append(tenant, new JourneyAuditTrail.RequestSaved(UUID.randomUUID(), journeyId, requestId, origin,
+                    clock.instant()));
+        } catch (RuntimeException e) {
+            log.error("Could not record the saved request of journey {}", journeyId, e);
+        }
     }
 
     private void traceRenewal(TenantId tenant, UUID journeyId, String requestId,

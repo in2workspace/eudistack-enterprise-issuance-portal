@@ -1095,6 +1095,162 @@ class IssuanceServiceTest {
         assertThat(tickets.calls()).extracting(InMemoryOnboardingTickets.Call::email).containsOnly(EMAIL);
     }
 
+    // --- EUD-359 task 4b: a request that is saved ---
+
+    @Test
+    @DisplayName("AC-08 — newOffer_offerNotRenewable_savesTheRequestDeletesItsOfferAndAnswersRequestSaved")
+    void newOffer_offerNotRenewable_savesTheRequestDeletesItsOfferAndAnswersRequestSaved() {
+        HolderRef holder = confirmedOnce();
+        clock.advance(Duration.ofMinutes(10));
+        api.notRenewable();
+
+        assertThatThrownBy(() -> service.newOffer(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
+                ProblemCode.REQUEST_SAVED));
+
+        assertSavedWithoutOffer(holder, JourneyAuditTrail.SavedOrigin.OFFER_NOT_RENEWABLE);
+        assertThat(trail.offerRenewals()).extracting(JourneyAuditTrail.OfferRenewalRequested::result)
+                .containsExactly(JourneyAuditTrail.RenewalOutcome.REQUEST_SAVED);
+        assertThat(api.calls()).hasSize(1);
+        assertThat(stored(holder).state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(stored(holder).endedAt()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("AC-08 — confirm_requestWhoseOfferIsNotRenewable_isSavedAndNoOtherIssuanceIsAsked")
+    void confirm_requestWhoseOfferIsNotRenewable_isSavedAndNoOtherIssuanceIsAsked() {
+        HolderRef holder = confirmedOnce();
+        clock.advance(Duration.ofMinutes(10));
+        api.notRenewable();
+
+        assertThatThrownBy(() -> service.confirm(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
+                ProblemCode.REQUEST_SAVED));
+
+        assertSavedWithoutOffer(holder, JourneyAuditTrail.SavedOrigin.OFFER_NOT_RENEWABLE);
+        assertThat(api.calls()).hasSize(1);
+        // Saved: no confirmation and no new offer, ever.
+        assertThatThrownBy(() -> service.confirm(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
+                ProblemCode.STEP_NOT_ALLOWED));
+        assertThatThrownBy(() -> service.newOffer(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
+                ProblemCode.STEP_NOT_ALLOWED));
+        assertThat(api.calls()).hasSize(1);
+        assertThat(api.renewals()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("AC-08 — newOffer_offerNotRenewableInAJourneyStillInProgress_completesIt")
+    void newOffer_offerNotRenewableInAJourneyStillInProgress_completesIt() {
+        withOnboarding();
+        HolderRef holder = entitledJourney();
+        tickets.failWith(OnboardingTicketException.Reason.UNAVAILABLE);
+        assertThatThrownBy(() -> service.confirm(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
+                ProblemCode.ONBOARDING_UNAVAILABLE));
+        tickets.recover();
+        api.notRenewable();
+
+        assertThatThrownBy(() -> service.newOffer(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
+                ProblemCode.REQUEST_SAVED));
+
+        assertThat(stored(holder).state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(stored(holder).endedAt()).isEmpty();
+        assertThat(trail.events().stream().filter(e -> e.kind() == JourneyAuditTrail.Kind.COMPLETED)).hasSize(1);
+    }
+
+    private void assertSavedWithoutOffer(HolderRef holder, JourneyAuditTrail.SavedOrigin origin) {
+        JourneyIssuance process = issuances.findByJourney(CGCOM, stored(holder).id()).getFirst();
+        assertThat(process.isSaved()).isTrue();
+        IssuanceRecord.Entry entry = IssuanceRecord.fromJson(
+                sessions.read(CGCOM, journeyOf(holder), Section.ISSUANCE).orElseThrow()).entry("r1").orElseThrow();
+        assertThat(entry.offerUri()).isEmpty();
+        assertThat(entry.onboarding()).isEmpty();
+        assertThat(trail.savedRequests()).singleElement().satisfies(event -> {
+            assertThat(event.requestId()).isEqualTo("r1");
+            assertThat(event.origin()).isEqualTo(origin);
+            assertThat(event.toString()).doesNotContain("openid-credential-offer", EMAIL);
+        });
+    }
+
+    @Test
+    @DisplayName("AC-05 — declareSaved_requestInOfferWithItsOffer_savesItAndNeverAsksTheIssuer")
+    void declareSaved_requestInOfferWithItsOffer_savesItAndNeverAsksTheIssuer() {
+        HolderRef holder = confirmedOnce();
+        int issuances = api.calls().size();
+
+        service.declareSaved(CGCOM, holder, "r1");
+
+        assertSavedWithoutOffer(holder, JourneyAuditTrail.SavedOrigin.HOLDER_DECLARED);
+        assertThat(api.calls()).hasSize(issuances);
+        assertThat(api.renewals()).isEmpty();
+        assertThat(stored(holder).state()).isEqualTo(JourneyState.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("AC-14 — declareSaved_thenConfirmOrNewOffer_isStepNotAllowed")
+    void declareSaved_thenConfirmOrNewOffer_isStepNotAllowed() {
+        HolderRef holder = confirmedOnce();
+        service.declareSaved(CGCOM, holder, "r1");
+        clock.advance(Duration.ofMinutes(10));
+
+        assertThatThrownBy(() -> service.confirm(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
+                ProblemCode.STEP_NOT_ALLOWED));
+        assertThatThrownBy(() -> service.newOffer(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
+                ProblemCode.STEP_NOT_ALLOWED));
+        assertThatThrownBy(() -> service.declareSaved(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
+                ProblemCode.STEP_NOT_ALLOWED));
+
+        assertThat(api.renewals()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("AC-14 — declareSaved_requestWithoutOfferDeliveredOrNotInOfferOrUnknown_isStepNotAllowed")
+    void declareSaved_requestWithoutOfferDeliveredOrNotInOfferOrUnknown_isStepNotAllowed() {
+        withOnboarding();
+        HolderRef holder = journeyWithRequests(request("r1", EntitlementRecord.Status.AVAILABLE, "280000001"),
+                request("r2", EntitlementRecord.Status.AVAILABLE, "280000002"));
+        tickets.failWith(OnboardingTicketException.Reason.UNAVAILABLE);
+        assertThatThrownBy(() -> service.confirm(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
+                ProblemCode.ONBOARDING_UNAVAILABLE));
+
+        // r1 has its process but no offer was delivered; r2 has no process; r9 is not a request of the journey.
+        for (String id : List.of("r1", "r2", "r9")) {
+            assertThatThrownBy(() -> service.declareSaved(CGCOM, holder, id)).as(id).satisfies(e -> assertProblem(e,
+                    ProblemCode.STEP_NOT_ALLOWED));
+        }
+
+        assertThat(trail.savedRequests()).isEmpty();
+        assertThat(issuances.findByJourney(CGCOM, stored(holder).id())).allMatch(process -> !process.isSaved());
+    }
+
+    @Test
+    @DisplayName("ES-01 — declareSaved_blankOrTooLongRequestId_isBadRequest")
+    void declareSaved_blankOrTooLongRequestId_isBadRequest() {
+        HolderRef holder = confirmedOnce();
+
+        for (String id : new String[] {null, "", " ", "r".repeat(65)}) {
+            assertThatThrownBy(() -> service.declareSaved(CGCOM, holder, id)).satisfies(e -> assertProblem(e,
+                    ProblemCode.BAD_REQUEST));
+        }
+    }
+
+    @Test
+    @DisplayName("AC-25 — declareSaved_countsAsActivity")
+    void declareSaved_countsAsActivity() {
+        HolderRef holder = confirmedOnce();
+        clock.advance(Duration.ofMinutes(14));
+
+        service.declareSaved(CGCOM, holder, "r1");
+
+        assertThat(stored(holder).lastActivity()).isEqualTo(clock.instant());
+    }
+
+    @Test
+    @DisplayName("ES-08 — declareSaved_endedJourney_isJourneyClosed")
+    void declareSaved_endedJourney_isJourneyClosed() {
+        HolderRef holder = confirmedOnce();
+        clock.advance(Duration.ofMinutes(15));
+
+        assertThatThrownBy(() -> service.declareSaved(CGCOM, holder, "r1")).isInstanceOf(JourneyClosedException.class);
+    }
+
     private Journey stored(HolderRef holder) {
         return journeys.findById(CGCOM, journeyOf(holder)).orElseThrow();
     }

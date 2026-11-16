@@ -4,6 +4,7 @@ import es.in2.issuanceportal.journey.application.port.JourneyIssuanceRepository;
 import es.in2.issuanceportal.journey.domain.JourneyIssuance;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
@@ -27,6 +28,20 @@ public class InMemoryJourneyIssuanceRepository implements JourneyIssuanceReposit
             throw new org.springframework.dao.DuplicateKeyException("journey_issuance");
         }
         rows.add(new Row(tenant, issuance));
+    }
+
+    @Override
+    public synchronized boolean markSaved(TenantId tenant, UUID journeyId, String requestId, Instant savedAt) {
+        for (Row row : rows) {
+            JourneyIssuance issuance = row.issuance();
+            if (row.tenant().equals(tenant) && issuance.journeyId().equals(journeyId)
+                    && issuance.requestId().equals(requestId) && !issuance.isSaved()) {
+                rows.set(rows.indexOf(row), new Row(tenant, new JourneyIssuance(journeyId, requestId,
+                        issuance.issuanceProcessId(), issuance.createdAt(), savedAt)));
+                return true;
+            }
+        }
+        return false;
     }
 
     @Override

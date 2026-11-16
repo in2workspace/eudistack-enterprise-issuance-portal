@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
@@ -38,6 +39,16 @@ class JdbcJourneyIssuanceRepository implements JourneyIssuanceRepository {
                 .param("createdAt", Timestamp.from(issuance.createdAt()))
                 .param("savedAt", issuance.savedAtIfSaved().map(Timestamp::from).orElse(null))
                 .update();
+    }
+
+    @Override
+    public boolean markSaved(TenantId tenant, UUID journeyId, String requestId, Instant savedAt) {
+        return jdbc.sql("UPDATE " + table(tenant) + " SET saved_at = :savedAt WHERE journey_id = :journey "
+                        + "AND request_id = :request AND saved_at IS NULL")
+                .param("savedAt", Timestamp.from(savedAt))
+                .param("journey", journeyId)
+                .param("request", requestId)
+                .update() == 1;
     }
 
     @Override

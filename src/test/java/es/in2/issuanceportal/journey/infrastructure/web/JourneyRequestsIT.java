@@ -157,8 +157,9 @@ abstract class JourneyRequestsIT {
         IssuanceRecord.Entry entry = section.entry(requestId).orElseThrow();
         Instant past = clock.instant().minusSeconds(60);
         sessions.write(SANDBOX, journeyOf(holder), Section.ISSUANCE, section.with(requestId,
-                new IssuanceRecord.Entry(entry.idempotencyKey(), entry.email(), entry.credentialOfferUri(), past,
-                        entry.onboardingUrl(), entry.onboardingUrl() == null ? null : past.minusSeconds(60))).toJson());
+                new IssuanceRecord.Entry(entry.idempotencyKey(), entry.email(), entry.credentialOfferUri(),
+                        entry.credentialOfferUri() == null ? null : past, entry.onboardingUrl(),
+                        entry.onboardingUrl() == null ? null : past.minusSeconds(60))).toJson());
     }
 
     IssuanceRecord.Entry entryOf(TestHolder holder, String requestId) {

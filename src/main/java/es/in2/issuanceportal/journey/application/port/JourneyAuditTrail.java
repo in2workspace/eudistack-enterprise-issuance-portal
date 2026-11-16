@@ -173,7 +173,32 @@ public interface JourneyAuditTrail {
                                  Instant occurredAt) {
     }
 
+    /** Why a request became saved (design.md §3.4, §3.8). */
+    enum SavedOrigin {
+
+        /** The holder pressed "I have saved it". */
+        HOLDER_DECLARED("holder_declared"),
+        /** The Issuer said the offer can no longer be renewed. */
+        OFFER_NOT_RENEWABLE("offer_not_renewable");
+
+        private final String code;
+
+        SavedOrigin(String code) {
+            this.code = code;
+        }
+
+        public String code() {
+            return code;
+        }
+    }
+
+    /** A request became saved (design.md §3.5): the opaque id and why. No offer, address or data. */
+    record RequestSaved(UUID eventId, UUID journeyId, String requestId, SavedOrigin origin, Instant occurredAt) {
+    }
+
     void append(TenantId tenant, Event event);
+
+    void append(TenantId tenant, RequestSaved event);
 
     void append(TenantId tenant, OfferRenewalRequested event);
 

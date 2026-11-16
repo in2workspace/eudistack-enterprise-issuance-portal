@@ -230,9 +230,12 @@ class EmailVerificationApiIT {
     }
 
     @Test
-    @DisplayName("EC-04 — postEmailVerification_offerAlreadyDelivered_is409StepNotAllowed")
-    void postEmailVerification_offerAlreadyDelivered_is409StepNotAllowed() throws Exception {
+    @DisplayName("EC-12 — postEmailVerification_afterTheFirstConfirmation_is409StepNotAllowed")
+    void postEmailVerification_afterTheFirstConfirmation_is409StepNotAllowed() throws Exception {
         TestHolder holder = entitledJourney();
+        sessions.write(SANDBOX, journeyOf(holder), Section.ISSUANCE, es.in2.issuanceportal.session.api.IssuanceRecord
+                .empty().with("r1", es.in2.issuanceportal.session.api.IssuanceRecord.Entry
+                        .withKey(java.util.UUID.randomUUID(), EMAIL)).toJson());
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET state = 'completed', step = 'offer_obtained', "
                         + "completed_at = now() WHERE id = :id")
                 .param("id", journeyOf(holder)).update();
