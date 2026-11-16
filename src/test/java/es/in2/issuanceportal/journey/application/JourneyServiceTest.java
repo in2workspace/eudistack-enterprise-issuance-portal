@@ -56,7 +56,7 @@ class JourneyServiceTest {
 
         assertThat(opened.created()).isTrue();
         assertThat(opened.journey().state()).isEqualTo(JourneyState.IN_PROGRESS);
-        assertThat(opened.journey().step()).isEqualTo(JourneyStep.STARTED);
+        assertThat(opened.journey().step()).isEqualTo(JourneyStep.IDENTIFIED);
         assertThat(opened.journey().identificationMethod()).contains("certificate");
         assertThat(sessions.journeyOf(SANDBOX, holder)).contains(opened.journey().id());
         assertThat(sessions.read(SANDBOX, opened.journey().id(), Section.IDENTITY)).contains(IDENTITY.toJson());
@@ -67,14 +67,14 @@ class JourneyServiceTest {
     void open_holderWithActiveJourney_returnsItWithoutRewritingItsIdentity() {
         HolderRef holder = Holders.next();
         JourneyService.Opened first = service.open(SANDBOX, holder, IDENTITY, "certificate");
-        service.reach(SANDBOX, holder, JourneyProgress.Step.IDENTIFIED);
+        service.reach(SANDBOX, holder, JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
         HolderIdentity other = new HolderIdentity("Otra", "Persona", new PersonalIdentifier(IdentifierType.PERSONAL_ID, "99999999R"), null);
 
         JourneyService.Opened second = service.open(SANDBOX, holder, other, "certificate");
 
         assertThat(second.created()).isFalse();
         assertThat(second.journey().id()).isEqualTo(first.journey().id());
-        assertThat(second.journey().step()).isEqualTo(JourneyStep.IDENTIFIED);
+        assertThat(second.journey().step()).isEqualTo(JourneyStep.ENTITLEMENT_CONFIRMED);
         assertThat(sessions.read(SANDBOX, first.journey().id(), Section.IDENTITY)).contains(IDENTITY.toJson());
         assertThat(trail.events()).extracting(JourneyAuditTrail.Event::kind)
                 .containsExactly(JourneyAuditTrail.Kind.STARTED, JourneyAuditTrail.Kind.STEP_REACHED);
@@ -360,8 +360,7 @@ class JourneyServiceTest {
         assertThat(trail.events())
                 .extracting(JourneyAuditTrail.Event::kind, JourneyAuditTrail.Event::state, JourneyAuditTrail.Event::step)
                 .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple(JourneyAuditTrail.Kind.STARTED, JourneyState.IN_PROGRESS, JourneyStep.STARTED),
-                        org.assertj.core.groups.Tuple.tuple(JourneyAuditTrail.Kind.STEP_REACHED, JourneyState.IN_PROGRESS, JourneyStep.IDENTIFIED),
+                        org.assertj.core.groups.Tuple.tuple(JourneyAuditTrail.Kind.STARTED, JourneyState.IN_PROGRESS, JourneyStep.IDENTIFIED),
                         org.assertj.core.groups.Tuple.tuple(JourneyAuditTrail.Kind.STEP_REACHED, JourneyState.IN_PROGRESS, JourneyStep.ENTITLEMENT_CONFIRMED),
                         org.assertj.core.groups.Tuple.tuple(JourneyAuditTrail.Kind.WITHDRAWN, JourneyState.WITHDRAWN, JourneyStep.ENTITLEMENT_CONFIRMED));
         assertThat(trail.events().getLast().withdrawalReason()).contains(WithdrawalReason.CANCELLED);

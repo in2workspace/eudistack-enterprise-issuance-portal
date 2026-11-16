@@ -54,7 +54,7 @@ class JdbcJourneyRepositoryIT {
 
         Journey read = repository.findById(SANDBOX, journey.id()).orElseThrow();
         assertThat(read.state()).isEqualTo(JourneyState.IN_PROGRESS);
-        assertThat(read.step()).isEqualTo(JourneyStep.STARTED);
+        assertThat(read.step()).isEqualTo(JourneyStep.IDENTIFIED);
         assertThat(read.createdAt()).isEqualTo(journey.createdAt());
         assertThat(read.issuanceProcessId()).isEmpty();
     }

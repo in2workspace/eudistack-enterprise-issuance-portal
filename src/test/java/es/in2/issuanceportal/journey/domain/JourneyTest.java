@@ -19,7 +19,7 @@ class JourneyTest {
         Journey journey = Journey.start(UUID.randomUUID(), T0, null);
 
         assertThat(journey.state()).isEqualTo(JourneyState.IN_PROGRESS);
-        assertThat(journey.step()).isEqualTo(JourneyStep.STARTED);
+        assertThat(journey.step()).isEqualTo(JourneyStep.IDENTIFIED);
         assertThat(journey.withdrawalReason()).isEmpty();
         assertThat(journey.endedAt()).isEmpty();
         assertThat(journey.createdAt()).isEqualTo(T0);

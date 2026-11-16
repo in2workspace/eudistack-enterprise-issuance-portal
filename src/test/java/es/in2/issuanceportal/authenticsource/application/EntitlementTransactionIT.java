@@ -152,7 +152,7 @@ class EntitlementTransactionIT {
 
         assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.ENTITLEMENT)).isEmpty();
         assertThat(jdbc.sql("SELECT step FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
-                .param("id", journeyId).query(String.class).single()).isEqualTo("started");
+                .param("id", journeyId).query(String.class).single()).isEqualTo("identified");
     }
 
     @Test
@@ -184,7 +184,7 @@ class EntitlementTransactionIT {
                 .isInstanceOfSatisfying(ProblemException.class,
                         e -> assertThat(e.problem()).isEqualTo(ProblemCode.JOURNEY_CLOSED));
 
-        assertThat(journeyRow(journeyId)).isEqualTo("withdrawn/cancelled/started");
+        assertThat(journeyRow(journeyId)).isEqualTo("withdrawn/cancelled/identified");
         assertThat(sessionRows(journeyId)).isZero();
     }
 
@@ -200,7 +200,7 @@ class EntitlementTransactionIT {
 
         assertThatThrownBy(() -> checks.check(SANDBOX, holder)).isInstanceOf(JourneyClosedException.class);
 
-        assertThat(journeyRow(journeyId)).isEqualTo("withdrawn/cancelled/started");
+        assertThat(journeyRow(journeyId)).isEqualTo("withdrawn/cancelled/identified");
         assertThat(sessionRows(journeyId)).isZero();
     }
 

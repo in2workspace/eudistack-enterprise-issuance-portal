@@ -39,9 +39,14 @@ public final class Journey {
         this.endedAt = endedAt;
     }
 
-    /** @param identificationMethod how the holder logged in; {@code null} when it is not known */
+    /**
+     * A journey opened for a holder the Access Token identifies: it starts at {@code identified}, the first step of
+     * the contract (design.md §3.2). {@code started} is only read from journeys opened before EUD-314.
+     *
+     * @param identificationMethod how the holder logged in; {@code null} when it is not known
+     */
     public static Journey start(UUID id, Instant now, String identificationMethod) {
-        return new Journey(id, JourneyState.IN_PROGRESS, JourneyStep.STARTED, null, identificationMethod, null,
+        return new Journey(id, JourneyState.IN_PROGRESS, JourneyStep.IDENTIFIED, null, identificationMethod, null,
                 now, now, null);
     }
 

@@ -162,7 +162,7 @@ class EntitlementSimulatedIT {
         Duration took = Duration.ofNanos(System.nanoTime() - start);
 
         assertThat(took).isBetween(Duration.ofSeconds(10), Duration.ofSeconds(11));
-        assertThat(journeyRow(journeyId)).containsEntry("state", "in_progress").containsEntry("step", "started");
+        assertThat(journeyRow(journeyId)).containsEntry("state", "in_progress").containsEntry("step", "identified");
         assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.ENTITLEMENT)).isEmpty();
         String logged = output.getOut().substring(before);
         assertThat(logged).contains("\"result\":\"unavailable\"")

@@ -277,7 +277,7 @@ class EntitlementServiceTest {
         assertThatThrownBy(() -> service.check(CGCOM, holder)).isInstanceOfSatisfying(ProblemException.class,
                 e -> assertThat(e.problem()).isEqualTo(ProblemCode.STEP_NOT_ALLOWED));
         assertThat(adapter.searches()).isEmpty();
-        assertThat(stored(journeyId(holder)).step()).isEqualTo(JourneyStep.STARTED);
+        assertThat(stored(journeyId(holder)).step()).isEqualTo(JourneyStep.IDENTIFIED);
     }
 
     @Test
@@ -455,7 +455,7 @@ class EntitlementServiceTest {
                 new LookupSlots(100, 100));
 
         assertThatThrownBy(() -> failing.check(CGCOM, holder)).isInstanceOf(IllegalStateException.class);
-        assertThat(stored(id).step()).isEqualTo(JourneyStep.STARTED);
+        assertThat(stored(id).step()).isEqualTo(JourneyStep.IDENTIFIED);
         failing.close();
     }
 

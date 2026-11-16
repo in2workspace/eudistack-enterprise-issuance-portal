@@ -120,7 +120,7 @@ class JourneyApiIT {
         mvc.perform(open(holder))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.state").value("in_progress"))
-                .andExpect(jsonPath("$.step").value("started"))
+                .andExpect(jsonPath("$.step").value("identified"))
                 .andExpect(jsonPath("$.withdrawal_reason").doesNotExist());
 
         UUID journeyId = journeyOf(holder);
@@ -408,7 +408,7 @@ class JourneyApiIT {
         mvc.perform(get(JOURNEY, holder))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.state").value("in_progress"))
-                .andExpect(jsonPath("$.step").value("started"));
+                .andExpect(jsonPath("$.step").value("identified"));
 
         assertThat(lastActivity(journeyId)).isAfter(before);
     }
