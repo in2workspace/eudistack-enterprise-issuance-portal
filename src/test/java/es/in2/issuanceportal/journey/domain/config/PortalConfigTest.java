@@ -29,6 +29,37 @@ class PortalConfigTest {
     }
 
     @Test
+    void portalConfig_withoutAssuranceLevel_isHigh() {
+        PortalConfig config = new PortalConfig(TEXTS, LEGAL_LINKS, SUPPORT, WALLET_URL, null, null);
+
+        assertThat(config.assuranceLevel()).isEqualTo(AssuranceLevel.HIGH);
+        assertThat(new PortalConfig(TEXTS, LEGAL_LINKS, SUPPORT, WALLET_URL, null).assuranceLevel())
+                .isEqualTo(AssuranceLevel.HIGH);
+    }
+
+    @Test
+    void assuranceLevel_ofConfig_readsTheContractValuesAndDefaultsToHigh() {
+        assertThat(AssuranceLevel.ofConfig(null)).isEqualTo(AssuranceLevel.HIGH);
+        assertThat(AssuranceLevel.ofConfig("high")).isEqualTo(AssuranceLevel.HIGH);
+        assertThat(AssuranceLevel.ofConfig("substantial")).isEqualTo(AssuranceLevel.SUBSTANTIAL);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"low", "HIGH", "", "http://eidas.europa.eu/LoA/high"})
+    void assuranceLevel_ofConfig_unknownValue_isInvalid(String value) {
+        assertThatThrownBy(() -> AssuranceLevel.ofConfig(value))
+                .isInstanceOf(InvalidPortalConfigException.class)
+                .hasMessageContaining("assurance_level");
+    }
+
+    @Test
+    void assuranceLevel_acceptedAcrValues_areTheLevelAndHigher() {
+        assertThat(AssuranceLevel.HIGH.acceptedAcrValues()).containsExactly("http://eidas.europa.eu/LoA/high");
+        assertThat(AssuranceLevel.SUBSTANTIAL.acceptedAcrValues()).containsExactlyInAnyOrder(
+                "http://eidas.europa.eu/LoA/substantial", "http://eidas.europa.eu/LoA/high");
+    }
+
+    @Test
     void portalConfig_withoutSettings_hasNoneWithOnboardingDisabled() {
         PortalConfig config = new PortalConfig(TEXTS, LEGAL_LINKS, SUPPORT, WALLET_URL, null);
 

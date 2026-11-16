@@ -358,6 +358,47 @@ class AccessTokenApiIT {
         assertThat(rows()).isEqualTo(before);
     }
 
+    // --- AC-28: the level of assurance of the tenant ---
+
+    @Test
+    @DisplayName("AC-28 — tenantWithSubstantialLevel_acceptsSubstantialAndHighTokens")
+    void tenantWithSubstantialLevel_acceptsSubstantialAndHighTokens() throws Exception {
+        save(KPMG, withAssuranceLevel(configJson("kpmg", true), "substantial"));
+        Instant now = Instant.now();
+
+        mvc.perform(probe(AccessTokens.forTenant(KPMG, now).claim("acr", AccessTokens.ACR_SUBSTANTIAL).sign(),
+                        KPMG_HOST))
+                .andExpect(status().isOk());
+        mvc.perform(probe(AccessTokens.forTenant(KPMG, now).sign(), KPMG_HOST)).andExpect(status().isOk());
+        mvc.perform(probe(AccessTokens.forTenant(KPMG, now).without("acr").sign(), KPMG_HOST))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, CHALLENGE_INVALID));
+        mvc.perform(probe(AccessTokens.forTenant(KPMG, now).claim("acr", "http://eidas.europa.eu/LoA/low").sign(),
+                        KPMG_HOST))
+                .andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    @DisplayName("AC-28 — tenantWithHighLevel_rejectsSubstantialToken")
+    void tenantWithHighLevel_rejectsSubstantialToken() throws Exception {
+        save(KPMG, withAssuranceLevel(configJson("kpmg", true), "high"));
+
+        mvc.perform(probe(AccessTokens.forTenant(KPMG, Instant.now()).claim("acr", AccessTokens.ACR_SUBSTANTIAL)
+                        .sign(), KPMG_HOST))
+                .andExpect(status().isUnauthorized())
+                .andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, CHALLENGE_INVALID));
+    }
+
+    @Test
+    @DisplayName("AC-28 — tenantWithUnknownLevel_isConfigUnavailableAndAcceptsNoToken")
+    void tenantWithUnknownLevel_isConfigUnavailableAndAcceptsNoToken() throws Exception {
+        save(KPMG, withAssuranceLevel(configJson("kpmg", true), "low"));
+
+        mvc.perform(probe(AccessTokens.forTenant(KPMG, Instant.now()).sign(), KPMG_HOST))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.type").value("config_unavailable"));
+    }
+
     // --- ES-01, ES-02 ---
 
     @Test
@@ -650,7 +691,11 @@ class AccessTokenApiIT {
     }
 
     private static MockHttpServletRequestBuilder probe(String token) {
-        return MockMvcRequestBuilders.get(API + "/probe/holder").contextPath(CONTEXT).with(host(SANDBOX_HOST))
+        return probe(token, SANDBOX_HOST);
+    }
+
+    private static MockHttpServletRequestBuilder probe(String token, String host) {
+        return MockMvcRequestBuilders.get(API + "/probe/holder").contextPath(CONTEXT).with(host(host))
                 .header(HttpHeaders.AUTHORIZATION, "Bearer " + token);
     }
 
@@ -664,6 +709,10 @@ class AccessTokenApiIT {
     private static String configJson(String tenant, boolean withClientId) {
         return CONFIG_JSON.formatted(tenant,
                 withClientId ? "\"portal_client_id\": \"" + AccessTokens.clientOf(new TenantId(tenant)) + "\"," : "");
+    }
+
+    private static String withAssuranceLevel(String config, String level) {
+        return config.replace("\"identifier_types\"", "\"assurance_level\": \"" + level + "\",\n  \"identifier_types\"");
     }
 
     private void save(TenantId tenant, String config) {

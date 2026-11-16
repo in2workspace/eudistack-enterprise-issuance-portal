@@ -9,12 +9,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **EUD-314 — el recorrido con el Access Token del Verifier**:
-  - Servidor de recursos OAuth 2.0: cada llamada del recorrido exige un Access Token del Verifier del tenant, validado con su JWKS (leído por la red interna, en caché 10 minutos y recargado ante un `kid` desconocido; solo ES256). Comprueba `iss`, `aud` con `portal_client_id`, `exp` e `iat` (obligatorias) y `nbf` con 30 s de margen, `tenant` y `acr` alto, y que sea un Access Token y no un ID Token (exige `jti`; rechaza `nonce` y `auth_time`).
+  - Servidor de recursos OAuth 2.0: cada llamada del recorrido exige un Access Token del Verifier del tenant, validado con su JWKS (leído por la red interna, en caché 10 minutos y recargado ante un `kid` desconocido; solo ES256). Comprueba `iss`, `aud` con `portal_client_id`, `exp` e `iat` (obligatorias) y `nbf` con 30 s de margen, `tenant` y `acr` del nivel del tenant o superior, y que sea un Access Token y no un ID Token (exige `jti`; rechaza `nonce` y `auth_time`).
   - Un token que no vale responde 401 `unauthenticated` con `WWW-Authenticate: Bearer`; un `kid` desconocido dentro de la ventana de recarga del JWKS, 401; sin JWKS ni nada en caché, 503 `service_unavailable`; un token válido en un tenant sin `portal_client_id`, 503 `config_unavailable` (el token se valida antes de leer la configuración). El `jwks_uri` del descubrimiento solo aporta su camino, que debe empezar por `/`; el host es siempre el interno.
   - Tipo de identificador según el método de login: certificado (`amr` `hwk` o `swk`) da `personal_id`; una atestación, el que asigna `identifier_types` de `portal_config`.
   - El recorrido se liga al titular por `holder_ref`, un HMAC-SHA256 de `iss` y `sub` con la clave `PORTAL_HOLDER_REF_KEY` (obligatoria). La migración V5 lo añade a `journey_session` y la busca por `journey_id`.
   - `POST /journey` devuelve el recorrido activo del titular (200) sin reescribir la identidad, o abre uno nuevo (201) con la identidad del token. Sin nombre, apellidos o identificador personal en el token, 401. `identification_method` guarda `certificate` o `attestation`.
   - `GET /config`, `POST /incidents`, `/health` y las métricas siguen sin token.
+  - Nivel de garantía por tenant: `assurance_level` en `portal_config`, `high` (por defecto) o `substantial`. Con `substantial` se aceptan tokens de nivel sustancial o alto. `GET /config` lo sirve siempre resuelto. Un valor desconocido hace la configuración no válida (`config_unavailable`).
 
 - **EUD-358 — verificación del correo del titular con un código**:
   - `POST /journey/email-verification` envía al correo un código de 6 dígitos (10 minutos de validez y 5 intentos). Un código nuevo anula el anterior y deja de dar por verificado el correo anterior.

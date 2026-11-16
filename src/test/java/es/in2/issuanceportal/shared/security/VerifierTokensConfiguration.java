@@ -23,6 +23,7 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Wires the simulated Verifier into a test context: the service reads its keys from {@link VerifierFixture}.
@@ -47,7 +48,8 @@ public class VerifierTokensConfiguration {
     @Primary
     @ConditionalOnProperty(name = AUTO_TOKEN, havingValue = "true", matchIfMissing = true)
     TenantLoginSettings fixedLoginSettings() {
-        return tenant -> new LoginSettings(AccessTokens.clientOf(tenant), Map.of("doctorid.sd.1", "colegiado"));
+        return tenant -> new LoginSettings(AccessTokens.clientOf(tenant), Map.of("doctorid.sd.1", "colegiado"),
+                Set.of(AccessTokens.ACR_HIGH));
     }
 
     @Bean

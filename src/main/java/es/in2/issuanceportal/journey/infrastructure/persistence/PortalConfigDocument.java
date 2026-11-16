@@ -2,6 +2,7 @@ package es.in2.issuanceportal.journey.infrastructure.persistence;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import es.in2.issuanceportal.journey.domain.config.AssuranceLevel;
 import es.in2.issuanceportal.journey.domain.config.LegalLinks;
 import es.in2.issuanceportal.journey.domain.config.Onboarding;
 import es.in2.issuanceportal.journey.domain.config.PortalConfig;
@@ -17,6 +18,7 @@ record PortalConfigDocument(
         @JsonProperty("legal_links") LegalLinksDocument legalLinks,
         SupportDocument support,
         @JsonProperty("wallet_url") String walletUrl,
+        @JsonProperty("assurance_level") String assuranceLevel,
         @JsonProperty("attestation_type") String attestationType,
         @JsonProperty("data_placement") Map<String, String> dataPlacement,
         OnboardingDocument onboarding,
@@ -30,6 +32,7 @@ record PortalConfigDocument(
                 legalLinks == null ? null : legalLinks.toDomain(),
                 support == null ? null : support.toDomain(),
                 walletUrl,
+                AssuranceLevel.ofConfig(assuranceLevel),
                 new ServiceSettings(attestationType, dataPlacement,
                         onboarding == null ? null : onboarding.toDomain(), portalClientId, identifierTypes));
     }

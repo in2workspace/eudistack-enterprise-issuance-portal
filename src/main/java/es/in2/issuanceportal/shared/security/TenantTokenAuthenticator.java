@@ -27,17 +27,14 @@ import java.util.List;
 /**
  * Validates the Access Token of every request against the tenant of that request (design.md section 3.1, AD-9): the
  * tenant's decoder judges signature, {@code iss} and time, and the claims that depend on the tenant's portal
- * configuration or on the request are checked here: {@code aud}, {@code tenant} and {@code acr}. The result is the
- * {@link HolderPrincipal}.
+ * configuration or on the request are checked here: {@code aud}, {@code tenant} and {@code acr}, which must be of the
+ * tenant's level of assurance or higher (AD-20). The result is the {@link HolderPrincipal}.
  *
  * <p>Nothing of the token, the subject or the identity is logged: a rejection is logged as its kind only.
  */
 @Slf4j
 @Component
 class TenantTokenAuthenticator implements AuthenticationManagerResolver<HttpServletRequest> {
-
-    /** {@code acr} of a login with a high level of assurance (eIDAS). */
-    static final String ACR_HIGH = "http://eidas.europa.eu/LoA/high";
 
     private final VerifierTokenDecoders decoders;
     private final TenantLoginSettings loginSettings;
@@ -65,7 +62,8 @@ class TenantTokenAuthenticator implements AuthenticationManagerResolver<HttpServ
         if (!tenant.value().equals(jwt.getClaimAsString("tenant"))) {
             throw invalid("tenant");
         }
-        if (!ACR_HIGH.equals(jwt.getClaimAsString("acr"))) {
+        String acr = jwt.getClaimAsString("acr");
+        if (acr == null || !settings.acceptedAcr().contains(acr)) {
             throw invalid("acr");
         }
         return new HolderAuthentication(principalOf(tenant, jwt, settings));
