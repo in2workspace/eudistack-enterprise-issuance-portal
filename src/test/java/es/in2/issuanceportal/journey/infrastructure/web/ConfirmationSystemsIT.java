@@ -264,9 +264,9 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         everythingWorks();
         TestHolder completed = entitledJourney();
         mvc.perform(confirmation(completed)).andExpect(status().isOk());
-        // Completed and active (AD-18), not closed: the request already has its process, so nothing is asked again.
-        mvc.perform(confirmation(completed)).andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
+        // Completed and active (AD-18), not closed: its address still works, so nothing is asked again.
+        mvc.perform(confirmation(completed)).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("step_not_allowed"));
         assertThat(requestsTo(ISSUANCES_PATH)).hasSize(1);
 
         WIRE.resetRequests();
@@ -278,12 +278,12 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         assertThat(process).isNotNull();
         walletUnitServiceCreatesTicket();
 
-        mvc.perform(confirmation(withoutTicket))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
+        // The process exists: the retry asks the Issuer for a new offer of it, never for another process.
+        mvc.perform(confirmation(withoutTicket)).andExpect(status().isOk());
 
         assertThat(requestsTo(ISSUANCES_PATH)).hasSize(1);
-        assertThat(requestsTo(TICKETS_PATH)).hasSize(1);
+        assertThat(requestsTo(ISSUANCES_PATH + "/" + process + "/credential-offer")).hasSize(1);
+        assertThat(requestsTo(TICKETS_PATH)).hasSize(2);
         assertThat(processOf(withoutTicket)).isEqualTo(process);
     }
 

@@ -158,6 +158,11 @@ class ConfirmationApiIT {
             }
             return delegate.issue(tenant, idempotencyKey, request);
         }
+
+        @Override
+        public IssuanceResult renewOffer(TenantId tenant, UUID processId) {
+            return delegate.renewOffer(tenant, processId);
+        }
     }
 
     @TestConfiguration
@@ -337,8 +342,8 @@ class ConfirmationApiIT {
     }
 
     @Test
-    @DisplayName("AC-12 — postConfirmation_afterTheTicketFailed_isOnboardingUnavailableUntilTheRenewalExists")
-    void postConfirmation_afterTheTicketFailed_isOnboardingUnavailableUntilTheRenewalExists() throws Exception {
+    @DisplayName("ES-07 — postConfirmation_afterTheTicketFailed_renewsTheOfferOfTheSameProcess")
+    void postConfirmation_afterTheTicketFailed_renewsTheOfferOfTheSameProcess() throws Exception {
         configure(CONFIG_WITH_ONBOARDING);
         TestHolder holder = entitledJourney();
         tickets.failWith(OnboardingTicketException.Reason.REJECTED);
@@ -346,11 +351,14 @@ class ConfirmationApiIT {
         tickets.recover();
 
         mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.credential_offer_uri").exists())
+                .andExpect(jsonPath("$.onboarding_url").exists());
 
         assertThat(issuer.api().calls()).hasSize(1);
-        assertThat(tickets.calls()).hasSize(1);
+        assertThat(issuer.api().renewals()).containsExactly(processOf(holder));
+        assertThat(issuer.api().processes()).isEqualTo(1);
+        assertThat(tickets.calls()).hasSize(2);
     }
 
     @Test
@@ -491,10 +499,9 @@ class ConfirmationApiIT {
                 .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
         tickets.recover();
 
-        // The renewal of the offer of a process that already exists is EUD-295: until then the answer is the same
-        // 503, but it is never step_not_allowed, because the verified email is still the journey's.
-        mvc.perform(confirmation(holder, null)).andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
+        // The process exists: the confirmation renews its offer, and it is never step_not_allowed because the verified
+        // email is still the journey's.
+        mvc.perform(confirmation(holder, null)).andExpect(status().isOk());
 
         assertThat(EmailRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL).orElseThrow()).address())
                 .isEqualTo(EMAIL);
@@ -516,16 +523,17 @@ class ConfirmationApiIT {
     }
 
     @Test
-    @DisplayName("AC-25 — postConfirmation_requestAlreadyInOffer_keepsTheJourneyActiveAndAsksTheIssuerNoMore")
-    void postConfirmation_requestAlreadyInOffer_keepsTheJourneyActiveAndAsksTheIssuerNoMore() throws Exception {
+    @DisplayName("ES-06 — postConfirmation_requestAlreadyInOffer_is409StepNotAllowedAndTheJourneyStaysActive")
+    void postConfirmation_requestAlreadyInOffer_is409StepNotAllowedAndTheJourneyStaysActive() throws Exception {
         TestHolder holder = entitledJourney();
         mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}")).andExpect(status().isOk());
 
-        // The journey is completed and active (AD-18): not closed. Until the new offer of EUD-359 task 4 the repeated
-        // confirmation of a request that has its process answers onboarding_unavailable, and asks for nothing.
+        // The journey is completed and active (AD-18): not closed. The address delivered still works, so there is
+        // no new offer and nothing is asked of the Issuer.
         mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("step_not_allowed"));
+        assertThat(issuer.api().renewals()).isEmpty();
 
         assertThat(issuer.api().calls()).hasSize(1);
         assertThat(jdbc.sql("SELECT state = 'completed' AND ended_at IS NULL FROM \"sandbox_issuance_portal\".journey "
@@ -659,9 +667,8 @@ class ConfirmationApiIT {
         UUID key = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).entry("r1").orElseThrow().idempotencyKey();
         verifyEmail(holder, OTHER_EMAIL);
 
-        // The renewal of the offer of a process that exists is EUD-295: until then the answer is onboarding_unavailable.
-        mvc.perform(confirmation(holder, null)).andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
+        // The process exists: the confirmation asks for a new offer of it, with the email the journey has.
+        mvc.perform(confirmation(holder, null)).andExpect(status().isOk());
 
         assertThat(issuer.api().calls()).singleElement().satisfies(call ->
                 assertThat(call.idempotencyKey()).isEqualTo(key));
@@ -671,19 +678,18 @@ class ConfirmationApiIT {
     }
 
     @Test
-    @DisplayName("EC-04 — postConfirmation_processAlreadyRecorded_isOnboardingUnavailableWithoutAskingTheIssuer")
-    void postConfirmation_processAlreadyRecorded_isOnboardingUnavailableWithoutAskingTheIssuer() throws Exception {
+    @DisplayName("EC-04 — postConfirmation_processAlreadyRecorded_renewsItsOfferWithoutAskingForAnotherIssuance")
+    void postConfirmation_processAlreadyRecorded_renewsItsOfferWithoutAskingForAnotherIssuance() throws Exception {
         TestHolder holder = entitledJourney();
         UUID process = UUID.randomUUID();
         jdbc.sql("INSERT INTO \"sandbox_issuance_portal\".journey_issuance (journey_id, request_id, issuance_process_id, created_at) "
                         + "VALUES (:id, 'r1', :process, now())")
                 .param("process", process).param("id", journeyOf(holder)).update();
 
-        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
+        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}")).andExpect(status().isOk());
 
         assertThat(issuer.api().calls()).isEmpty();
+        assertThat(issuer.api().renewals()).containsExactly(process);
         assertThat(processOf(holder)).isEqualTo(process);
     }
 
@@ -852,34 +858,44 @@ class ConfirmationApiIT {
     }
 
     @Test
-    @DisplayName("EC-03 — postConfirmation_sameRequestAtTheSameTimeButAnotherOne_sharesTheKeyOfEachOnly")
-    void postConfirmation_sameRequestAtTheSameTimeButAnotherOne_sharesTheKeyOfEachOnly() throws Exception {
+    @DisplayName("EC-03 — postConfirmation_sameRequestAtTheSameTime_oneProcessAndTheLateDuplicateIsStepNotAllowed")
+    void postConfirmation_sameRequestAtTheSameTime_oneProcessAndTheLateDuplicateIsStepNotAllowed() throws Exception {
         TestHolder holder = entitledJourney();
         withRequests(holder, requestOf("r1", EntitlementRecord.Status.AVAILABLE, "280000001"),
                 requestOf("r2", EntitlementRecord.Status.AVAILABLE, "280000002"));
-        CyclicBarrier together = new CyclicBarrier(3);
+        // Both confirmations of r1 reach the Issuer together: neither has recorded a process yet.
+        issuer.bothInFlight();
         List<Future<Integer>> answers = new ArrayList<>();
         try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
-            for (String id : List.of("r1", "r1", "r2")) {
-                answers.add(pool.submit(() -> {
-                    together.await(5, TimeUnit.SECONDS);
-                    return mvc.perform(confirmationOf(holder, id)).andReturn().getResponse().getStatus();
-                }));
+            for (int i = 0; i < 2; i++) {
+                answers.add(pool.submit(() ->
+                        mvc.perform(confirmationOf(holder, "r1")).andReturn().getResponse().getStatus()));
             }
-            List<Integer> statuses = new ArrayList<>();
             for (Future<Integer> answer : answers) {
-                statuses.add(answer.get(20, TimeUnit.SECONDS));
+                assertThat(answer.get(20, TimeUnit.SECONDS)).isEqualTo(200);
             }
-            // The duplicate of r1 answers the stored offer (200) or, if it arrives after the first finished, the
-            // onboarding_unavailable of a request that has its process (until EUD-359 task 4): never a second process.
-            assertThat(statuses).isSubsetOf(200, 503);
-            assertThat(statuses.stream().filter(status -> status == 200).count()).isGreaterThanOrEqualTo(2L);
         }
 
+        // The two shared the key stored by the first: one process, one entry, the second answered the stored offer.
+        UUID keyOfR1 = issuer.api().calls().getFirst().idempotencyKey();
+        assertThat(issuer.api().calls()).extracting(call -> call.idempotencyKey()).containsOnly(keyOfR1);
+        assertThat(issuer.api().processes()).isEqualTo(1);
         assertThat(jdbc.sql("SELECT count(*) FROM \"sandbox_issuance_portal\".journey_issuance WHERE journey_id = :id")
-                .param("id", journeyOf(holder)).query(Long.class).single()).isEqualTo(2L);
-        assertThat(issuer.api().calls().stream().map(call -> call.idempotencyKey()).distinct().count()).isEqualTo(2L);
-        assertThat(issuer.api().processes()).isEqualTo(2);
+                .param("id", journeyOf(holder)).query(Long.class).single()).isEqualTo(1L);
+
+        // A duplicate that arrives later finds the address delivered still working: the offer keeps serving.
+        mvc.perform(confirmationOf(holder, "r1"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("step_not_allowed"));
+        assertThat(issuer.api().renewals()).isEmpty();
+
+        // Another request of the journey gets its own key and process.
+        issuer.reset();
+        mvc.perform(confirmationOf(holder, "r2")).andExpect(status().isOk());
+        assertThat(issuer.api().calls()).singleElement().satisfies(call ->
+                assertThat(call.idempotencyKey()).isNotEqualTo(keyOfR1));
+        assertThat(jdbc.sql("SELECT count(DISTINCT issuance_process_id) FROM \"sandbox_issuance_portal\".journey_issuance "
+                + "WHERE journey_id = :id").param("id", journeyOf(holder)).query(Long.class).single()).isEqualTo(2L);
     }
 
     @Test

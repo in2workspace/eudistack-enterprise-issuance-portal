@@ -2,8 +2,6 @@ package es.in2.issuanceportal.journey.infrastructure.web;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import es.in2.issuanceportal.journey.application.IssuanceService;
-import es.in2.issuanceportal.shared.error.ProblemCode;
-import es.in2.issuanceportal.shared.error.ProblemException;
 import es.in2.issuanceportal.shared.security.HolderPrincipal;
 import es.in2.issuanceportal.shared.security.HolderRefs;
 import es.in2.issuanceportal.shared.tenant.CurrentTenant;
@@ -23,8 +21,6 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/v1/journey/confirmation")
 class ConfirmationController {
 
-    private static final String REQUEST_ID = "request_id";
-
     private final IssuanceService service;
     private final HolderRefs holders;
 
@@ -41,10 +37,7 @@ class ConfirmationController {
     @PostMapping
     OfferResponse confirm(HttpServletRequest request, @AuthenticationPrincipal HolderPrincipal principal,
                           @RequestBody(required = false) JsonNode body) {
-        JsonNode requestId = body == null ? null : body.get(REQUEST_ID);
-        if (requestId == null || !requestId.isTextual()) {
-            throw new ProblemException(ProblemCode.BAD_REQUEST);
-        }
-        return OfferResponse.of(service.confirm(CurrentTenant.of(request), holders.of(principal), requestId.asText()));
+        return OfferResponse.of(service.confirm(CurrentTenant.of(request), holders.of(principal),
+                RequestReferences.requestIdOf(body)));
     }
 }

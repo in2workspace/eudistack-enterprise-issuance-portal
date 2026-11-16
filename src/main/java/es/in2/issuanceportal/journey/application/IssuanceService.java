@@ -9,6 +9,7 @@ import es.in2.issuanceportal.journey.application.port.IssuanceUnavailableExcepti
 import es.in2.issuanceportal.journey.application.port.JourneyAuditTrail;
 import es.in2.issuanceportal.journey.application.port.JourneyIssuanceRepository;
 import es.in2.issuanceportal.journey.application.port.JourneyRepository;
+import es.in2.issuanceportal.journey.application.port.OfferNotRenewableException;
 import es.in2.issuanceportal.journey.application.port.OnboardingTicket;
 import es.in2.issuanceportal.journey.application.port.OnboardingTicketException;
 import es.in2.issuanceportal.journey.application.port.OnboardingTickets;
@@ -119,8 +120,17 @@ public class IssuanceService {
         }
     }
 
-    /** What the first transaction leaves ready for the request. */
-    private record Prepared(UUID idempotencyKey, IssuanceRequest request, Onboarding onboarding, String requestId) {
+    /** What the first transaction leaves ready: a new issuance, or the new offer of a request that has its process. */
+    private sealed interface Plan permits Prepared, Renewal {
+    }
+
+    /** A request without a process: the issuance to ask for. */
+    private record Prepared(UUID idempotencyKey, IssuanceRequest request, Onboarding onboarding, String requestId)
+            implements Plan {
+    }
+
+    /** A request with its process: the new offer to ask for (design.md §3.4). */
+    private record Renewal(String requestId, UUID processId, String email, Onboarding onboarding) implements Plan {
     }
 
     /**
@@ -130,17 +140,53 @@ public class IssuanceService {
      *                  64 characters is {@code bad_request}
      */
     public Offer confirm(TenantId tenant, HolderRef holder, String requestId) {
-        if (requestId == null || requestId.isBlank() || requestId.length() > JourneyIssuance.MAX_REQUEST_ID_LENGTH) {
-            throw new ProblemException(ProblemCode.BAD_REQUEST);
-        }
+        requireValid(requestId);
         access.requireActive(tenant, holder);
         UUID journeyId = sessions.journeyOf(tenant, holder)
                 .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
-        Prepared prepared = Objects.requireNonNull(
-                transactions.execute(status -> prepare(tenant, journeyId, requestId)));
+        Plan plan = Objects.requireNonNull(transactions.execute(status -> prepare(tenant, journeyId, requestId)));
+        // A request that already has its process is not issued again: it follows POST /journey/offers (§3.7 step 2).
+        return switch (plan) {
+            case Prepared prepared -> issueNew(tenant, journeyId, prepared);
+            case Renewal renewal -> renew(tenant, journeyId, renewal);
+        };
+    }
+
+    /**
+     * A new offer for a request that has its process (design.md §3.4): only once the address delivered for it
+     * expired, or none was delivered because the ticket failed. No new process is created.
+     *
+     * @throws ProblemException {@code step_not_allowed} when the request has no process, is saved, or its address
+     *                          has not expired; {@code onboarding_unavailable} when the ticket cannot be obtained
+     */
+    public Offer newOffer(TenantId tenant, HolderRef holder, String requestId) {
+        requireValid(requestId);
+        access.requireActive(tenant, holder);
+        UUID journeyId = sessions.journeyOf(tenant, holder)
+                .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
+        Renewal renewal = Objects.requireNonNull(transactions.execute(status -> {
+            Journey journey = lock(tenant, journeyId);
+            if (!journey.isActive()) {
+                throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
+            }
+            String address = verifiedEmail(tenant, journeyId);
+            return renewalOf(tenant, journeyId, requestId, address, settings(tenant));
+        }));
+        return renew(tenant, journeyId, renewal);
+    }
+
+    private static void requireValid(String requestId) {
+        if (requestId == null || requestId.isBlank() || requestId.length() > JourneyIssuance.MAX_REQUEST_ID_LENGTH) {
+            throw new ProblemException(ProblemCode.BAD_REQUEST);
+        }
+    }
+
+    private Offer issueNew(TenantId tenant, UUID journeyId, Prepared prepared) {
+        String requestId = prepared.requestId();
         IssuanceResult issued = request(tenant, journeyId, prepared);
         boolean ticketNeeded = prepared.onboarding().enabled();
-        OnboardingTicket ticket = ticketNeeded ? requestTicket(tenant, journeyId, prepared, issued) : null;
+        OnboardingTicket ticket = ticketNeeded
+                ? requestTicket(tenant, journeyId, prepared.onboarding(), prepared.request().email(), issued) : null;
         trace(tenant, journeyId, requestId, ticketNeeded && ticket == null
                 ? JourneyAuditTrail.IssuanceOutcome.ONBOARDING_FAILED : JourneyAuditTrail.IssuanceOutcome.ISSUED,
                 issued.processId());
@@ -155,7 +201,7 @@ public class IssuanceService {
      * that the request is one of the journey that can be issued, and keeps a new idempotency key if the request has
      * none for that email. Anything that makes it fail leaves the journey as it was.
      */
-    private Prepared prepare(TenantId tenant, UUID journeyId, String requestId) {
+    private Plan prepare(TenantId tenant, UUID journeyId, String requestId) {
         Journey journey = lock(tenant, journeyId);
         if (!journey.isActive()) {
             throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
@@ -165,7 +211,12 @@ public class IssuanceService {
         // Always the one in the session: a retry after onboarding_unavailable needs no new code (EC-05).
         String address = verifiedEmail(tenant, journeyId);
         ServiceSettings settings = settings(tenant);
-        EntitlementRecord.Request confirmed = confirmable(tenant, journeyId, entitlement, requestId);
+        EntitlementRecord.Request confirmed = entitlement.request(requestId)
+                .orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED));
+        if (processOf(tenant, journeyId, requestId).isPresent()) {
+            return renewalOf(tenant, journeyId, requestId, address, settings);
+        }
+        requireAvailable(confirmed);
         Map<String, Object> payload = payload(tenant, settings, identity, confirmed.claims());
         IssuanceRecord section = readIssuance(tenant, journeyId).orElseGet(IssuanceRecord::empty);
         Optional<IssuanceRecord.Entry> issued = section.entry(requestId);
@@ -183,28 +234,42 @@ public class IssuanceService {
                 DELIVERY, GRANT_TYPE), settings.onboarding(), requestId);
     }
 
-    /**
-     * The request the holder confirms. It has to be a request of the journey that is available and has no process
-     * yet. One that is not (not of the journey, not available, or already saved) is {@code step_not_allowed}.
-     */
-    private EntitlementRecord.Request confirmable(TenantId tenant, UUID journeyId, EntitlementRecord entitlement,
-                                                  String requestId) {
-        EntitlementRecord.Request request = entitlement.request(requestId)
-                .orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED));
-        Optional<JourneyIssuance> process = issuances.findByJourney(tenant, journeyId).stream()
+    private Optional<JourneyIssuance> processOf(TenantId tenant, UUID journeyId, String requestId) {
+        return issuances.findByJourney(tenant, journeyId).stream()
                 .filter(issuance -> issuance.requestId().equals(requestId)).findFirst();
-        if (process.isPresent()) {
-            if (process.get().isSaved()) {
-                throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
-            }
-            // EUD-359 task 4 routes a request that already has its process to the new offer of that process.
-            log.info("Journey {} already has the issuance process of a request: not requested again", journeyId);
-            throw new ProblemException(ProblemCode.ONBOARDING_UNAVAILABLE);
-        }
+    }
+
+    /** A request without a process is confirmed only if the source says it is available; otherwise {@code step_not_allowed}. */
+    private static void requireAvailable(EntitlementRecord.Request request) {
         if (request.status() != EntitlementRecord.Status.AVAILABLE) {
             throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
         }
-        return request;
+    }
+
+    /**
+     * The new offer of a request with its process, if the address delivered for it expired or none was delivered.
+     * A request that has no process, is saved, or whose address still works is {@code step_not_allowed}: the
+     * current offer keeps serving (design.md §3.4 step 2).
+     */
+    private Renewal renewalOf(TenantId tenant, UUID journeyId, String requestId, String address,
+                              ServiceSettings settings) {
+        JourneyIssuance process = processOf(tenant, journeyId, requestId)
+                .orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED));
+        if (process.isSaved()) {
+            throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
+        }
+        Optional<IssuanceRecord.Entry> entry = readIssuance(tenant, journeyId)
+                .flatMap(section -> section.entry(requestId));
+        if (entry.isPresent() && entry.get().offerUri().isPresent()
+                && clock.instant().isBefore(deliveredAddressExpiry(entry.get()))) {
+            throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
+        }
+        return new Renewal(requestId, process.issuanceProcessId(), address, settings.onboarding());
+    }
+
+    /** The address the interface was given: the onboarding address in a tenant with tickets, else the offer. */
+    private static Instant deliveredAddressExpiry(IssuanceRecord.Entry entry) {
+        return entry.onboardingExpiresAt() != null ? entry.onboardingExpiresAt() : entry.offerExpiresAt();
     }
 
     /**
@@ -258,7 +323,8 @@ public class IssuanceService {
      *
      * @return the ticket, or {@code null} when it was not created
      */
-    private OnboardingTicket requestTicket(TenantId tenant, UUID journeyId, Prepared prepared, IssuanceResult issued) {
+    private OnboardingTicket requestTicket(TenantId tenant, UUID journeyId, Onboarding onboarding, String email,
+                                           IssuanceResult issued) {
         Duration expiresIn = Duration.between(clock.instant(), issued.offerExpiresAt()).minus(TICKET_MARGIN);
         if (expiresIn.compareTo(Duration.ofSeconds(1)) < 0) {
             log.warn("Offer of journey {} has too little life left for an onboarding ticket: not requested", journeyId);
@@ -266,14 +332,105 @@ public class IssuanceService {
             return null;
         }
         try {
-            OnboardingTicket ticket = tickets.request(tenant, prepared.onboarding().walletUnitServiceUrl(),
-                    prepared.request().email(), issued.credentialOfferUri(), expiresIn);
+            OnboardingTicket ticket = tickets.request(tenant, onboarding.walletUnitServiceUrl(),
+                    email, issued.credentialOfferUri(), expiresIn);
             traceTicket(tenant, journeyId, JourneyAuditTrail.TicketOutcome.CREATED);
             return ticket;
         } catch (OnboardingTicketException e) {
             log.warn("Onboarding ticket of journey {} not created: {}", journeyId, e.reason());
             traceTicket(tenant, journeyId, JourneyAuditTrail.TicketOutcome.FAILED);
             return null;
+        }
+    }
+
+    /** Outside any transaction, like the issuance: the journey is not locked while the Issuer and the tickets answer. */
+    private Offer renew(TenantId tenant, UUID journeyId, Renewal plan) {
+        IssuanceResult renewed = askForNewOffer(tenant, journeyId, plan);
+        boolean ticketNeeded = plan.onboarding().enabled();
+        OnboardingTicket ticket = ticketNeeded
+                ? requestTicket(tenant, journeyId, plan.onboarding(), plan.email(), renewed) : null;
+        Optional<Offer> offer = Objects.requireNonNull(transactions.execute(status ->
+                finishRenewal(tenant, journeyId, plan, renewed, ticketNeeded, ticket)));
+        return offer.orElseThrow(() -> new ProblemException(ProblemCode.ONBOARDING_UNAVAILABLE));
+    }
+
+    private IssuanceResult askForNewOffer(TenantId tenant, UUID journeyId, Renewal plan) {
+        try {
+            IssuanceResult renewed = issuance.renewOffer(tenant, plan.processId());
+            traceRenewal(tenant, journeyId, plan.requestId(), JourneyAuditTrail.RenewalOutcome.RENEWED);
+            return renewed;
+        } catch (OfferNotRenewableException _) {
+            traceRenewal(tenant, journeyId, plan.requestId(), JourneyAuditTrail.RenewalOutcome.REQUEST_SAVED);
+            // EUD-359 task 4b: the request becomes saved and the answer is request_saved.
+            throw new ProblemException(ProblemCode.ISSUANCE_REJECTED);
+        } catch (SystemTokenUnavailableException e) {
+            log.warn("No system token of tenant {} to renew an offer of journey {}: {}", tenant, journeyId, e.reason());
+            traceRenewal(tenant, journeyId, plan.requestId(), JourneyAuditTrail.RenewalOutcome.UNAVAILABLE);
+            throw new ProblemException(ProblemCode.ISSUANCE_UNAVAILABLE);
+        } catch (IssuanceRejectedException e) {
+            log.warn("Offer renewal of journey {} rejected: {}", journeyId, e.reason());
+            traceRenewal(tenant, journeyId, plan.requestId(), JourneyAuditTrail.RenewalOutcome.REJECTED);
+            throw new ProblemException(ProblemCode.ISSUANCE_REJECTED);
+        } catch (IssuanceUnavailableException e) {
+            log.warn("Offer renewal of journey {} unavailable: {}", journeyId, e.reason());
+            traceRenewal(tenant, journeyId, plan.requestId(), JourneyAuditTrail.RenewalOutcome.UNAVAILABLE);
+            throw new ProblemException(ProblemCode.ISSUANCE_UNAVAILABLE);
+        }
+    }
+
+    /**
+     * Second transaction of a new offer. With the ticket, or in a tenant without onboarding, keeps the new offer in
+     * the request's entry and, if it is the journey's first offer, completes it. Without a ticket that was needed the
+     * new offer is not kept, and the old one, which the Issuer voided, is dropped so the next call can renew again:
+     * the journey stays as it was.
+     *
+     * @return the offer to give, or empty when the ticket was needed and not created
+     */
+    // Each argument is a different step of the renewal: a record would only rename them.
+    @SuppressWarnings("java:S107")
+    private Optional<Offer> finishRenewal(TenantId tenant, UUID journeyId, Renewal plan, IssuanceResult renewed,
+                                          boolean ticketNeeded, OnboardingTicket ticket) {
+        Journey journey = lock(tenant, journeyId);
+        if (!journey.isActive()) {
+            log.warn("Journey {} closed while its offer was renewed", journeyId);
+            throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
+        }
+        JourneyIssuance process = processOf(tenant, journeyId, plan.requestId())
+                .orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED));
+        if (process.isSaved()) {
+            throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
+        }
+        IssuanceRecord section = readIssuance(tenant, journeyId).orElseGet(IssuanceRecord::empty);
+        IssuanceRecord.Entry before = section.entry(plan.requestId())
+                .orElseGet(() -> IssuanceRecord.Entry.withKey(UUID.randomUUID(), plan.email()));
+        if (ticketNeeded && ticket == null) {
+            sessions.write(tenant, journeyId, Section.ISSUANCE, section.with(plan.requestId(),
+                    IssuanceRecord.Entry.withKey(before.idempotencyKey(), before.email())).toJson());
+            return Optional.empty();
+        }
+        String onboardingUrl = ticket == null ? null : ticket.onboardingUrl();
+        Instant onboardingExpiresAt = ticket == null ? null : ticket.expiresAt();
+        sessions.write(tenant, journeyId, Section.ISSUANCE, section.with(plan.requestId(),
+                new IssuanceRecord.Entry(before.idempotencyKey(), before.email(), renewed.credentialOfferUri(),
+                        renewed.offerExpiresAt(), onboardingUrl, onboardingExpiresAt)).toJson());
+        if (journey.isInProgress()) {
+            journey.complete(clock.instant());
+            if (!journeys.update(tenant, journey, JourneyState.IN_PROGRESS)) {
+                throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
+            }
+            audit(tenant, JourneyAuditTrail.Kind.COMPLETED, journey);
+        }
+        return Optional.of(new Offer(renewed.credentialOfferUri(), renewed.offerExpiresAt(), onboardingUrl,
+                onboardingExpiresAt));
+    }
+
+    private void traceRenewal(TenantId tenant, UUID journeyId, String requestId,
+                              JourneyAuditTrail.RenewalOutcome outcome) {
+        try {
+            trail.append(tenant, new JourneyAuditTrail.OfferRenewalRequested(UUID.randomUUID(), journeyId, requestId,
+                    outcome, clock.instant()));
+        } catch (RuntimeException e) {
+            log.error("Could not record the offer renewal of journey {}", journeyId, e);
         }
     }
 

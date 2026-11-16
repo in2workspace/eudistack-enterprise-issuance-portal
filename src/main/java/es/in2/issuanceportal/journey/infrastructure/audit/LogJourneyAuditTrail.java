@@ -73,6 +73,23 @@ class LogJourneyAuditTrail implements JourneyAuditTrail {
     }
 
     @Override
+    public void append(TenantId tenant, OfferRenewalRequested event) {
+        try {
+            audit.info("offer renewal {} {} {} {} {} {} {}",
+                    kv(EVENT, "OFFER_RENEWAL_REQUESTED"),
+                    kv(JOURNEY_ID, event.journeyId()),
+                    kv("request_id", event.requestId()),
+                    kv(EVENT_ID, event.eventId()),
+                    kv(TENANT, tenant.value()),
+                    kv(RESULT, event.result().code()),
+                    kv(OCCURRED_AT, event.occurredAt()));
+        } catch (RuntimeException e) {
+            audit.error("Could not record the offer renewal {} of journey {}",
+                    event.eventId(), event.journeyId(), e);
+        }
+    }
+
+    @Override
     public void append(TenantId tenant, OnboardingTicketRequested event) {
         try {
             audit.info("onboarding ticket {} {} {} {} {} {}",

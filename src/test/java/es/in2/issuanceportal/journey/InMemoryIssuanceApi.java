@@ -1,6 +1,7 @@
 package es.in2.issuanceportal.journey;
 
 import es.in2.issuanceportal.journey.application.port.IssuanceApi;
+import es.in2.issuanceportal.journey.application.port.OfferNotRenewableException;
 import es.in2.issuanceportal.journey.application.port.IssuanceRequest;
 import es.in2.issuanceportal.journey.application.port.IssuanceResult;
 import es.in2.issuanceportal.shared.tenant.TenantId;
@@ -28,6 +29,10 @@ public final class InMemoryIssuanceApi implements IssuanceApi {
     private final List<Call> calls = new ArrayList<>();
     private final Map<UUID, IssuanceResult> issued = new HashMap<>();
     private RuntimeException failure;
+    private final List<UUID> renewals = new ArrayList<>();
+    private int renewed;
+    private boolean notRenewable;
+    private RuntimeException renewalFailure;
 
     public InMemoryIssuanceApi(Clock clock) {
         this.clock = clock;
@@ -52,6 +57,34 @@ public final class InMemoryIssuanceApi implements IssuanceApi {
         return issued.computeIfAbsent(idempotencyKey, key -> new IssuanceResult(UUID.randomUUID(),
                 "openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fissuer.test%2Foffers%2F" + issued.size(),
                 clock.instant().plus(Duration.ofMinutes(10))));
+    }
+
+    /** From now on, {@link #renewOffer} says the process can no longer be renewed. */
+    public synchronized void notRenewable() {
+        this.notRenewable = true;
+    }
+
+    /** From now on, {@link #renewOffer} throws this. */
+    public synchronized void failRenewalWith(RuntimeException exception) {
+        this.renewalFailure = exception;
+    }
+
+    @Override
+    public synchronized IssuanceResult renewOffer(TenantId tenant, UUID processId) {
+        renewals.add(processId);
+        if (renewalFailure != null) {
+            throw renewalFailure;
+        }
+        if (notRenewable) {
+            throw new OfferNotRenewableException();
+        }
+        return new IssuanceResult(processId, "openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fissuer.test%2Frenewed%2F"
+                + ++renewed, clock.instant().plus(Duration.ofMinutes(10)));
+    }
+
+    /** The processes whose offer was renewed, in order. */
+    public synchronized List<UUID> renewals() {
+        return List.copyOf(renewals);
     }
 
     public synchronized List<Call> calls() {

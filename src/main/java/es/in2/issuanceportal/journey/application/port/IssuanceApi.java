@@ -20,4 +20,17 @@ public interface IssuanceApi {
      * @throws SystemTokenUnavailableException when the tenant has no system token
      */
     IssuanceResult issue(TenantId tenant, UUID idempotencyKey, IssuanceRequest request);
+
+    /**
+     * Asks for a new credential offer of an issuance process that already exists, which voids the previous one: no
+     * new process is created. Like {@link #issue}, always with the system token of the tenant and with the same
+     * retries.
+     *
+     * @return the process with its new offer and when it expires
+     * @throws OfferNotRenewableException      when the process is no longer a draft or has no offer to renew
+     * @throws IssuanceRejectedException       when the Issuer refuses the request or answers without the offer
+     * @throws IssuanceUnavailableException    when the Issuer does not answer, also after the retries
+     * @throws SystemTokenUnavailableException when the tenant has no system token
+     */
+    IssuanceResult renewOffer(TenantId tenant, UUID processId);
 }

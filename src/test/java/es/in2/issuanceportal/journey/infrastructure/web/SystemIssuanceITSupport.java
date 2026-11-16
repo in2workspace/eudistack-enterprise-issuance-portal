@@ -57,6 +57,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -226,6 +227,11 @@ abstract class SystemIssuanceITSupport {
 
     void issuerIssues() {
         WIRE.stubFor(post(urlEqualTo(ISSUANCES_PATH)).willReturn(issued()));
+        // The new offer of the branch EUD-295 of the Issuer: the same envelope, and no Location.
+        WIRE.stubFor(post(urlPathMatching(ISSUANCES_PATH + "/[0-9a-f-]{36}/credential-offer")).willReturn(aResponse()
+                .withStatus(200).withHeader("Content-Type", "application/json")
+                .withBody("{\"responses\":[{\"channel\":\"ui\",\"status\":200,"
+                        + "\"body\":{\"credential_offer_uri\":\"" + OFFER + "\"}}]}")));
     }
 
     void walletUnitServiceCreatesTicket() {

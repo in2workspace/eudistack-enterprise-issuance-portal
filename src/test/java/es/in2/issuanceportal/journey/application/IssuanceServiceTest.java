@@ -9,6 +9,7 @@ import es.in2.issuanceportal.journey.RecordingJourneyAuditTrail;
 import es.in2.issuanceportal.journey.api.JourneyProgress;
 import es.in2.issuanceportal.journey.application.port.IssuanceApi;
 import es.in2.issuanceportal.journey.application.port.IssuanceRejectedException;
+import es.in2.issuanceportal.journey.application.port.IssuanceRequest;
 import es.in2.issuanceportal.journey.application.port.IssuanceUnavailableException;
 import es.in2.issuanceportal.journey.application.port.IssuanceResult;
 import es.in2.issuanceportal.journey.application.port.JourneyAuditTrail;
@@ -92,12 +93,26 @@ class IssuanceServiceTest {
     private final AtomicBoolean askedInsideTransaction = new AtomicBoolean();
     private final AtomicBoolean ticketAskedInsideTransaction = new AtomicBoolean();
     private final InMemoryOnboardingTickets tickets = new InMemoryOnboardingTickets(clock);
-    private IssuanceApi issuer = api;
+    /** What the Issuer does when it is asked for an issuance; a test replaces it. */
+    private interface Issue {
+        IssuanceResult issue(TenantId tenant, UUID key, IssuanceRequest request);
+    }
+
+    private Issue issuer = api::issue;
     private final IssuanceService service = new IssuanceService(journey, journeys, issuances, sessions,
             new PortalConfigService(tenant -> Optional.ofNullable(configs.get(tenant))),
-            (tenant, key, request) -> {
-                askedInsideTransaction.compareAndSet(false, inTransaction.get());
-                return issuer.issue(tenant, key, request);
+            new IssuanceApi() {
+                @Override
+                public IssuanceResult issue(TenantId tenant, UUID key, IssuanceRequest request) {
+                    askedInsideTransaction.compareAndSet(false, inTransaction.get());
+                    return issuer.issue(tenant, key, request);
+                }
+
+                @Override
+                public IssuanceResult renewOffer(TenantId tenant, UUID processId) {
+                    askedInsideTransaction.compareAndSet(false, inTransaction.get());
+                    return api.renewOffer(tenant, processId);
+                }
             },
             (tenant, url, email, offer, expiresIn) -> {
                 ticketAskedInsideTransaction.compareAndSet(false, inTransaction.get());
@@ -320,17 +335,18 @@ class IssuanceServiceTest {
     // --- EC-09, ES-06 ---
 
     @Test
-    @DisplayName("AC-25 — confirm_requestAlreadyInOffer_isOnboardingUnavailableWithoutAskingTheIssuerAgain")
-    void confirm_requestAlreadyInOffer_isOnboardingUnavailableWithoutAskingTheIssuerAgain() {
+    @DisplayName("ES-06 — confirm_requestWhoseAddressHasNotExpired_isStepNotAllowedAndTheOfferKeepsServing")
+    void confirm_requestWhoseAddressHasNotExpired_isStepNotAllowedAndTheOfferKeepsServing() {
         configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
         HolderRef holder = entitledJourney();
         service.confirm(CGCOM, holder, "r1");
 
-        // The journey is completed and active: not closed. EUD-359 task 4 routes this to the new offer of the process.
+        // The journey is completed and active: not closed. The address delivered still works, so no new offer.
         assertThatThrownBy(() -> service.confirm(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
-                ProblemCode.ONBOARDING_UNAVAILABLE));
+                ProblemCode.STEP_NOT_ALLOWED));
 
         assertThat(api.calls()).hasSize(1);
+        assertThat(api.renewals()).isEmpty();
     }
 
     @Test
@@ -480,20 +496,22 @@ class IssuanceServiceTest {
     // --- EC-04 ---
 
     @Test
-    @DisplayName("EC-04 — confirm_processAlreadyRecorded_isOnboardingUnavailableWithoutAskingTheIssuer")
-    void confirm_processAlreadyRecorded_isOnboardingUnavailableWithoutAskingTheIssuer() {
+    @DisplayName("EC-04 — confirm_processAlreadyRecorded_renewsItsOfferWithoutAskingForAnotherIssuance")
+    void confirm_processAlreadyRecorded_renewsItsOfferWithoutAskingForAnotherIssuance() {
         configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
         HolderRef holder = entitledJourney();
         Journey stored = journeys.findById(CGCOM, journeyOf(holder)).orElseThrow();
         UUID process = UUID.randomUUID();
         issuances.insert(CGCOM, new JourneyIssuance(stored.id(), "r1", process, clock.instant(), null));
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
-                ProblemCode.ONBOARDING_UNAVAILABLE));
+        IssuanceService.Offer offer = service.confirm(CGCOM, holder, "r1");
 
         assertThat(api.calls()).isEmpty();
+        assertThat(api.renewals()).containsExactly(process);
+        assertThat(offer.credentialOfferUri()).contains("renewed");
         Journey after = journeys.findById(CGCOM, stored.id()).orElseThrow();
-        assertThat(after.state()).isEqualTo(JourneyState.IN_PROGRESS);
+        // The process had no offer yet, so this is the journey's first: it completes.
+        assertThat(after.state()).isEqualTo(JourneyState.COMPLETED);
         assertThat(processOf(after.id())).contains(process);
     }
 
@@ -675,8 +693,8 @@ class IssuanceServiceTest {
     }
 
     @Test
-    @DisplayName("AC-12 — confirm_afterTheTicketFailed_isOnboardingUnavailableWithoutAskingAnySystemAgain")
-    void confirm_afterTheTicketFailed_isOnboardingUnavailableWithoutAskingAnySystemAgain() {
+    @DisplayName("ES-07 — confirm_afterTheTicketFailed_renewsTheOfferOfTheSameProcessAndAsksForAnotherTicket")
+    void confirm_afterTheTicketFailed_renewsTheOfferOfTheSameProcessAndAsksForAnotherTicket() {
         withOnboarding();
         HolderRef holder = entitledJourney();
         tickets.failWith(OnboardingTicketException.Reason.UNAVAILABLE);
@@ -684,11 +702,16 @@ class IssuanceServiceTest {
                 ProblemCode.ONBOARDING_UNAVAILABLE));
         tickets.recover();
 
-        assertThatThrownBy(() -> service.confirm(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
-                ProblemCode.ONBOARDING_UNAVAILABLE));
+        IssuanceService.Offer offer = service.confirm(CGCOM, holder, "r1");
 
+        // No second issuance: the same process gets a new offer, and a new ticket is asked for it.
         assertThat(api.calls()).hasSize(1);
-        assertThat(tickets.calls()).hasSize(1);
+        assertThat(api.renewals()).containsExactly(processOf(journeyOf(holder)).orElseThrow());
+        assertThat(tickets.calls()).hasSize(2);
+        assertThat(offer.onboardingUrl()).isNotNull();
+        assertThat(stored(holder).state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(trail.offerRenewals()).extracting(JourneyAuditTrail.OfferRenewalRequested::result)
+                .containsExactly(JourneyAuditTrail.RenewalOutcome.RENEWED);
     }
 
     @Test
@@ -900,6 +923,176 @@ class IssuanceServiceTest {
             assertThat(event.requestId()).isEqualTo("r1");
             assertThat(event.toString()).doesNotContain("SIM-", "280000001");
         });
+    }
+
+    // --- EUD-359 task 4: a new offer of a request that has its process ---
+
+    private HolderRef confirmedOnce() {
+        configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
+        HolderRef holder = entitledJourney();
+        service.confirm(CGCOM, holder, "r1");
+        return holder;
+    }
+
+    @Test
+    @DisplayName("AC-07 — newOffer_addressExpired_renewsTheOfferOfTheSameProcessAndKeepsTheKey")
+    void newOffer_addressExpired_renewsTheOfferOfTheSameProcessAndKeepsTheKey() {
+        HolderRef holder = confirmedOnce();
+        UUID process = processOf(stored(holder).id()).orElseThrow();
+        UUID key = IssuanceRecord.fromJson(sessions.read(CGCOM, journeyOf(holder), Section.ISSUANCE).orElseThrow())
+                .entry("r1").orElseThrow().idempotencyKey();
+        clock.advance(Duration.ofMinutes(10));
+
+        IssuanceService.Offer offer = service.newOffer(CGCOM, holder, "r1");
+
+        assertThat(offer.credentialOfferUri()).contains("renewed");
+        assertThat(offer.expiresAt()).isEqualTo(clock.instant().plus(Duration.ofMinutes(10)));
+        assertThat(api.calls()).hasSize(1);
+        assertThat(api.renewals()).containsExactly(process);
+        IssuanceRecord.Entry entry = IssuanceRecord.fromJson(
+                sessions.read(CGCOM, journeyOf(holder), Section.ISSUANCE).orElseThrow()).entry("r1").orElseThrow();
+        assertThat(entry.idempotencyKey()).isEqualTo(key);
+        assertThat(entry.offerUri()).contains(offer.credentialOfferUri());
+        assertThat(issuances.findByJourney(CGCOM, stored(holder).id())).hasSize(1);
+        assertThat(trail.offerRenewals()).singleElement().satisfies(event -> {
+            assertThat(event.requestId()).isEqualTo("r1");
+            assertThat(event.result()).isEqualTo(JourneyAuditTrail.RenewalOutcome.RENEWED);
+            assertThat(event.toString()).doesNotContain("openid-credential-offer");
+        });
+    }
+
+    @Test
+    @DisplayName("ES-06 — newOffer_addressStillWorking_isStepNotAllowedAndNothingIsAsked")
+    void newOffer_addressStillWorking_isStepNotAllowedAndNothingIsAsked() {
+        HolderRef holder = confirmedOnce();
+        clock.advance(Duration.ofMinutes(9));
+
+        assertThatThrownBy(() -> service.newOffer(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
+                ProblemCode.STEP_NOT_ALLOWED));
+
+        assertThat(api.renewals()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("ES-06 — newOffer_requestWithoutProcessOrUnknown_isStepNotAllowed")
+    void newOffer_requestWithoutProcessOrUnknown_isStepNotAllowed() {
+        configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
+        HolderRef holder = journeyWithRequests(request("r1", EntitlementRecord.Status.AVAILABLE, "280000001"),
+                request("r2", EntitlementRecord.Status.AVAILABLE, "280000002"));
+        service.confirm(CGCOM, holder, "r1");
+        clock.advance(Duration.ofMinutes(10));
+
+        for (String id : List.of("r2", "r9")) {
+            assertThatThrownBy(() -> service.newOffer(CGCOM, holder, id)).as(id).satisfies(e -> assertProblem(e,
+                    ProblemCode.STEP_NOT_ALLOWED));
+        }
+
+        assertThat(api.renewals()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("ES-01 — newOffer_blankOrTooLongRequestId_isBadRequest")
+    void newOffer_blankOrTooLongRequestId_isBadRequest() {
+        HolderRef holder = confirmedOnce();
+
+        for (String id : new String[] {null, "", " ", "r".repeat(65)}) {
+            assertThatThrownBy(() -> service.newOffer(CGCOM, holder, id)).satisfies(e -> assertProblem(e,
+                    ProblemCode.BAD_REQUEST));
+        }
+    }
+
+    @Test
+    @DisplayName("ES-07 — newOffer_ticketFails_isOnboardingUnavailableWithoutOfferAndTheJourneyStaysAsItWas")
+    void newOffer_ticketFails_isOnboardingUnavailableWithoutOfferAndTheJourneyStaysAsItWas() {
+        withOnboarding();
+        HolderRef holder = entitledJourney();
+        service.confirm(CGCOM, holder, "r1");
+        clock.advance(Duration.ofMinutes(9));
+        tickets.failWith(OnboardingTicketException.Reason.UNAVAILABLE);
+
+        assertThatThrownBy(() -> service.newOffer(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
+                ProblemCode.ONBOARDING_UNAVAILABLE));
+
+        assertThat(stored(holder).state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(issuances.findByJourney(CGCOM, stored(holder).id())).hasSize(1);
+        // The Issuer voided the old offer: it is dropped, so the next call can renew without waiting.
+        IssuanceRecord.Entry entry = IssuanceRecord.fromJson(
+                sessions.read(CGCOM, journeyOf(holder), Section.ISSUANCE).orElseThrow()).entry("r1").orElseThrow();
+        assertThat(entry.offerUri()).isEmpty();
+        tickets.recover();
+
+        IssuanceService.Offer offer = service.newOffer(CGCOM, holder, "r1");
+
+        assertThat(offer.onboardingUrl()).isNotNull();
+        assertThat(api.renewals()).hasSize(2);
+        assertThat(api.calls()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("AC-07 — newOffer_onboardingAddressExpiredBeforeTheOffer_renews")
+    void newOffer_onboardingAddressExpiredBeforeTheOffer_renews() {
+        withOnboarding();
+        HolderRef holder = entitledJourney();
+        service.confirm(CGCOM, holder, "r1");
+        // The ticket lasts 60 s less than the offer: the address the holder has expired, the offer did not yet.
+        clock.advance(Duration.ofSeconds(9 * 60 + 1));
+
+        IssuanceService.Offer offer = service.newOffer(CGCOM, holder, "r1");
+
+        assertThat(offer.onboardingUrl()).isNotNull();
+        assertThat(api.renewals()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("ES-07 — newOffer_journeyStillInProgressBecauseTheFirstTicketFailed_completesItWithTheNewOffer")
+    void newOffer_journeyStillInProgressBecauseTheFirstTicketFailed_completesItWithTheNewOffer() {
+        withOnboarding();
+        HolderRef holder = entitledJourney();
+        tickets.failWith(OnboardingTicketException.Reason.UNAVAILABLE);
+        assertThatThrownBy(() -> service.confirm(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
+                ProblemCode.ONBOARDING_UNAVAILABLE));
+        tickets.recover();
+
+        service.newOffer(CGCOM, holder, "r1");
+
+        assertThat(stored(holder).state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(stored(holder).step()).isEqualTo(JourneyStep.OFFER_OBTAINED);
+        assertThat(api.calls()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("ES-07 — newOffer_issuerFails_isRejectedOrUnavailableAndTraced")
+    void newOffer_issuerFails_isRejectedOrUnavailableAndTraced() {
+        HolderRef holder = confirmedOnce();
+        clock.advance(Duration.ofMinutes(10));
+        api.failRenewalWith(new IssuanceRejectedException(IssuanceRejectedException.Reason.REQUEST_REJECTED));
+        assertThatThrownBy(() -> service.newOffer(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
+                ProblemCode.ISSUANCE_REJECTED));
+        api.failRenewalWith(new IssuanceUnavailableException(IssuanceUnavailableException.Reason.NETWORK));
+        assertThatThrownBy(() -> service.newOffer(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
+                ProblemCode.ISSUANCE_UNAVAILABLE));
+        api.failRenewalWith(new SystemTokenUnavailableException(
+                SystemTokenUnavailableException.Reason.NO_MACHINE_CREDENTIAL));
+        assertThatThrownBy(() -> service.newOffer(CGCOM, holder, "r1")).satisfies(e -> assertProblem(e,
+                ProblemCode.ISSUANCE_UNAVAILABLE));
+
+        assertThat(trail.offerRenewals()).extracting(JourneyAuditTrail.OfferRenewalRequested::result)
+                .containsExactly(JourneyAuditTrail.RenewalOutcome.REJECTED,
+                        JourneyAuditTrail.RenewalOutcome.UNAVAILABLE, JourneyAuditTrail.RenewalOutcome.UNAVAILABLE);
+        assertThat(stored(holder).state()).isEqualTo(JourneyState.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("EC-12 — newOffer_usesTheVerifiedEmailOfTheJourneyForTheTicket")
+    void newOffer_usesTheVerifiedEmailOfTheJourneyForTheTicket() {
+        withOnboarding();
+        HolderRef holder = entitledJourney();
+        service.confirm(CGCOM, holder, "r1");
+        clock.advance(Duration.ofMinutes(10));
+
+        service.newOffer(CGCOM, holder, "r1");
+
+        assertThat(tickets.calls()).extracting(InMemoryOnboardingTickets.Call::email).containsOnly(EMAIL);
     }
 
     private Journey stored(HolderRef holder) {

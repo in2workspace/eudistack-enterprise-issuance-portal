@@ -142,7 +142,40 @@ public interface JourneyAuditTrail {
     record EmailCodeChecked(UUID eventId, UUID journeyId, EmailCodeCheck result, Instant occurredAt) {
     }
 
+    /** What came of asking the issuance API for a new offer of a request (design.md §3.4, §3.5). */
+    enum RenewalOutcome {
+
+        /** The Issuer gave a new offer. */
+        RENEWED("renewed"),
+        /** The Issuer said the process can no longer be renewed: the request is saved. */
+        REQUEST_SAVED("request_saved"),
+        /** The Issuer refused the request, or the tenant has no system token. */
+        REJECTED("rejected"),
+        /** The Issuer did not answer, also after the retries. */
+        UNAVAILABLE("unavailable");
+
+        private final String code;
+
+        RenewalOutcome(String code) {
+            this.code = code;
+        }
+
+        public String code() {
+            return code;
+        }
+    }
+
+    /**
+     * A request for a new offer (design.md §3.5): the request of the journey by its opaque id and the result. No
+     * email, offer, address or token.
+     */
+    record OfferRenewalRequested(UUID eventId, UUID journeyId, String requestId, RenewalOutcome result,
+                                 Instant occurredAt) {
+    }
+
     void append(TenantId tenant, Event event);
+
+    void append(TenantId tenant, OfferRenewalRequested event);
 
     void append(TenantId tenant, IssuanceRequested event);
 
