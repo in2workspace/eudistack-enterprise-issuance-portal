@@ -63,6 +63,9 @@ class SecurityConfiguration {
      * No session, CSRF, login pages or request cache. The response headers are the service's own
      * ({@code SecurityHeadersFilter}), which also cover the answers of filters that run before this chain.
      */
+    // java:S4502: CSRF protects cookie-based sessions. The service has none (design.md AD-9, ac.md AC-11): every call
+    // authenticates with the Access Token in the Authorization header, which a cross-site request cannot attach.
+    @SuppressWarnings("java:S4502")
     private static HttpSecurity statelessAndPlain(HttpSecurity http) throws Exception {
         return http
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

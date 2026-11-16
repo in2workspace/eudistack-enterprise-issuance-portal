@@ -20,9 +20,8 @@ import java.util.UUID;
  * {@code journey_session} in the tenant's schema. Every section is encrypted with the journey and the
  * section as context, so a value copied to another row or column cannot be decrypted.
  */
-// "UPDATE " is written in each statement (write, clear): extracting the keyword would rewrite write and
-// read, which carry the java:S2077 false-positive review, so the duplicate literal is accepted (as in
-// JdbcJourneyRepository).
+// "UPDATE " is written in each statement (write, clear), as in JdbcJourneyRepository: each statement carries
+// its own java:S2077 false-positive suppression, so the duplicate literal is accepted.
 @SuppressWarnings("java:S1192")
 @Component
 class JdbcJourneySessions implements JourneySessions {
@@ -36,6 +35,9 @@ class JdbcJourneySessions implements JourneySessions {
     }
 
     @Override
+    // java:S2077 false positive: the table comes from the validated TenantId schema and the column, if any, from the
+    // closed Section switch; every value is bound.
+    @SuppressWarnings("java:S2077")
     public void open(TenantId tenant, HolderRef holder, UUID journeyId) {
         try {
             jdbc.sql("INSERT INTO " + table(tenant) + " (journey_id, holder_ref) VALUES (:journey, :holder)")
@@ -48,6 +50,9 @@ class JdbcJourneySessions implements JourneySessions {
     }
 
     @Override
+    // java:S2077 false positive: the table comes from the validated TenantId schema and the column, if any, from the
+    // closed Section switch; every value is bound.
+    @SuppressWarnings("java:S2077")
     public Optional<UUID> journeyOf(TenantId tenant, HolderRef holder) {
         return jdbc.sql("SELECT journey_id FROM " + table(tenant) + " WHERE holder_ref = :holder")
                 .param("holder", holder.value())
@@ -56,6 +61,9 @@ class JdbcJourneySessions implements JourneySessions {
     }
 
     @Override
+    // java:S2077 false positive: the table comes from the validated TenantId schema and the column, if any, from the
+    // closed Section switch; every value is bound.
+    @SuppressWarnings("java:S2077")
     public Optional<String> read(TenantId tenant, UUID journeyId, Section section) {
         return jdbc.sql("SELECT " + column(section) + " FROM " + table(tenant) + " WHERE journey_id = :journey")
                 .param("journey", journeyId)
@@ -66,6 +74,9 @@ class JdbcJourneySessions implements JourneySessions {
     }
 
     @Override
+    // java:S2077 false positive: the table comes from the validated TenantId schema and the column, if any, from the
+    // closed Section switch; every value is bound.
+    @SuppressWarnings("java:S2077")
     public void write(TenantId tenant, UUID journeyId, Section section, String content) {
         byte[] sealed = cipher.encrypt(content.getBytes(StandardCharsets.UTF_8), context(journeyId, section));
         int updated = jdbc.sql("UPDATE " + table(tenant) + " SET " + column(section) + " = :value WHERE journey_id = :journey")
