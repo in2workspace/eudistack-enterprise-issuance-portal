@@ -17,12 +17,14 @@ record PortalConfigResponse(
         @JsonProperty("legal_links") LegalLinksResponse legalLinks,
         SupportResponse support,
         @JsonProperty("wallet_url") String walletUrl,
-        @JsonProperty("assurance_level") String assuranceLevel) {
+        @JsonProperty("assurance_level") String assuranceLevel,
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        @JsonProperty("login_attestation_scope") String loginAttestationScope) {
 
     static PortalConfigResponse of(PortalConfig config) {
         return new PortalConfigResponse(config.texts(), LegalLinksResponse.of(config.legalLinks()),
                 SupportResponse.of(config.support()), config.walletUrl(),
-                config.assuranceLevel().value());
+                config.assuranceLevel().value(), config.loginAttestationScope());
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)

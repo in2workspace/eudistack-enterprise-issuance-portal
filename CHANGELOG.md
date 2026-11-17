@@ -27,6 +27,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `POST /journey` devuelve el recorrido activo del titular (200) sin reescribir la identidad, o abre uno nuevo (201) con la identidad del token. Sin nombre, apellidos o identificador personal en el token, 401. `identification_method` guarda `certificate` o `attestation`.
   - `GET /config`, `POST /incidents`, `/health` y las métricas siguen sin token.
   - Nivel de garantía por tenant: `assurance_level` en `portal_config`, `high` (por defecto) o `substantial`. Con `substantial` se aceptan tokens de nivel sustancial o alto. `GET /config` lo sirve siempre resuelto. Un valor desconocido hace la configuración no válida (`config_unavailable`).
+  - Scope de la atestación de login por tenant: `login_attestation_scope` en `portal_config`, opcional (un único scope OAuth, por ejemplo `doctorid`). `GET /config` lo sirve si existe, para que la interfaz lo pida al Verifier y este ofrezca la cartera. Un valor con espacios o caracteres no válidos hace la configuración no válida (`config_unavailable`).
 
 - **EUD-358 — verificación del correo del titular con un código**:
   - `POST /journey/email-verification` envía al correo un código de 6 dígitos (10 minutos de validez y 5 intentos). Un código nuevo anula el anterior y deja de dar por verificado el correo anterior.
