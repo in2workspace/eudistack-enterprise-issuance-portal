@@ -19,6 +19,7 @@ record PortalConfigDocument(
         SupportDocument support,
         @JsonProperty("wallet_url") String walletUrl,
         @JsonProperty("assurance_level") String assuranceLevel,
+        @JsonProperty("login_attestation_scope") String loginAttestationScope,
         @JsonProperty("attestation_type") String attestationType,
         @JsonProperty("data_placement") Map<String, String> dataPlacement,
         OnboardingDocument onboarding,
@@ -33,6 +34,7 @@ record PortalConfigDocument(
                 support == null ? null : support.toDomain(),
                 walletUrl,
                 AssuranceLevel.ofConfig(assuranceLevel),
+                loginAttestationScope,
                 new ServiceSettings(attestationType, dataPlacement,
                         onboarding == null ? null : onboarding.toDomain(), portalClientId, identifierTypes));
     }
