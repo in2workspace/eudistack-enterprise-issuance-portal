@@ -8,6 +8,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **EUD-314 — el recorrido con el Access Token del Verifier**:
+  - Servidor de recursos OAuth 2.0: cada llamada del recorrido exige un Access Token del Verifier del tenant, validado con su JWKS (leído por la red interna, en caché 10 minutos y recargado ante un `kid` desconocido; solo ES256). Comprueba `iss`, `aud` con `portal_client_id`, `exp` e `iat` (obligatorias) y `nbf` con 30 s de margen, `tenant` y `acr` del nivel del tenant o superior, y que sea un Access Token y no un ID Token (exige `jti`; rechaza `nonce` y `auth_time`).
+  - Un token que no vale responde 401 `unauthenticated` con `WWW-Authenticate: Bearer`; un `kid` desconocido dentro de la ventana de recarga del JWKS, 401; sin JWKS ni nada en caché, 503 `service_unavailable`; un token válido en un tenant sin `portal_client_id`, 503 `config_unavailable` (el token se valida antes de leer la configuración). El `jwks_uri` del descubrimiento solo aporta su camino, que debe empezar por `/`; el host es siempre el interno.
+  - Tipo de identificador según el método de login: certificado (`amr` `hwk` o `swk`) da `personal_id`; una atestación, el que asigna `identifier_types` de `portal_config`.
+  - El recorrido se liga al titular por `holder_ref`, un HMAC-SHA256 de `iss` y `sub` con la clave `PORTAL_HOLDER_REF_KEY` (obligatoria). La migración V5 lo añade a `journey_session` y la busca por `journey_id`.
+  - `POST /journey` devuelve el recorrido activo del titular (200) sin reescribir la identidad, o abre uno nuevo (201) con la identidad del token. Sin nombre, apellidos o identificador personal en el token, 401. `identification_method` guarda `certificate` o `attestation`.
+  - `GET /config`, `POST /incidents`, `/health` y las métricas siguen sin token.
+  - Nivel de garantía por tenant: `assurance_level` en `portal_config`, `high` (por defecto) o `substantial`. Con `substantial` se aceptan tokens de nivel sustancial o alto. `GET /config` lo sirve siempre resuelto. Un valor desconocido hace la configuración no válida (`config_unavailable`).
+
 - **EUD-358 — verificación del correo del titular con un código**:
   - `POST /journey/email-verification` envía al correo un código de 6 dígitos (10 minutos de validez y 5 intentos). Un código nuevo anula el anterior y deja de dar por verificado el correo anterior.
   - Límites: 3 envíos por recorrido, 180 s entre envíos (429 `resend_too_soon` con `Retry-After`) y 10 por IP y hora (429 `too_many_requests`). Con 3 envíos, 429 `too_many_codes`.
@@ -39,6 +48,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **EUD-314**: el tipo de identificador `dni` pasa a `personal_id` (DNI, NIE o pasaporte), también en `identifier_types` de `authentic_source` y en los registros del adaptador simulado.
+- **EUD-314**: sin recorrido activo del titular, todas las llamadas del recorrido responden 410 `journey_closed`; `POST /entitlement` respondía 409 `step_not_allowed`.
+
 - **EUD-358**: `POST /journey/confirmation` ya no lee el cuerpo. Usa el correo verificado del recorrido y, sin él, responde 409 `step_not_allowed`. La emisión y el ticket de alta llevan siempre ese correo, y desaparecen `email_required` y `email_invalid` de la confirmación.
 - **EUD-358**: el límite por IP de las incidencias (5 por hora) es ahora una instancia configurable, separada de la del límite de los códigos del correo (10 por hora): cada una tiene su propio presupuesto.
 - **EUD-358**: la confirmación exige la sección `email_verification` verificada y con el mismo correo que la sección `email`; una sección `email` sola, sin verificar o con otro correo da 409 `step_not_allowed` y no emite. La migración V4 vacía los correos que había en `journey_session.email`, porque ninguno estaba verificado.
@@ -46,6 +58,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **EUD-358**: el correo (el código de verificación y las incidencias) se envía por el SMTP de SES con `spring.mail`, con las mismas variables `SMTP_*` que el wallet (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM`, `SMTP_AUTH`, `SMTP_STARTTLS`, `SMTP_SSL_ENABLE` y los tiempos `SMTP_*_TIMEOUT_MS`, 5 s por defecto). `PORTAL_MAIL_PROVIDER` pasa a valer `smtp` o `local` (sigue siendo obligatoria). Desaparecen el adaptador de la API de SES, la dependencia `sesv2` y `PORTAL_MAIL_FROM`: el remitente es `SMTP_FROM`. `SMTP_FROM` es obligatoria con `smtp` (sin ella el servicio no arranca). El portal exige STARTTLS (`starttls.required`) y valida el certificado del servidor con el truststore del JDK (`ssl.checkserveridentity`): sin TLS no se envían ni las credenciales ni el correo, y `SMTP_SSL_TRUST` no se usa. La comprobación de salud del correo de Spring Boot queda desactivada. Al arrancar con `smtp` se comprueba la sesión de correo efectiva (venga de donde venga): STARTTLS (o TLS implícito) obligatorio, `checkserveridentity` activo, sin `ssl.trust` ni fábricas de sockets propias y protocolo `smtp`; si falla, el servicio no arranca. El fichero de `EMAIL_BRANDING_PATH` ya no se importa como configuración de Spring: se lee aparte y solo se enlaza `email-branding.tenants`, así que no puede fijar ninguna otra propiedad (`spring.mail`, `management`...); un fichero ilegible hace fallar el arranque. `EMAIL_ASSETS_BASE_URL` debe ser una URL `https` absoluta con host. Se excluye la autoconfiguración de Thymeleaf (sin `ThymeleafViewResolver`), las plantillas pasan a `mail-templates/` y el log de `org.thymeleaf.TemplateEngine` queda apagado.
 
 - Health y métricas en la raíz del servicio, como en el resto de servicios de la plataforma (`management.endpoints.web.base-path: /`): `/issuance-portal/health`, `/issuance-portal/health/liveness`, `/issuance-portal/health/readiness` y `/issuance-portal/prometheus`, en lugar de `/issuance-portal/actuator/...`. Los filtros de la cabecera `X-Requested-With` y del tenant dejan pasar solo esas rutas.
+
+### Removed
+
+- **EUD-314**: la cookie `journey_session`, el filtro de `X-Requested-With` con su 403 `request_not_allowed` y `SessionId`. Los recorridos abiertos con la cookie quedan sin titular y caducan solos.
 
 ### Fixed
 

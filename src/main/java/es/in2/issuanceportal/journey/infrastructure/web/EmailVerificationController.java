@@ -6,15 +6,15 @@ import es.in2.issuanceportal.journey.application.EmailVerificationService;
 import es.in2.issuanceportal.journey.application.JourneyViewService;
 import es.in2.issuanceportal.journey.domain.EmailLanguage;
 import es.in2.issuanceportal.journey.domain.EmailVerification;
-import es.in2.issuanceportal.session.api.SessionId;
-import es.in2.issuanceportal.shared.error.ProblemCode;
-import es.in2.issuanceportal.shared.error.ProblemException;
+import es.in2.issuanceportal.session.api.HolderRef;
+import es.in2.issuanceportal.shared.security.HolderPrincipal;
+import es.in2.issuanceportal.shared.security.HolderRefs;
 import es.in2.issuanceportal.shared.tenant.CurrentTenant;
 import es.in2.issuanceportal.shared.tenant.TenantId;
-import es.in2.issuanceportal.shared.web.SessionCookie;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -33,10 +33,12 @@ class EmailVerificationController {
 
     private final EmailVerificationService service;
     private final JourneyViewService views;
+    private final HolderRefs holders;
 
-    EmailVerificationController(EmailVerificationService service, JourneyViewService views) {
+    EmailVerificationController(EmailVerificationService service, JourneyViewService views, HolderRefs holders) {
         this.service = service;
         this.views = views;
+        this.holders = holders;
     }
 
     /** The code as sent: only text can be one (the contract says a string of 6 digits), a number is not. */
@@ -62,10 +64,10 @@ class EmailVerificationController {
 
     @PostMapping
     @ResponseStatus(HttpStatus.ACCEPTED)
-    EmailVerificationResponse send(HttpServletRequest request,
+    EmailVerificationResponse send(HttpServletRequest request, @AuthenticationPrincipal HolderPrincipal principal,
                                    @RequestHeader(value = HttpHeaders.ACCEPT_LANGUAGE, required = false) String acceptLanguage,
                                    @RequestBody(required = false) SendRequest body) {
-        EmailVerification sent = service.send(CurrentTenant.of(request), session(request),
+        EmailVerification sent = service.send(CurrentTenant.of(request), holders.of(principal),
                 body == null ? null : body.emailText(), EmailLanguage.fromAcceptLanguage(acceptLanguage),
                 request.getRemoteAddr());
         return EmailVerificationResponse.of(sent);
@@ -73,15 +75,11 @@ class EmailVerificationController {
 
     /** The journey as {@code GET /journey} gives it, so the interface sees at once that the email is verified. */
     @PostMapping("/code")
-    JourneyResponse check(HttpServletRequest request, @RequestBody(required = false) CheckRequest body) {
+    JourneyResponse check(HttpServletRequest request, @AuthenticationPrincipal HolderPrincipal principal,
+                          @RequestBody(required = false) CheckRequest body) {
         TenantId tenant = CurrentTenant.of(request);
-        SessionId session = session(request);
-        service.check(tenant, session, body == null ? null : body.codeText());
-        return JourneyResponse.of(views.current(tenant, session));
-    }
-
-    /** No cookie, or one this service never issued, is a journey that no longer exists. */
-    private static SessionId session(HttpServletRequest request) {
-        return SessionCookie.read(request).orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
+        HolderRef holder = holders.of(principal);
+        service.check(tenant, holder, body == null ? null : body.codeText());
+        return JourneyResponse.of(views.current(tenant, holder));
     }
 }

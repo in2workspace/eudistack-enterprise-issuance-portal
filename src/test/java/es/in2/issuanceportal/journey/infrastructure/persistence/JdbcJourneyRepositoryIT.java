@@ -6,7 +6,7 @@ import es.in2.issuanceportal.journey.domain.Journey;
 import es.in2.issuanceportal.journey.domain.JourneyState;
 import es.in2.issuanceportal.journey.domain.JourneyStep;
 import es.in2.issuanceportal.journey.domain.WithdrawalReason;
-import es.in2.issuanceportal.session.api.SessionId;
+import es.in2.issuanceportal.session.Holders;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -48,20 +48,20 @@ class JdbcJourneyRepositoryIT {
 
     @Test
     void findById_insertedJourney_returnsIt() {
-        Journey journey = Journey.start(UUID.randomUUID(), now());
+        Journey journey = Journey.start(UUID.randomUUID(), now(), null);
 
         repository.insert(SANDBOX, journey);
 
         Journey read = repository.findById(SANDBOX, journey.id()).orElseThrow();
         assertThat(read.state()).isEqualTo(JourneyState.IN_PROGRESS);
-        assertThat(read.step()).isEqualTo(JourneyStep.STARTED);
+        assertThat(read.step()).isEqualTo(JourneyStep.IDENTIFIED);
         assertThat(read.createdAt()).isEqualTo(journey.createdAt());
         assertThat(read.issuanceProcessId()).isEmpty();
     }
 
     @Test
     void recordIssuanceProcess_journeyWithoutProcess_isReadBack() {
-        Journey journey = Journey.start(UUID.randomUUID(), now());
+        Journey journey = Journey.start(UUID.randomUUID(), now(), null);
         repository.insert(SANDBOX, journey);
         UUID process = UUID.randomUUID();
 
@@ -72,7 +72,7 @@ class JdbcJourneyRepositoryIT {
 
     @Test
     void recordIssuanceProcess_sameProcessAgain_isRecordedAndADifferentOneIsNot() {
-        Journey journey = Journey.start(UUID.randomUUID(), now());
+        Journey journey = Journey.start(UUID.randomUUID(), now(), null);
         repository.insert(SANDBOX, journey);
         UUID process = UUID.randomUUID();
         repository.recordIssuanceProcess(SANDBOX, journey.id(), process);
@@ -85,7 +85,7 @@ class JdbcJourneyRepositoryIT {
 
     @Test
     void update_journeyReadBeforeTheProcessWasRecorded_keepsTheProcess() {
-        Journey journey = Journey.start(UUID.randomUUID(), now());
+        Journey journey = Journey.start(UUID.randomUUID(), now(), null);
         repository.insert(SANDBOX, journey);
         Journey readWithoutProcess = repository.findById(SANDBOX, journey.id()).orElseThrow();
         UUID process = UUID.randomUUID();
@@ -101,7 +101,7 @@ class JdbcJourneyRepositoryIT {
 
     @Test
     void findByIdForUpdate_lockedByAnotherTransaction_waitsUntilItCommits() throws Exception {
-        Journey journey = Journey.start(UUID.randomUUID(), now());
+        Journey journey = Journey.start(UUID.randomUUID(), now(), null);
         repository.insert(SANDBOX, journey);
         TransactionTemplate transaction = new TransactionTemplate(transactionManager);
         CountDownLatch firstHoldsLock = new CountDownLatch(1);
@@ -141,7 +141,7 @@ class JdbcJourneyRepositoryIT {
 
     @Test
     void update_withdrawnJourney_savesStateStepReasonAndEnd() {
-        Journey journey = Journey.start(UUID.randomUUID(), now());
+        Journey journey = Journey.start(UUID.randomUUID(), now(), null);
         repository.insert(SANDBOX, journey);
         journey.reach(JourneyStep.ENTITLEMENT_CONFIRMED, now());
         journey.withdraw(WithdrawalReason.CANCELLED, now());
@@ -157,7 +157,7 @@ class JdbcJourneyRepositoryIT {
 
     @Test
     void update_journeyChangedSinceRead_returnsFalseAndKeepsFirstChange() {
-        Journey journey = Journey.start(UUID.randomUUID(), now());
+        Journey journey = Journey.start(UUID.randomUUID(), now(), null);
         repository.insert(SANDBOX, journey);
         Journey parallelCopy = repository.findById(SANDBOX, journey.id()).orElseThrow();
         journey.withdraw(WithdrawalReason.EXPIRED, now());
@@ -172,7 +172,7 @@ class JdbcJourneyRepositoryIT {
 
     @Test
     void findById_journeyOfAnotherTenant_returnsEmpty() {
-        Journey journey = Journey.start(UUID.randomUUID(), now());
+        Journey journey = Journey.start(UUID.randomUUID(), now(), null);
         repository.insert(KPMG, journey);
 
         assertThat(repository.findById(SANDBOX, journey.id())).isEmpty();
@@ -235,16 +235,16 @@ class JdbcJourneyRepositoryIT {
 
     /** A journey with its session, with the given last activity, optionally already withdrawn. */
     private UUID journeyWithSession(Instant lastActivity, boolean withdrawn) {
-        Journey journey = Journey.start(UUID.randomUUID(), lastActivity);
+        Journey journey = Journey.start(UUID.randomUUID(), lastActivity, null);
         repository.insert(SANDBOX, journey);
         if (withdrawn) {
             journey.withdraw(WithdrawalReason.CANCELLED, now());
             repository.update(SANDBOX, journey, JourneyState.IN_PROGRESS);
         }
-        jdbc.sql("INSERT INTO \"sandbox_issuance_portal\".journey_session (session_id_hash, journey_id) "
-                        + "VALUES (:hash, :id)")
-                .param("hash", SessionId.generate().hash())
+        jdbc.sql("INSERT INTO \"sandbox_issuance_portal\".journey_session (journey_id, holder_ref) "
+                        + "VALUES (:id, :holder)")
                 .param("id", journey.id())
+                .param("holder", Holders.next().value())
                 .update();
         return journey.id();
     }

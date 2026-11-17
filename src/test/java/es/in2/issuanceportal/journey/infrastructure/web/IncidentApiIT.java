@@ -207,17 +207,6 @@ class IncidentApiIT {
     }
 
     @Test
-    @DisplayName("ES-06 — postIncident_withoutRequestedWithHeader_isNotAllowed")
-    void postIncident_withoutRequestedWithHeader_isNotAllowed() throws Exception {
-        configure("sandbox", "soporte@sandbox.example.org", "48 horas");
-
-        mvc.perform(postWithoutRequestedWith(VALID, SANDBOX_HOST))
-                .andExpect(status().isForbidden())
-                .andExpect(jsonPath("$.type").value("request_not_allowed"));
-        verify(mailer, never()).send(any());
-    }
-
-    @Test
     @DisplayName("AC-06, EC-04 — postIncident_sixthWithinAnHourFromSameAddress_isTooManyRequests")
     void postIncident_sixthWithinAnHourFromSameAddress_isTooManyRequests(CapturedOutput output) throws Exception {
         configure("sandbox", "soporte@sandbox.example.org", "48 horas");
@@ -261,20 +250,15 @@ class IncidentApiIT {
                 .update();
     }
 
-    /** As the interface sends it, with the state-changing header. */
     private static MockHttpServletRequestBuilder post(String body) {
         return post(body, SANDBOX_HOST);
-    }
-
-    private static MockHttpServletRequestBuilder post(String body, String host) {
-        return postWithoutRequestedWith(body, host).header("X-Requested-With", "issuance-portal");
     }
 
     /**
      * Each request comes from its own address unless a test sets one: the rate limiter is shared by every
      * test in the context.
      */
-    private static MockHttpServletRequestBuilder postWithoutRequestedWith(String body, String host) {
+    private static MockHttpServletRequestBuilder post(String body, String host) {
         String address = "10.0.0." + NEXT_ADDRESS.incrementAndGet() % 250;
         return MockMvcRequestBuilders.post(INCIDENTS)
                 .contextPath(CONTEXT)

@@ -86,7 +86,6 @@ class ClientAddressIT {
 
     private static MockHttpServletRequestBuilder incident(String forwardedFor) {
         return MockMvcRequestBuilders.post(CONTEXT + "/api/v1/incidents").contextPath(CONTEXT)
-                .header("X-Requested-With", "issuance-portal")
                 .header("X-Forwarded-For", forwardedFor)
                 .header("X-Forwarded-Host", SANDBOX_HOST)
                 .contentType(MediaType.APPLICATION_JSON)

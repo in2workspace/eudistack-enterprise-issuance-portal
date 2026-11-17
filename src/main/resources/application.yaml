@@ -63,6 +63,10 @@ issuance-portal:
     provider: ${PORTAL_CRYPTO_PROVIDER:}
     kms-key-id: ${PORTAL_KMS_KEY_ID:}
     local-key: ${PORTAL_LOCAL_DATA_KEY:}
+  holder-ref:
+    # Base64 key, at least 32 bytes, of the HMAC that gives each holder their reference (design.md section 3.2): one
+    # per environment, never in git. Empty: the service does not start.
+    key: ${PORTAL_HOLDER_REF_KEY:}
   client-address:
     # Proxies of the platform in front of the service, each appending to X-Forwarded-For: 1 in Docker
     # Compose (nginx), 2 in AWS (CloudFront and the ALB). Empty: the service does not start.
@@ -93,6 +97,15 @@ issuance-portal:
     # The Verifier on the internal network, with its context path, e.g. http://verifier:8082/verifier.
     verifier-internal-url: ${PORTAL_VERIFIER_INTERNAL_URL:}
     # How long the Verifier gets to answer.
+    request-timeout: 5s
+  token-validation:
+    # How the Access Token of each call is validated (design.md AD-9). The tenant's Verifier on the internal network,
+    # with its context path: the same one as system-token, so the same variable.
+    verifier-internal-url: ${PORTAL_VERIFIER_INTERNAL_URL:}
+    # A tenant's JWKS is kept this long, and reloaded when a token names a kid it does not have, at most once per
+    # reload interval (so forged tokens cannot flood the Verifier). How long the Verifier gets to answer.
+    jwks-cache-ttl: 10m
+    jwks-min-reload-interval: 5s
     request-timeout: 5s
   issuance-api:
     # The Issuer on the internal network, with its context path, e.g. http://issuer-service:8080/issuer.

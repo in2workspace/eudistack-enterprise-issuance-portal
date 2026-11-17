@@ -15,9 +15,9 @@ import java.util.Map;
 /**
  * The response headers every response must carry (conv-quality-security-gates §8.1), with the API
  * Content-Security-Policy. {@code Cache-Control: no-store} also keeps the edge from caching a journey,
- * which depends on the session cookie (conv-edge-caching, rule 5).
+ * which belongs to its holder and depends on their token (conv-edge-caching, rule 5).
  *
- * <p>Runs first: the other filters answer some requests themselves (403, 404, 503), and those
+ * <p>Runs first: the other filters answer some requests themselves (404, 503), and those
  * responses need the headers too.
  */
 @Component

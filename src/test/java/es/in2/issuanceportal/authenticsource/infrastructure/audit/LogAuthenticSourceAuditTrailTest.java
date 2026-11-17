@@ -58,7 +58,7 @@ class LogAuthenticSourceAuditTrailTest {
         doThrow(new IllegalStateException("log sink down")).when(audit).info(anyString(), any(Object[].class));
 
         assertThatNoException().isThrownBy(() -> trail.append(CGCOM, new AuthenticSourceAuditTrail.Event(
-                UUID.randomUUID(), UUID.randomUUID(), "doctorid.sd.1", "none", IdentifierType.DNI,
+                UUID.randomUUID(), UUID.randomUUID(), "doctorid.sd.1", "none", IdentifierType.PERSONAL_ID,
                 AuthenticSourceAuditTrail.Result.CONFIRMED, Optional.empty(), Duration.ZERO, Instant.now())));
     }
 }

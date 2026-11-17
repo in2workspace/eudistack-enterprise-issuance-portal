@@ -1,11 +1,15 @@
 package es.in2.issuanceportal.shared;
 
-import jakarta.servlet.http.Cookie;
+import es.in2.issuanceportal.shared.security.HolderRefs;
+import es.in2.issuanceportal.shared.security.TestHolder;
+import es.in2.issuanceportal.shared.security.VerifierTokensConfiguration;
+import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpHeaders;
 import org.springframework.test.annotation.DirtiesContext;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -27,6 +31,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest
 @AutoConfigureMockMvc
+@Import(VerifierTokensConfiguration.class)
 @DirtiesContext
 class DatabaseDownIT {
 
@@ -52,19 +57,21 @@ class DatabaseDownIT {
 
     @Autowired
     private MockMvc mvc;
+    @Autowired
+    private HolderRefs holderRefs;
 
     @Test
     @DisplayName("EUD-275 ES-04, EUD-276 ES-05 — api_databaseDown_returns503ServiceUnavailable")
     void api_databaseDown_returns503ServiceUnavailable() throws Exception {
         // sandbox is now in the tenant cache, kpmg is not.
-        MvcResult started = mvc.perform(post("sandbox")).andExpect(status().isCreated()).andReturn();
-        Cookie session = started.getResponse().getCookie("journey_session");
+        TestHolder holder = TestHolder.of(new TenantId("sandbox"), holderRefs);
+        mvc.perform(post("sandbox").with(holder.token())).andExpect(status().isCreated());
 
         POSTGRES.stop();
 
         // Transaction path: the tenant is cached, the service's transaction cannot open.
-        assertServiceUnavailable(mvc.perform(get("sandbox").cookie(session)).andReturn());
-        MvcResult start = mvc.perform(post("sandbox")).andReturn();
+        assertServiceUnavailable(mvc.perform(get("sandbox").with(holder.token())).andReturn());
+        MvcResult start = mvc.perform(post("sandbox").with(holder.token())).andReturn();
         assertServiceUnavailable(start);
         assertThat(start.getResponse().getHeader(HttpHeaders.SET_COOKIE)).isNull();
         // Filter path: the tenant registry itself cannot be read.
@@ -76,7 +83,6 @@ class DatabaseDownIT {
                     return request;
                 })).andReturn());
         assertServiceUnavailable(mvc.perform(MockMvcRequestBuilders.post(INCIDENTS).contextPath(CONTEXT)
-                .header("X-Requested-With", "issuance-portal")
                 .contentType("application/json")
                 .content("{\"name\": \"Ana\", \"email\": \"ana@example.org\", \"type\": \"other\", "
                         + "\"subject\": \"S\", \"description\": \"D\"}")
@@ -95,7 +101,6 @@ class DatabaseDownIT {
 
     private static MockHttpServletRequestBuilder post(String tenant) {
         return MockMvcRequestBuilders.post(JOURNEY).contextPath(CONTEXT)
-                .header("X-Requested-With", "issuance-portal")
                 .with(request -> {
                     request.setServerName(tenant + ".127.0.0.1.nip.io");
                     return request;

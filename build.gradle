@@ -42,6 +42,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-validation'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
 
+    // Access Token validation per tenant: Spring Security as an OAuth 2.0 resource server, stateless (design.md AD-9).
+    implementation 'org.springframework.boot:spring-boot-starter-oauth2-resource-server'
+
     // --- Persistence ---
     // Journey, session and configuration live in the tenant's schema (design.md AD-2).
     implementation 'org.springframework.boot:spring-boot-starter-jdbc'

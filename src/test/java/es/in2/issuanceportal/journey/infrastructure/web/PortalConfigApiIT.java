@@ -67,7 +67,7 @@ class PortalConfigApiIT {
                 .andExpect(status().isOk())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
                 .andExpect(header().doesNotExist(HttpHeaders.SET_COOKIE))
-                .andExpect(jsonPath("$", aMapWithSize(4)))
+                .andExpect(jsonPath("$", aMapWithSize(5)))
                 .andExpect(jsonPath("$.texts.es['portal.app_name']").value("Portal de emisión"))
                 .andExpect(jsonPath("$.legal_links.legal_notice").value("https://example.org/aviso-legal"))
                 .andExpect(jsonPath("$.legal_links.privacy").value("https://example.org/privacidad"))
@@ -76,7 +76,30 @@ class PortalConfigApiIT {
                 .andExpect(jsonPath("$.support.phone").value("900 000 000"))
                 .andExpect(jsonPath("$.support.schedule").value("L-V 9:00-18:00"))
                 .andExpect(jsonPath("$.support.response_time").value("48 horas"))
-                .andExpect(jsonPath("$.wallet_url").value("https://sandbox.stg.eudistack.net/wallet"));
+                .andExpect(jsonPath("$.wallet_url").value("https://sandbox.stg.eudistack.net/wallet"))
+                .andExpect(jsonPath("$.assurance_level").value("high"));
+    }
+
+    @Test
+    @DisplayName("AC-28 — getConfig_tenantWithSubstantialLevel_servesIt")
+    void getConfig_tenantWithSubstantialLevel_servesIt() throws Exception {
+        save(KPMG, CONFIG_JSON.formatted("kpmg", "kpmg")
+                .replace("\"portal_client_id\"", "\"assurance_level\": \"substantial\", \"portal_client_id\""));
+
+        mvc.perform(get("kpmg.127.0.0.1.nip.io"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.assurance_level").value("substantial"));
+    }
+
+    @Test
+    @DisplayName("AC-28 — getConfig_unknownLevel_isConfigUnavailable")
+    void getConfig_unknownLevel_isConfigUnavailable() throws Exception {
+        save(KPMG, CONFIG_JSON.formatted("kpmg", "kpmg")
+                .replace("\"portal_client_id\"", "\"assurance_level\": \"low\", \"portal_client_id\""));
+
+        mvc.perform(get("kpmg.127.0.0.1.nip.io"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.type").value("config_unavailable"));
     }
 
     @Test

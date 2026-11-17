@@ -12,7 +12,7 @@ class PersonalIdentifierTest {
 
     @Test
     void sameAs_otherType_isFalse() {
-        PersonalIdentifier dni = new PersonalIdentifier(IdentifierType.DNI, "280000001");
+        PersonalIdentifier dni = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "280000001");
 
         assertThat(dni.sameAs(new PersonalIdentifier(IdentifierType.COLEGIADO, "280000001"))).isFalse();
         assertThat(dni.sameAs(null)).isFalse();
@@ -20,16 +20,16 @@ class PersonalIdentifierTest {
 
     @Test
     void constructor_blankValue_isRejected() {
-        assertThatThrownBy(() -> new PersonalIdentifier(IdentifierType.DNI, " "))
+        assertThatThrownBy(() -> new PersonalIdentifier(IdentifierType.PERSONAL_ID, " "))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void toString_identifierAndRecord_hidePersonalData() {
-        PersonalIdentifier dni = new PersonalIdentifier(IdentifierType.DNI, "00000001R");
+        PersonalIdentifier dni = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R");
         SourceRecord found = new SourceRecord(List.of(dni), true, Map.of("given_name", "Lucía"));
 
-        assertThat(dni.toString()).contains("dni").doesNotContain("00000001R");
+        assertThat(dni.toString()).contains("personal_id").doesNotContain("00000001R");
         assertThat(found.toString()).contains("given_name").doesNotContain("00000001R", "Lucía");
     }
 }

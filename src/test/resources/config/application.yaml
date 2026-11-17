@@ -5,6 +5,9 @@ issuance-portal:
     provider: local
     # Test-only key, never used outside the test suite.
     local-key: VV4OSyWM8BydULUYWMb92hUKKZZWmlYXo3TTa/7BDhI=
+  # Test-only key of the holder reference, never used outside the test suite.
+  holder-ref:
+    key: VGhpcyBpcyBhIHRlc3Qtb25seSBob2xkZXIgcmVmIGtleSE=
   # Tests run the expiry sweep explicitly, never on the minute.
   expiry:
     enabled: false
@@ -22,6 +25,11 @@ issuance-portal:
     provider: file
     directory: build/tmp/system-token-test
     verifier-internal-url: http://localhost:9/verifier
+  # Token validation reads the JWKS of a simulated Verifier (VerifierFixture), on the port the test context gets.
+  # The reload limit is off: tests rotate the key and expect one reload at once.
+  token-validation:
+    verifier-internal-url: http://localhost:9/verifier
+    jwks-min-reload-interval: 0s
   # No Issuer listens: the issuance API client has its own tests.
   issuance-api:
     issuer-internal-url: http://localhost:9/issuer

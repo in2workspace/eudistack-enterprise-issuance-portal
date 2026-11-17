@@ -11,9 +11,14 @@ import es.in2.issuanceportal.journey.domain.JourneyClosedException;
 import es.in2.issuanceportal.journey.domain.JourneyState;
 import es.in2.issuanceportal.journey.domain.JourneyStep;
 import es.in2.issuanceportal.journey.domain.WithdrawalReason;
+import es.in2.issuanceportal.session.Holders;
 import es.in2.issuanceportal.session.InMemoryJourneySessions;
+import es.in2.issuanceportal.session.api.HolderAlreadyHasJourneyException;
+import es.in2.issuanceportal.session.api.HolderIdentity;
+import es.in2.issuanceportal.session.api.HolderRef;
+import es.in2.issuanceportal.session.api.IdentifierType;
+import es.in2.issuanceportal.session.api.PersonalIdentifier;
 import es.in2.issuanceportal.session.api.Section;
-import es.in2.issuanceportal.session.api.SessionId;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.Test;
@@ -23,6 +28,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -31,6 +37,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class JourneyServiceTest {
 
     private static final TenantId SANDBOX = new TenantId("sandbox");
+    private static final HolderIdentity IDENTITY =
+            new HolderIdentity("Lucia", "Prueba Sintetica", new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R"), null);
 
     private final InMemoryJourneySessions sessions = new InMemoryJourneySessions();
     private final InMemoryJourneyRepository journeys = new InMemoryJourneyRepository(sessions);
@@ -41,82 +49,69 @@ class JourneyServiceTest {
                 TransactionOperations.withoutTransaction(), clock);
 
     @Test
-    void start_noPreviousSession_createsJourneyInProgressWithSession() {
-        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
+    void open_holderWithoutJourney_createsJourneyInProgressBoundToHolderWithItsIdentity() {
+        HolderRef holder = Holders.next();
 
-        assertThat(started.journey().state()).isEqualTo(JourneyState.IN_PROGRESS);
-        assertThat(started.journey().step()).isEqualTo(JourneyStep.STARTED);
-        assertThat(sessions.journeyOf(SANDBOX, started.session())).contains(started.journey().id());
+        JourneyService.Opened opened = service.open(SANDBOX, holder, IDENTITY, "certificate");
+
+        assertThat(opened.created()).isTrue();
+        assertThat(opened.journey().state()).isEqualTo(JourneyState.IN_PROGRESS);
+        assertThat(opened.journey().step()).isEqualTo(JourneyStep.IDENTIFIED);
+        assertThat(opened.journey().identificationMethod()).contains("certificate");
+        assertThat(sessions.journeyOf(SANDBOX, holder)).contains(opened.journey().id());
+        assertThat(sessions.read(SANDBOX, opened.journey().id(), Section.IDENTITY)).contains(IDENTITY.toJson());
+        assertThat(trail.events()).extracting(JourneyAuditTrail.Event::kind).containsExactly(JourneyAuditTrail.Kind.STARTED);
     }
 
     @Test
-    void start_previousJourneyInProgress_withdrawsItAsCancelled() {
-        JourneyService.Started previous = service.start(SANDBOX, Optional.empty());
+    void open_holderWithActiveJourney_returnsItWithoutRewritingItsIdentity() {
+        HolderRef holder = Holders.next();
+        JourneyService.Opened first = service.open(SANDBOX, holder, IDENTITY, "certificate");
+        service.reach(SANDBOX, holder, JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
+        HolderIdentity other = new HolderIdentity("Otra", "Persona", new PersonalIdentifier(IdentifierType.PERSONAL_ID, "99999999R"), null);
 
-        JourneyService.Started next = service.start(SANDBOX, Optional.of(previous.session()));
+        JourneyService.Opened second = service.open(SANDBOX, holder, other, "certificate");
 
-        Journey withdrawn = stored(previous);
-        assertThat(withdrawn.state()).isEqualTo(JourneyState.WITHDRAWN);
-        assertThat(withdrawn.withdrawalReason()).contains(WithdrawalReason.CANCELLED);
-        assertThat(sessions.journeyOf(SANDBOX, previous.session())).isEmpty();
-        assertThat(next.session()).isNotEqualTo(previous.session());
+        assertThat(second.created()).isFalse();
+        assertThat(second.journey().id()).isEqualTo(first.journey().id());
+        assertThat(second.journey().step()).isEqualTo(JourneyStep.ENTITLEMENT_CONFIRMED);
+        assertThat(sessions.read(SANDBOX, first.journey().id(), Section.IDENTITY)).contains(IDENTITY.toJson());
+        assertThat(trail.events()).extracting(JourneyAuditTrail.Event::kind)
+                .containsExactly(JourneyAuditTrail.Kind.STARTED, JourneyAuditTrail.Kind.STEP_REACHED);
     }
 
     @Test
-    void cancel_atDataStep_withdrawsWithStepAndDeletesPersonalData() {
-        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
-        sessions.write(SANDBOX, started.session(), Section.IDENTITY, "{\"givenName\":\"Ana\"}");
-        service.reach(SANDBOX, started.session(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
+    void open_anotherHolder_opensItsOwnJourney() {
+        JourneyService.Opened first = service.open(SANDBOX, Holders.next(), IDENTITY, "certificate");
 
-        Journey journey = service.cancel(SANDBOX, started.session());
+        JourneyService.Opened second = service.open(SANDBOX, Holders.next(), IDENTITY, "certificate");
 
-        assertThat(journey.state()).isEqualTo(JourneyState.WITHDRAWN);
-        assertThat(journey.step()).isEqualTo(JourneyStep.ENTITLEMENT_CONFIRMED);
-        assertThat(journey.withdrawalReason()).contains(WithdrawalReason.CANCELLED);
-        assertThat(sessions.journeyOf(SANDBOX, started.session())).isEmpty();
-        assertThat(journeys.findById(SANDBOX, journey.id())).isPresent();
+        assertThat(second.created()).isTrue();
+        assertThat(second.journey().id()).isNotEqualTo(first.journey().id());
     }
 
     @Test
-    void cancel_completedJourney_onlyClosesSession() {
-        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
+    void open_holderWithCompletedJourneyStillOpen_returnsIt() {
+        Started started = open(service);
         complete(started);
 
-        Journey journey = service.cancel(SANDBOX, started.session());
+        JourneyService.Opened opened = service.open(SANDBOX, started.holder(), IDENTITY, "certificate");
 
-        assertThat(journey.state()).isEqualTo(JourneyState.COMPLETED);
-        assertThat(journey.step()).isEqualTo(JourneyStep.OFFER_OBTAINED);
-        assertThat(stored(started).state()).isEqualTo(JourneyState.COMPLETED);
-        assertThat(sessions.journeyOf(SANDBOX, started.session())).isEmpty();
+        assertThat(opened.created()).isFalse();
+        assertThat(opened.journey().state()).isEqualTo(JourneyState.COMPLETED);
     }
 
     @Test
-    void withdraw_notEntitled_withdrawsKeepingStep() {
-        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
-        service.reach(SANDBOX, started.session(), JourneyProgress.Step.IDENTIFIED);
-
-        service.withdraw(SANDBOX, started.session(), JourneyWithdrawal.Cause.NOT_ENTITLED);
-
-        Journey journey = stored(started);
-        assertThat(journey.state()).isEqualTo(JourneyState.WITHDRAWN);
-        assertThat(journey.step()).isEqualTo(JourneyStep.IDENTIFIED);
-        assertThat(journey.withdrawalReason()).contains(WithdrawalReason.NOT_ENTITLED);
-        assertThat(sessions.journeyOf(SANDBOX, started.session())).isEmpty();
-        JourneyAuditTrail.Event withdrawn = trail.events().getLast();
-        assertThat(withdrawn.kind()).isEqualTo(JourneyAuditTrail.Kind.WITHDRAWN);
-        assertThat(withdrawn.step()).isEqualTo(JourneyStep.IDENTIFIED);
-        assertThat(withdrawn.withdrawalReason()).contains(WithdrawalReason.NOT_ENTITLED);
-    }
-
-    @Test
-    void start_previousJourneyAlreadyInactive_withdrawsItAsExpiredNotCancelled() {
-        JourneyService.Started previous = service.start(SANDBOX, Optional.empty());
+    void open_holderJourneyAlreadyInactive_expiresItAndOpensANewOne() {
+        Started previous = open(service);
         clock.advance(Duration.ofMinutes(16));
 
-        service.start(SANDBOX, Optional.of(previous.session()));
+        JourneyService.Opened next = service.open(SANDBOX, previous.holder(), IDENTITY, "certificate");
 
+        assertThat(next.created()).isTrue();
+        assertThat(next.journey().id()).isNotEqualTo(previous.journey().id());
         assertThat(stored(previous).withdrawalReason()).contains(WithdrawalReason.EXPIRED);
-        assertThat(sessions.journeyOf(SANDBOX, previous.session())).isEmpty();
+        assertThat(sessions.journeyOf(SANDBOX, previous.holder())).contains(next.journey().id());
         assertThat(trail.events())
                 .filteredOn(event -> event.journeyId().equals(previous.journey().id())
                         && event.kind() == JourneyAuditTrail.Kind.WITHDRAWN)
@@ -125,15 +120,116 @@ class JourneyServiceTest {
     }
 
     @Test
+    void open_holderWithAWithdrawnJourneyLeftBehind_closesItAndOpensANewOne() {
+        Started previous = open(service);
+        Journey withdrawn = stored(previous);
+        withdrawn.withdraw(WithdrawalReason.CANCELLED, clock.instant());
+        journeys.update(SANDBOX, withdrawn, JourneyState.IN_PROGRESS);
+
+        JourneyService.Opened next = service.open(SANDBOX, previous.holder(), IDENTITY, "certificate");
+
+        assertThat(next.created()).isTrue();
+        assertThat(sessions.journeyOf(SANDBOX, previous.holder())).contains(next.journey().id());
+    }
+
+    @Test
+    void open_anotherOpeningOfTheSameHolderGetsThereFirst_returnsTheirJourney() {
+        AtomicBoolean staleRead = new AtomicBoolean(false);
+        InMemoryJourneySessions racing = new InMemoryJourneySessions() {
+            @Override
+            public Optional<UUID> journeyOf(TenantId tenant, HolderRef who) {
+                return staleRead.getAndSet(false) ? Optional.empty() : super.journeyOf(tenant, who);
+            }
+        };
+        JourneyService racingService = new JourneyService(new InMemoryJourneyRepository(racing), racing, trail,
+                TransactionOperations.withoutTransaction(), TransactionOperations.withoutTransaction(), clock);
+        HolderRef holder = Holders.next();
+        UUID theirs = racingService.open(SANDBOX, holder, IDENTITY, "certificate").journey().id();
+        // This request read the holder's journey before the other one committed.
+        staleRead.set(true);
+
+        JourneyService.Opened opened = racingService.open(SANDBOX, holder, IDENTITY, "certificate");
+
+        assertThat(opened.created()).isFalse();
+        assertThat(opened.journey().id()).isEqualTo(theirs);
+    }
+
+    @Test
+    void open_holderKeepsCollidingWithOthers_givesUpAfterThreeAttempts() {
+        InMemoryJourneySessions colliding = new InMemoryJourneySessions() {
+            @Override
+            public Optional<UUID> journeyOf(TenantId tenant, HolderRef who) {
+                return Optional.empty();
+            }
+
+            @Override
+            public void open(TenantId tenant, HolderRef who, UUID journeyId) {
+                throw new HolderAlreadyHasJourneyException(null);
+            }
+        };
+        JourneyService stuck = new JourneyService(journeys, colliding, trail, TransactionOperations.withoutTransaction(),
+                TransactionOperations.withoutTransaction(), clock);
+
+        assertThatThrownBy(() -> stuck.open(SANDBOX, Holders.next(), IDENTITY, "certificate"))
+                .isInstanceOf(HolderAlreadyHasJourneyException.class);
+    }
+
+    @Test
+    void cancel_atDataStep_withdrawsWithStepAndDeletesPersonalData() {
+        Started started = open(service);
+        sessions.write(SANDBOX, started.journey().id(), Section.IDENTITY, "{\"givenName\":\"Ana\"}");
+        service.reach(SANDBOX, started.holder(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
+
+        Journey journey = service.cancel(SANDBOX, started.holder());
+
+        assertThat(journey.state()).isEqualTo(JourneyState.WITHDRAWN);
+        assertThat(journey.step()).isEqualTo(JourneyStep.ENTITLEMENT_CONFIRMED);
+        assertThat(journey.withdrawalReason()).contains(WithdrawalReason.CANCELLED);
+        assertThat(sessions.journeyOf(SANDBOX, started.holder())).isEmpty();
+        assertThat(journeys.findById(SANDBOX, journey.id())).isPresent();
+    }
+
+    @Test
+    void cancel_completedJourney_onlyClosesSession() {
+        Started started = open(service);
+        complete(started);
+
+        Journey journey = service.cancel(SANDBOX, started.holder());
+
+        assertThat(journey.state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(journey.step()).isEqualTo(JourneyStep.OFFER_OBTAINED);
+        assertThat(stored(started).state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(sessions.journeyOf(SANDBOX, started.holder())).isEmpty();
+    }
+
+    @Test
+    void withdraw_notEntitled_withdrawsKeepingStep() {
+        Started started = open(service);
+        service.reach(SANDBOX, started.holder(), JourneyProgress.Step.IDENTIFIED);
+
+        service.withdraw(SANDBOX, started.holder(), JourneyWithdrawal.Cause.NOT_ENTITLED);
+
+        Journey journey = stored(started);
+        assertThat(journey.state()).isEqualTo(JourneyState.WITHDRAWN);
+        assertThat(journey.step()).isEqualTo(JourneyStep.IDENTIFIED);
+        assertThat(journey.withdrawalReason()).contains(WithdrawalReason.NOT_ENTITLED);
+        assertThat(sessions.journeyOf(SANDBOX, started.holder())).isEmpty();
+        JourneyAuditTrail.Event withdrawn = trail.events().getLast();
+        assertThat(withdrawn.kind()).isEqualTo(JourneyAuditTrail.Kind.WITHDRAWN);
+        assertThat(withdrawn.step()).isEqualTo(JourneyStep.IDENTIFIED);
+        assertThat(withdrawn.withdrawalReason()).contains(WithdrawalReason.NOT_ENTITLED);
+    }
+
+    @Test
     void expireInactive_sweptTwice_recordsOneWithdrawnEventPerJourney() {
-        JourneyService.Started first = service.start(SANDBOX, Optional.empty());
-        JourneyService.Started second = service.start(SANDBOX, Optional.empty());
+        Started first = open(service);
+        Started second = open(service);
         clock.advance(Duration.ofMinutes(15));
 
         service.expireInactive(SANDBOX);
         service.expireInactive(SANDBOX);
 
-        for (JourneyService.Started started : List.of(first, second)) {
+        for (Started started : List.of(first, second)) {
             assertThat(trail.events())
                     .filteredOn(event -> event.journeyId().equals(started.journey().id())
                             && event.kind() == JourneyAuditTrail.Kind.WITHDRAWN)
@@ -145,7 +241,7 @@ class JourneyServiceTest {
     void expireInactive_moreJourneysThanOneBatch_expiresThemAll() {
         int count = JourneyService.SWEEP_BATCH + 5;
         for (int i = 0; i < count; i++) {
-            service.start(SANDBOX, Optional.empty());
+            open(service);
         }
         clock.advance(Duration.ofMinutes(15));
 
@@ -155,7 +251,7 @@ class JourneyServiceTest {
 
     @Test
     void expireInactive_journeyUsedAfterTheSweepRead_isNotExpired() {
-        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
+        Started started = open(service);
         clock.advance(Duration.ofMinutes(15));
         // The holder's request renews the activity between the sweep's read and its write.
         Journey used = stored(started);
@@ -170,56 +266,56 @@ class JourneyServiceTest {
         assertThat(journeys.deleteSessionIfClosedOrInactive(SANDBOX, used.id(),
                 clock.instant().minus(Journey.INACTIVITY_LIMIT))).isFalse();
         assertThat(stored(started).state()).isEqualTo(JourneyState.IN_PROGRESS);
-        assertThat(sessions.journeyOf(SANDBOX, started.session())).isPresent();
+        assertThat(sessions.journeyOf(SANDBOX, started.holder())).isPresent();
     }
 
     @Test
     void current_inactiveForFifteenMinutes_withdrawsAsExpiredAndThrowsJourneyClosed() {
-        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
+        Started started = open(service);
         clock.advance(Duration.ofMinutes(16));
 
-        assertJourneyClosed(() -> service.current(SANDBOX, started.session()));
+        assertJourneyClosed(() -> service.current(SANDBOX, started.holder()));
 
         Journey journey = stored(started);
         assertThat(journey.state()).isEqualTo(JourneyState.WITHDRAWN);
         assertThat(journey.withdrawalReason()).contains(WithdrawalReason.EXPIRED);
-        assertThat(sessions.journeyOf(SANDBOX, started.session())).isEmpty();
+        assertThat(sessions.journeyOf(SANDBOX, started.holder())).isEmpty();
     }
 
     @Test
     void current_activityWithinLimit_pushesBackExpiry() {
-        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
+        Started started = open(service);
         clock.advance(Duration.ofMinutes(14));
-        service.current(SANDBOX, started.session());
+        service.current(SANDBOX, started.holder());
         clock.advance(Duration.ofMinutes(14));
 
-        assertThat(service.current(SANDBOX, started.session()).state()).isEqualTo(JourneyState.IN_PROGRESS);
+        assertThat(service.current(SANDBOX, started.holder()).state()).isEqualTo(JourneyState.IN_PROGRESS);
     }
 
     @Test
     void current_closedOrUnknownSession_throwsJourneyClosed() {
-        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
-        service.cancel(SANDBOX, started.session());
+        Started started = open(service);
+        service.cancel(SANDBOX, started.holder());
 
-        assertJourneyClosed(() -> service.current(SANDBOX, started.session()));
-        assertJourneyClosed(() -> service.cancel(SANDBOX, started.session()));
-        assertJourneyClosed(() -> service.current(SANDBOX, SessionId.generate()));
+        assertJourneyClosed(() -> service.current(SANDBOX, started.holder()));
+        assertJourneyClosed(() -> service.cancel(SANDBOX, started.holder()));
+        assertJourneyClosed(() -> service.current(SANDBOX, Holders.next()));
     }
 
     @Test
     void withdraw_completedJourney_throwsJourneyClosed() {
-        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
+        Started started = open(service);
         complete(started);
 
-        assertJourneyClosed(() -> service.withdraw(SANDBOX, started.session(), JourneyWithdrawal.Cause.NOT_ENTITLED));
+        assertJourneyClosed(() -> service.withdraw(SANDBOX, started.holder(), JourneyWithdrawal.Cause.NOT_ENTITLED));
     }
 
     @Test
     void expireInactive_inactiveJourneyInProgress_withdrawsAsExpiredAndKeepsIt() {
-        JourneyService.Started inactive = service.start(SANDBOX, Optional.empty());
-        service.reach(SANDBOX, inactive.session(), JourneyProgress.Step.IDENTIFIED);
+        Started inactive = open(service);
+        service.reach(SANDBOX, inactive.holder(), JourneyProgress.Step.IDENTIFIED);
         clock.advance(Duration.ofMinutes(10));
-        JourneyService.Started active = service.start(SANDBOX, Optional.empty());
+        Started active = open(service);
         clock.advance(Duration.ofMinutes(6));
 
         assertThat(service.expireInactive(SANDBOX)).isEqualTo(1);
@@ -228,26 +324,26 @@ class JourneyServiceTest {
         assertThat(expired.state()).isEqualTo(JourneyState.WITHDRAWN);
         assertThat(expired.step()).isEqualTo(JourneyStep.IDENTIFIED);
         assertThat(expired.withdrawalReason()).contains(WithdrawalReason.EXPIRED);
-        assertThat(sessions.journeyOf(SANDBOX, inactive.session())).isEmpty();
+        assertThat(sessions.journeyOf(SANDBOX, inactive.holder())).isEmpty();
         assertThat(stored(active).state()).isEqualTo(JourneyState.IN_PROGRESS);
-        assertThat(sessions.journeyOf(SANDBOX, active.session())).isPresent();
+        assertThat(sessions.journeyOf(SANDBOX, active.holder())).isPresent();
     }
 
     @Test
     void expireInactive_inactiveCompletedJourney_onlyClosesSession() {
-        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
+        Started started = open(service);
         complete(started);
         clock.advance(Duration.ofMinutes(15));
 
         assertThat(service.expireInactive(SANDBOX)).isEqualTo(1);
 
         assertThat(stored(started).state()).isEqualTo(JourneyState.COMPLETED);
-        assertThat(sessions.journeyOf(SANDBOX, started.session())).isEmpty();
+        assertThat(sessions.journeyOf(SANDBOX, started.holder())).isEmpty();
     }
 
     @Test
     void expireInactive_secondSweep_closesNothing() {
-        service.start(SANDBOX, Optional.empty());
+        open(service);
         clock.advance(Duration.ofMinutes(15));
         service.expireInactive(SANDBOX);
 
@@ -256,16 +352,15 @@ class JourneyServiceTest {
 
     @Test
     void stateChanges_fullJourney_recordEventWithStepReached() {
-        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
-        service.reach(SANDBOX, started.session(), JourneyProgress.Step.IDENTIFIED);
-        service.reach(SANDBOX, started.session(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
-        service.cancel(SANDBOX, started.session());
+        Started started = open(service);
+        service.reach(SANDBOX, started.holder(), JourneyProgress.Step.IDENTIFIED);
+        service.reach(SANDBOX, started.holder(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
+        service.cancel(SANDBOX, started.holder());
 
         assertThat(trail.events())
                 .extracting(JourneyAuditTrail.Event::kind, JourneyAuditTrail.Event::state, JourneyAuditTrail.Event::step)
                 .containsExactly(
-                        org.assertj.core.groups.Tuple.tuple(JourneyAuditTrail.Kind.STARTED, JourneyState.IN_PROGRESS, JourneyStep.STARTED),
-                        org.assertj.core.groups.Tuple.tuple(JourneyAuditTrail.Kind.STEP_REACHED, JourneyState.IN_PROGRESS, JourneyStep.IDENTIFIED),
+                        org.assertj.core.groups.Tuple.tuple(JourneyAuditTrail.Kind.STARTED, JourneyState.IN_PROGRESS, JourneyStep.IDENTIFIED),
                         org.assertj.core.groups.Tuple.tuple(JourneyAuditTrail.Kind.STEP_REACHED, JourneyState.IN_PROGRESS, JourneyStep.ENTITLEMENT_CONFIRMED),
                         org.assertj.core.groups.Tuple.tuple(JourneyAuditTrail.Kind.WITHDRAWN, JourneyState.WITHDRAWN, JourneyStep.ENTITLEMENT_CONFIRMED));
         assertThat(trail.events().getLast().withdrawalReason()).contains(WithdrawalReason.CANCELLED);
@@ -274,19 +369,19 @@ class JourneyServiceTest {
 
     @Test
     void currentAndReach_noStateChange_recordNoEvent() {
-        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
-        service.reach(SANDBOX, started.session(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
+        Started started = open(service);
+        service.reach(SANDBOX, started.holder(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
         int before = trail.events().size();
 
-        service.current(SANDBOX, started.session());
-        service.reach(SANDBOX, started.session(), JourneyProgress.Step.IDENTIFIED);
+        service.current(SANDBOX, started.holder());
+        service.reach(SANDBOX, started.holder(), JourneyProgress.Step.IDENTIFIED);
 
         assertThat(trail.events()).hasSize(before);
     }
 
     @Test
     void expireInactive_inactiveJourney_recordsWithdrawnEventWithExpiredReason() {
-        service.start(SANDBOX, Optional.empty());
+        open(service);
         clock.advance(Duration.ofMinutes(15));
 
         service.expireInactive(SANDBOX);
@@ -299,11 +394,11 @@ class JourneyServiceTest {
     void startAndCancel_auditTrailUnavailable_completeNormally() {
         trail.failFromNowOn();
 
-        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
-        Journey journey = service.cancel(SANDBOX, started.session());
+        Started started = open(service);
+        Journey journey = service.cancel(SANDBOX, started.holder());
 
         assertThat(journey.state()).isEqualTo(JourneyState.WITHDRAWN);
-        assertThat(sessions.journeyOf(SANDBOX, started.session())).isEmpty();
+        assertThat(sessions.journeyOf(SANDBOX, started.holder())).isEmpty();
     }
 
     @Test
@@ -321,69 +416,53 @@ class JourneyServiceTest {
         JourneyService sweeping = new JourneyService(failingOnOne, sessions, trail,
                 TransactionOperations.withoutTransaction(),
                 TransactionOperations.withoutTransaction(), clock);
-        JourneyService.Started bad = sweeping.start(SANDBOX, Optional.empty());
-        JourneyService.Started good = sweeping.start(SANDBOX, Optional.empty());
+        Started bad = open(sweeping);
+        Started good = open(sweeping);
         poisoned[0] = bad.journey().id();
         clock.advance(Duration.ofMinutes(15));
 
         assertThat(sweeping.expireInactive(SANDBOX)).isEqualTo(1);
 
-        assertThat(sessions.journeyOf(SANDBOX, good.session())).isEmpty();
+        assertThat(sessions.journeyOf(SANDBOX, good.holder())).isEmpty();
         assertThat(failingOnOne.findById(SANDBOX, good.journey().id()).orElseThrow().withdrawalReason())
                 .contains(WithdrawalReason.EXPIRED);
     }
 
     @Test
-    void start_previousJourneyClosedByParallelRequest_startsNewJourney() {
-        boolean[] parallelWins = {false};
-        InMemoryJourneyRepository racing = new InMemoryJourneyRepository(sessions) {
-            @Override
-            public boolean update(TenantId tenant, Journey journey, JourneyState readInState) {
-                if (parallelWins[0] && journey.state() == JourneyState.WITHDRAWN) {
-                    parallelWins[0] = false;
-                    return false;
-                }
-                return super.update(tenant, journey, readInState);
-            }
-        };
-        JourneyService starting = new JourneyService(racing, sessions, trail,
-                TransactionOperations.withoutTransaction(),
-                TransactionOperations.withoutTransaction(), clock);
-        JourneyService.Started previous = starting.start(SANDBOX, Optional.empty());
-        parallelWins[0] = true;
-
-        JourneyService.Started next = starting.start(SANDBOX, Optional.of(previous.session()));
-
-        assertThat(next.journey().state()).isEqualTo(JourneyState.IN_PROGRESS);
-        assertThat(sessions.journeyOf(SANDBOX, next.session())).contains(next.journey().id());
-    }
-
-    @Test
     void requireInProgress_journeyInProgress_passesAndRecordsActivity() {
-        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
+        Started started = open(service);
         clock.advance(Duration.ofMinutes(10));
 
-        service.requireInProgress(SANDBOX, started.session());
+        service.requireInProgress(SANDBOX, started.holder());
 
         assertThat(stored(started).lastActivity()).isEqualTo(clock.instant());
     }
 
     @Test
     void requireInProgress_completedJourney_isClosedThoughRequireActivePasses() {
-        JourneyService.Started started = service.start(SANDBOX, Optional.empty());
+        Started started = open(service);
         complete(started);
 
-        service.requireActive(SANDBOX, started.session());
-        assertJourneyClosed(() -> service.requireInProgress(SANDBOX, started.session()));
+        service.requireActive(SANDBOX, started.holder());
+        assertJourneyClosed(() -> service.requireInProgress(SANDBOX, started.holder()));
     }
 
-    private void complete(JourneyService.Started started) {
+    private record Started(Journey journey, HolderRef holder) {
+    }
+
+    /** A journey of a new holder. */
+    private Started open(JourneyService opening) {
+        HolderRef holder = Holders.next();
+        return new Started(opening.open(SANDBOX, holder, IDENTITY, null).journey(), holder);
+    }
+
+    private void complete(Started started) {
         Journey journey = stored(started);
         journey.complete(clock.instant());
         journeys.update(SANDBOX, journey, JourneyState.IN_PROGRESS);
     }
 
-    private Journey stored(JourneyService.Started started) {
+    private Journey stored(Started started) {
         return journeys.findById(SANDBOX, started.journey().id()).orElseThrow();
     }
 

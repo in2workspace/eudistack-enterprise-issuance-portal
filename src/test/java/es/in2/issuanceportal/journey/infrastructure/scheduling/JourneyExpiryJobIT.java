@@ -2,6 +2,10 @@ package es.in2.issuanceportal.journey.infrastructure.scheduling;
 
 import es.in2.issuanceportal.TestcontainersConfiguration;
 import es.in2.issuanceportal.journey.application.JourneyService;
+import es.in2.issuanceportal.session.Holders;
+import es.in2.issuanceportal.session.api.HolderIdentity;
+import es.in2.issuanceportal.session.api.IdentifierType;
+import es.in2.issuanceportal.session.api.PersonalIdentifier;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import es.in2.issuanceportal.shared.tenant.TenantSchemas;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,7 +19,6 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 
 import java.time.Clock;
 import java.util.Map;
-import java.util.Optional;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -90,8 +93,8 @@ class JourneyExpiryJobIT {
     }
 
     private UUID inactiveJourney() {
-        JourneyService.Started started = service.start(KPMG, Optional.empty());
-        UUID id = started.journey().id();
+        UUID id = service.open(KPMG, Holders.next(), new HolderIdentity("Lucia", "Prueba Sintetica",
+                new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R"), null), null).journey().id();
         jdbc.sql("UPDATE \"kpmg_issuance_portal\".journey SET last_activity = now() - interval '16 minutes' WHERE id = :id")
                 .param("id", id).update();
         return id;

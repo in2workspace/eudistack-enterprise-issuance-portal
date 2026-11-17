@@ -38,7 +38,7 @@
       "type_name": "DoctorID",
       "adapter": "simulated",
       "timeout_seconds": 10,
-      "identifier_types": ["dni", "colegiado"],
+      "identifier_types": ["personal_id", "colegiado"],
       "mapping": [
         { "attribute": "registration_number", "claim": "personal_administrative_number", "label": "Número de colegiado" },
         { "attribute": "medical_boards", "claim": "medical_board", "label": "Colegio" },
@@ -49,7 +49,7 @@
       "settings": {
         "records": [
           {
-            "dni": "00000001R",
+            "personal_id": "00000001R",
             "colegiado": "280000001",
             "entitled": true,
             "attributes": {
@@ -62,7 +62,7 @@
             }
           },
           {
-            "dni": "00000002W",
+            "personal_id": "00000002W",
             "colegiado": "280000002",
             "entitled": false,
             "attributes": {
@@ -75,7 +75,7 @@
             }
           },
           {
-            "dni": "00000003A",
+            "personal_id": "00000003A",
             "colegiado": "280000003",
             "entitled": true,
             "delay_seconds": 15,

@@ -36,7 +36,7 @@ public record HolderIdentity(String givenName, String familyName, PersonalIdenti
      * Reads the section.
      *
      * @throws InvalidSectionException naming the field when a required one is missing or empty, or the
-     *                                 identifier type is not {@code dni} or {@code colegiado}
+     *                                 identifier type is not {@code personal_id} or {@code colegiado}
      */
     public static HolderIdentity fromJson(String json) {
         Document document = SectionJson.read(json, Document.class);

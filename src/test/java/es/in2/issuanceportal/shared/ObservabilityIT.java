@@ -72,7 +72,6 @@ class ObservabilityIT {
     void httpServerRequests_apiRequest_carryTenantTag() throws Exception {
         mvc.perform(post("/issuance-portal/api/v1/journey")
                 .contextPath("/issuance-portal")
-                .header("X-Requested-With", "issuance-portal")
                 .with(request -> {
                     request.setServerName("sandbox.127.0.0.1.nip.io");
                     return request;

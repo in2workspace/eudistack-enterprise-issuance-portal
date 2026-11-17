@@ -14,7 +14,7 @@ class AuthenticSourceConfigTest {
 
     private static final String DOCTORID = "doctorid.sd.1";
     private static final SourceSettings SOURCE = new SourceSettings("DoctorID", "simulated", null, null, null,
-            Set.of(IdentifierType.DNI), List.of(), null, Map.of());
+            Set.of(IdentifierType.PERSONAL_ID), List.of(), null, Map.of());
 
     @Test
     void constructor_sourceOfTheAttestationType_isTheSource() {

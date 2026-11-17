@@ -29,7 +29,7 @@ public class StubAdapter implements AuthenticSourceAdapter {
     }
 
     public static StubAdapter searchingByBoth(String type) {
-        return new StubAdapter(type, Set.of(IdentifierType.DNI, IdentifierType.COLEGIADO));
+        return new StubAdapter(type, Set.of(IdentifierType.PERSONAL_ID, IdentifierType.COLEGIADO));
     }
 
     public StubAdapter answering(Function<PersonalIdentifier, LookupResult> answer) {

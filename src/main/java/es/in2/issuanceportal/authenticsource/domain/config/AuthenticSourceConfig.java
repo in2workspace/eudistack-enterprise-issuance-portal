@@ -14,7 +14,7 @@ import java.util.Set;
  * identifier types its logins can give, and at most one source per attestation type (design.md AD-2).
  *
  * @param attestationType      {@code attestation_type}: the type the journey issues
- * @param loginIdentifierTypes {@code dni}, which the certificate login gives, plus the types
+ * @param loginIdentifierTypes {@code personal_id}, which the certificate login gives, plus the types
  *                             {@code identifier_types} assigns to the attestations accepted at login
  * @param sources              {@code authentic_source}: attestation type → its source
  */
@@ -25,7 +25,7 @@ public record AuthenticSourceConfig(String attestationType, Set<IdentifierType> 
         if (attestationType == null || attestationType.isBlank()) {
             throw new InvalidSourceConfigException("attestation_type is required");
         }
-        EnumSet<IdentifierType> types = EnumSet.of(IdentifierType.DNI);
+        EnumSet<IdentifierType> types = EnumSet.of(IdentifierType.PERSONAL_ID);
         if (loginIdentifierTypes != null) {
             types.addAll(loginIdentifierTypes);
         }

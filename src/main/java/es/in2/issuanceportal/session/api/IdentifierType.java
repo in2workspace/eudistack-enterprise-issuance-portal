@@ -9,8 +9,8 @@ import java.util.Optional;
  */
 public enum IdentifierType {
 
-    /** DNI or NIE: login with a qualified certificate (and Cl@ve in the future). */
-    DNI("dni"),
+    /** DNI, NIE or the personal number of the login: login with a qualified certificate (and Cl@ve in the future). */
+    PERSONAL_ID("personal_id"),
     /** Medical registration number: login with DoctorID. */
     COLEGIADO("colegiado");
 

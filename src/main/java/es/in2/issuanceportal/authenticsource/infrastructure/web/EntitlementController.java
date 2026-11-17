@@ -1,12 +1,11 @@
 package es.in2.issuanceportal.authenticsource.infrastructure.web;
 
 import es.in2.issuanceportal.authenticsource.application.EntitlementService;
-import es.in2.issuanceportal.session.api.SessionId;
-import es.in2.issuanceportal.shared.error.ProblemCode;
-import es.in2.issuanceportal.shared.error.ProblemException;
+import es.in2.issuanceportal.shared.security.HolderPrincipal;
+import es.in2.issuanceportal.shared.security.HolderRefs;
 import es.in2.issuanceportal.shared.tenant.CurrentTenant;
-import es.in2.issuanceportal.shared.web.SessionCookie;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,21 +19,16 @@ import org.springframework.web.bind.annotation.RestController;
 class EntitlementController {
 
     private final EntitlementService service;
+    private final HolderRefs holders;
 
-    EntitlementController(EntitlementService service) {
+    EntitlementController(EntitlementService service, HolderRefs holders) {
         this.service = service;
+        this.holders = holders;
     }
 
+    /** A holder without a journey answers {@code journey_closed}, as in every other call of the journey. */
     @PostMapping
-    EntitlementResponse verify(HttpServletRequest request) {
-        return EntitlementResponse.of(service.check(CurrentTenant.of(request), session(request)));
-    }
-
-    /**
-     * A holder without a journey in progress asks out of order (ac.md decision 4). A session that no
-     * longer leads to one is a closed journey, answered by the journey's own check.
-     */
-    private static SessionId session(HttpServletRequest request) {
-        return SessionCookie.read(request).orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED));
+    EntitlementResponse verify(HttpServletRequest request, @AuthenticationPrincipal HolderPrincipal principal) {
+        return EntitlementResponse.of(service.check(CurrentTenant.of(request), holders.of(principal)));
     }
 }

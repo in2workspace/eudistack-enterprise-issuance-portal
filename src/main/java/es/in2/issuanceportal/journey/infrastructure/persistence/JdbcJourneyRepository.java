@@ -52,11 +52,12 @@ class JdbcJourneyRepository implements JourneyRepository {
 
     @Override
     public void insert(TenantId tenant, Journey journey) {
-        jdbc.sql("INSERT INTO " + table(tenant) + " (id, state, step, created_at, last_activity) "
-                        + "VALUES (:id, :state, :step, :createdAt, :lastActivity)")
+        jdbc.sql("INSERT INTO " + table(tenant) + " (id, state, step, identification_method, created_at, last_activity) "
+                        + "VALUES (:id, :state, :step, :method, :createdAt, :lastActivity)")
                 .param(ID, journey.id())
                 .param(STATE, journey.state().code())
                 .param(STEP, journey.step().code())
+                .param("method", journey.identificationMethod().orElse(null))
                 .param("createdAt", Timestamp.from(journey.createdAt()))
                 .param("lastActivity", Timestamp.from(journey.lastActivity()))
                 .update();

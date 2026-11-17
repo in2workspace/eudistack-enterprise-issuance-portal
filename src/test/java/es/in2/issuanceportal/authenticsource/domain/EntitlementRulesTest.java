@@ -9,7 +9,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 class EntitlementRulesTest {
 
-    private static final PersonalIdentifier DNI = new PersonalIdentifier(IdentifierType.DNI, "00000001R");
+    private static final PersonalIdentifier DNI = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R");
     private static final PersonalIdentifier COLEGIADO = new PersonalIdentifier(IdentifierType.COLEGIADO, "280000001");
 
     private static SourceRecord sourceRecord(boolean entitled, PersonalIdentifier... identifiers) {
@@ -46,7 +46,7 @@ class EntitlementRulesTest {
 
     @Test
     void decide_anotherPerson_isIdentifierMismatch() {
-        PersonalIdentifier other = new PersonalIdentifier(IdentifierType.DNI, "00000002W");
+        PersonalIdentifier other = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000002W");
 
         assertThat(EntitlementRules.decide(DNI, LookupResult.found(sourceRecord(true, other, COLEGIADO))))
                 .isEqualTo(new EntitlementDecision.NotConfirmed(NotConfirmedReason.IDENTIFIER_MISMATCH));
@@ -54,7 +54,7 @@ class EntitlementRulesTest {
 
     @Test
     void decide_anotherPersonNotEntitled_isIdentifierMismatchNotNotEntitled() {
-        PersonalIdentifier other = new PersonalIdentifier(IdentifierType.DNI, "00000002W");
+        PersonalIdentifier other = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000002W");
 
         assertThat(EntitlementRules.decide(DNI, LookupResult.found(sourceRecord(false, other))))
                 .isEqualTo(new EntitlementDecision.NotConfirmed(NotConfirmedReason.IDENTIFIER_MISMATCH));
@@ -68,7 +68,7 @@ class EntitlementRulesTest {
 
     @Test
     void decide_sameValueOfAnotherType_isIdentifierMismatch() {
-        PersonalIdentifier dniWithColegiadoValue = new PersonalIdentifier(IdentifierType.DNI, "280000001");
+        PersonalIdentifier dniWithColegiadoValue = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "280000001");
 
         assertThat(EntitlementRules.decide(COLEGIADO, LookupResult.found(sourceRecord(true, dniWithColegiadoValue))))
                 .isEqualTo(new EntitlementDecision.NotConfirmed(NotConfirmedReason.IDENTIFIER_MISMATCH));
@@ -76,8 +76,8 @@ class EntitlementRulesTest {
 
     @Test
     void decide_identifierWithOtherCaseAndSpaces_isTheSamePerson() {
-        PersonalIdentifier lowerCase = new PersonalIdentifier(IdentifierType.DNI, "00000001r");
-        SourceRecord found = sourceRecord(true, new PersonalIdentifier(IdentifierType.DNI, " 0000 0001R "));
+        PersonalIdentifier lowerCase = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001r");
+        SourceRecord found = sourceRecord(true, new PersonalIdentifier(IdentifierType.PERSONAL_ID, " 0000 0001R "));
 
         assertThat(EntitlementRules.decide(lowerCase, LookupResult.found(found)))
                 .isEqualTo(new EntitlementDecision.Confirmed(found));

@@ -1,8 +1,9 @@
 package es.in2.issuanceportal.session;
 
+import es.in2.issuanceportal.session.api.HolderAlreadyHasJourneyException;
+import es.in2.issuanceportal.session.api.HolderRef;
 import es.in2.issuanceportal.session.api.JourneySessions;
 import es.in2.issuanceportal.session.api.Section;
-import es.in2.issuanceportal.session.api.SessionId;
 import es.in2.issuanceportal.shared.error.ProblemCode;
 import es.in2.issuanceportal.shared.error.ProblemException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
@@ -23,45 +24,39 @@ public class InMemoryJourneySessions implements JourneySessions {
     private final Map<String, Entry> sessions = new ConcurrentHashMap<>();
 
     @Override
-    public void open(TenantId tenant, SessionId session, UUID journeyId) {
-        sessions.put(key(tenant, session.hash()), new Entry(journeyId, new EnumMap<>(Section.class)));
+    public synchronized void open(TenantId tenant, HolderRef holder, UUID journeyId) {
+        if (journeyOf(tenant, holder).isPresent()) {
+            throw new HolderAlreadyHasJourneyException(null);
+        }
+        sessions.put(key(tenant, journeyId), new Entry(holder, journeyId, new EnumMap<>(Section.class)));
     }
 
     @Override
-    public Optional<UUID> journeyOf(TenantId tenant, SessionId session) {
-        return Optional.ofNullable(sessions.get(key(tenant, session.hash()))).map(Entry::journeyId);
+    public Optional<UUID> journeyOf(TenantId tenant, HolderRef holder) {
+        return sessions.entrySet().stream()
+                .filter(e -> e.getKey().startsWith(tenant.value() + "/") && e.getValue().holder().equals(holder))
+                .map(e -> e.getValue().journeyId())
+                .findFirst();
     }
 
     @Override
-    public Optional<String> read(TenantId tenant, SessionId session, Section section) {
-        return Optional.ofNullable(existing(tenant, session).sections().get(section));
+    public Optional<String> read(TenantId tenant, UUID journeyId, Section section) {
+        return Optional.ofNullable(existing(tenant, journeyId).sections().get(section));
     }
 
     @Override
-    public void write(TenantId tenant, SessionId session, Section section, String content) {
-        existing(tenant, session).sections().put(section, content);
+    public void write(TenantId tenant, UUID journeyId, Section section, String content) {
+        existing(tenant, journeyId).sections().put(section, content);
     }
 
     @Override
-    public void clear(TenantId tenant, SessionId session, Section section) {
-        existing(tenant, session).sections().remove(section);
+    public void clear(TenantId tenant, UUID journeyId, Section section) {
+        existing(tenant, journeyId).sections().remove(section);
     }
 
     @Override
     public void close(TenantId tenant, UUID journeyId) {
-        sessions.entrySet().removeIf(e -> e.getKey().startsWith(tenant.value() + "/")
-                && e.getValue().journeyId().equals(journeyId));
-    }
-
-    @Override
-    public SessionId rotate(TenantId tenant, SessionId session) {
-        Entry entry = sessions.remove(key(tenant, session.hash()));
-        if (entry == null) {
-            throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
-        }
-        SessionId rotated = SessionId.generate();
-        sessions.put(key(tenant, rotated.hash()), entry);
-        return rotated;
+        sessions.remove(key(tenant, journeyId));
     }
 
     /** For the in-memory journey repository: the journeys that still have a session. */
@@ -72,18 +67,18 @@ public class InMemoryJourneySessions implements JourneySessions {
                 .toList();
     }
 
-    private Entry existing(TenantId tenant, SessionId session) {
-        Entry entry = sessions.get(key(tenant, session.hash()));
+    private Entry existing(TenantId tenant, UUID journeyId) {
+        Entry entry = sessions.get(key(tenant, journeyId));
         if (entry == null) {
             throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
         }
         return entry;
     }
 
-    private static String key(TenantId tenant, String hash) {
-        return tenant.value() + "/" + hash;
+    private static String key(TenantId tenant, UUID journeyId) {
+        return tenant.value() + "/" + journeyId;
     }
 
-    private record Entry(UUID journeyId, Map<Section, String> sections) {
+    private record Entry(HolderRef holder, UUID journeyId, Map<Section, String> sections) {
     }
 }

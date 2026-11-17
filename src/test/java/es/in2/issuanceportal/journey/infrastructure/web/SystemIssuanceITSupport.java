@@ -20,9 +20,10 @@ import es.in2.issuanceportal.session.api.IdentifierType;
 import es.in2.issuanceportal.session.api.JourneySessions;
 import es.in2.issuanceportal.session.api.PersonalIdentifier;
 import es.in2.issuanceportal.session.api.Section;
-import es.in2.issuanceportal.session.api.SessionId;
+import es.in2.issuanceportal.shared.security.HolderRefs;
+import es.in2.issuanceportal.shared.security.TestHolder;
+import es.in2.issuanceportal.shared.security.AccessTokens;
 import es.in2.issuanceportal.shared.tenant.TenantId;
-import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.slf4j.LoggerFactory;
@@ -43,6 +44,8 @@ import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -86,7 +89,8 @@ abstract class SystemIssuanceITSupport {
     static final String MEDICAL_BOARD = "Colegio de Medicos de Prueba";
     static final String SPECIALITY = "Cardiology";
     static final String ACCESS_TOKEN = "system-token-7e1d5c0a-secret";
-    static final String HOLDER_TOKEN = "holder-access-token-2b9f41c6-secret";
+    /** The Access Tokens of the holders' calls, as the Verifier would have signed them: none may reach another system or a log. */
+    static final List<String> HOLDER_TOKENS = new CopyOnWriteArrayList<>();
     static final String OFFER = "openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fissuer.test%2Foffers%2Fsecret-4d2e";
     static final String ONBOARDING_URL = "https://sandbox.wallet.test/t/ticket-fixed-3f2a9c";
 
@@ -169,6 +173,8 @@ abstract class SystemIssuanceITSupport {
     JdbcClient jdbc;
     @Autowired
     JourneySessions sessions;
+    @Autowired
+    HolderRefs holderRefs;
     @Autowired
     JourneyProgress progress;
     @Autowired
@@ -260,71 +266,71 @@ abstract class SystemIssuanceITSupport {
 
     // --- the journey ---
 
-    UUID journeyOf(SessionId session) {
-        return sessions.journeyOf(SANDBOX, session).orElseThrow();
+    UUID journeyOf(TestHolder holder) {
+        return sessions.journeyOf(SANDBOX, holder.ref()).orElseThrow();
     }
 
-    UUID processOf(SessionId session) {
+    UUID processOf(TestHolder holder) {
         return jdbc.sql("SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
-                .param("id", journeyOf(session)).query(UUID.class).optional().orElse(null);
+                .param("id", journeyOf(holder)).query(UUID.class).optional().orElse(null);
     }
 
-    Map<String, Object> rowOf(SessionId session) {
+    Map<String, Object> rowOf(TestHolder holder) {
         return jdbc.sql("SELECT state, step, issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
-                .param("id", journeyOf(session)).query().singleRow();
+                .param("id", journeyOf(holder)).query().singleRow();
     }
 
-    SessionId startedJourney() throws Exception {
-        Cookie cookie = mvc.perform(MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey")
+    TestHolder startedJourney() throws Exception {
+        TestHolder holder = TestHolder.of(SANDBOX, holderRefs);
+        mvc.perform(MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey")
                         .contextPath(CONTEXT)
-                        .header("X-Requested-With", "issuance-portal")
-                        .with(host()))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getCookie("journey_session");
-        return SessionId.parse(cookie.getValue()).orElseThrow();
+                        .with(host())
+                        .with(holder.token()))
+                .andExpect(status().isCreated());
+        return holder;
     }
 
     /** What Identification leaves in the journey. */
-    SessionId identifiedJourney() throws Exception {
-        SessionId session = startedJourney();
-        sessions.write(SANDBOX, session, Section.IDENTITY, new HolderIdentity(GIVEN_NAME, FAMILY_NAME,
-                new PersonalIdentifier(IdentifierType.DNI, DNI), TOKEN_EMAIL).toJson());
-        progress.reach(SANDBOX, session, JourneyProgress.Step.IDENTIFIED);
-        return session;
+    TestHolder identifiedJourney() throws Exception {
+        TestHolder holder = startedJourney();
+        sessions.write(SANDBOX, journeyOf(holder), Section.IDENTITY, new HolderIdentity(GIVEN_NAME, FAMILY_NAME,
+                new PersonalIdentifier(IdentifierType.PERSONAL_ID, DNI), TOKEN_EMAIL).toJson());
+        progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.IDENTIFIED);
+        return holder;
     }
 
     /** What the holder has before confirming: the entitlement and the email verified with a code. */
-    SessionId entitledJourney() throws Exception {
-        SessionId session = entitledJourneyWithoutEmail();
-        sessions.write(SANDBOX, session, Section.EMAIL, new EmailRecord(EMAIL).toJson());
-        sessions.write(SANDBOX, session, Section.EMAIL_VERIFICATION, new EmailVerificationRecord(EMAIL, null, null, 0, 1,
+    TestHolder entitledJourney() throws Exception {
+        TestHolder holder = entitledJourneyWithoutEmail();
+        sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL, new EmailRecord(EMAIL).toJson());
+        sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION, new EmailVerificationRecord(EMAIL, null, null, 0, 1,
                 clock.instant()).toJson());
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET step = 'email_verified' WHERE id = :id")
-                .param("id", journeyOf(session)).update();
-        return session;
+                .param("id", journeyOf(holder)).update();
+        return holder;
     }
 
     /** What Identification and Authentic source leave in the journey before the holder verifies the email. */
-    SessionId entitledJourneyWithoutEmail() throws Exception {
-        SessionId session = identifiedJourney();
-        sessions.write(SANDBOX, session, Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.DNI, Map.of(
+    TestHolder entitledJourneyWithoutEmail() throws Exception {
+        TestHolder holder = identifiedJourney();
+        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.PERSONAL_ID, Map.of(
                 "personal_administrative_number", ADMINISTRATIVE_NUMBER,
                 "medical_board", List.of(MEDICAL_BOARD),
                 "medical_speciality", List.of(SPECIALITY),
                 "legally_entitled", true),
                 new EntitlementRecord.Preview("DoctorID", List.of(), null, true), clock.instant()).toJson());
-        progress.reach(SANDBOX, session, JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
-        return session;
+        progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
+        return holder;
     }
 
     /** The holder's call, with the holder's own token: it must never go on to another system (NFR-4). It has no body. */
-    static MockHttpServletRequestBuilder confirmation(SessionId session) {
+    static MockHttpServletRequestBuilder confirmation(TestHolder holder) {
+        String token = holder.mint(Instant.now(), tokens -> tokens.claim("exp", Instant.now().plus(Duration.ofHours(2))));
+        HOLDER_TOKENS.add(token);
         return MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey/confirmation")
                 .contextPath(CONTEXT)
-                .header("X-Requested-With", "issuance-portal")
-                .header("Authorization", "Bearer " + HOLDER_TOKEN)
-                .with(host())
-                .cookie(new Cookie("journey_session", session.value()));
+                .header("Authorization", "Bearer " + token)
+                .with(host());
     }
 
     static RequestPostProcessor host() {
@@ -338,9 +344,11 @@ abstract class SystemIssuanceITSupport {
     static void assertHolderTokenNeverSent() {
         assertThat(WIRE.getAllServeEvents()).allSatisfy(event -> {
             LoggedRequest request = event.getRequest();
-            assertThat(request.getHeaders().all().toString()).doesNotContain(HOLDER_TOKEN);
-            assertThat(request.getBodyAsString()).doesNotContain(HOLDER_TOKEN);
-            assertThat(request.getUrl()).doesNotContain(HOLDER_TOKEN);
+            for (String token : HOLDER_TOKENS) {
+                assertThat(request.getHeaders().all().toString()).doesNotContain(token);
+                assertThat(request.getBodyAsString()).doesNotContain(token);
+                assertThat(request.getUrl()).doesNotContain(token);
+            }
             assertThat(request.getHeader("Cookie")).isNull();
         });
         for (String path : List.of(ISSUANCES_PATH, TICKETS_PATH)) {

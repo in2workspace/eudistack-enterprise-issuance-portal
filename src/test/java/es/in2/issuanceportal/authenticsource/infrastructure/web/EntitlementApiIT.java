@@ -10,9 +10,9 @@ import es.in2.issuanceportal.journey.api.JourneyWithdrawal;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.JourneySessions;
 import es.in2.issuanceportal.session.api.Section;
-import es.in2.issuanceportal.session.api.SessionId;
+import es.in2.issuanceportal.shared.security.HolderRefs;
+import es.in2.issuanceportal.shared.security.TestHolder;
 import es.in2.issuanceportal.shared.tenant.TenantId;
-import jakarta.servlet.http.Cookie;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -32,6 +32,7 @@ import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
@@ -47,7 +48,7 @@ class EntitlementApiIT {
     private static final String CONTEXT = "/issuance-portal";
     private static final String SANDBOX_HOST = "sandbox.127.0.0.1.nip.io";
     private static final TenantId SANDBOX = new TenantId("sandbox");
-    private static final PersonalIdentifier ACTIVE = new PersonalIdentifier(IdentifierType.DNI, "00000001R");
+    private static final PersonalIdentifier ACTIVE = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R");
 
     @TestConfiguration
     static class StubSource {
@@ -64,6 +65,8 @@ class EntitlementApiIT {
     @Autowired
     private JourneySessions sessions;
     @Autowired
+    private HolderRefs holderRefs;
+    @Autowired
     private JourneyWithdrawal withdrawal;
     @Autowired
     private StubAdapter adapter;
@@ -75,7 +78,7 @@ class EntitlementApiIT {
                 .param("config", """
                         {"attestation_type": "doctorid.sd.1",
                          "authentic_source": {"doctorid.sd.1": {
-                           "type_name": "DoctorID", "adapter": "stub", "identifier_types": ["dni", "colegiado"],
+                           "type_name": "DoctorID", "adapter": "stub", "identifier_types": ["personal_id", "colegiado"],
                            "mapping": [{"attribute": "registration_number", "claim": "personal_administrative_number",
                                         "label": "Número de colegiado"}]}}}""")
                 .update();
@@ -93,11 +96,11 @@ class EntitlementApiIT {
     @Test
     @DisplayName("AC-06 — postEntitlement_bodyWithAnotherIdentifier_usesTheJourneysIdentity")
     void postEntitlement_bodyWithAnotherIdentifier_usesTheJourneysIdentity() throws Exception {
-        SessionId session = journeyWithIdentity("00000001R");
+        TestHolder holder = journeyWithIdentity("00000001R");
 
-        mvc.perform(entitlement(session)
+        mvc.perform(entitlement(holder)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"personal_identifier\":\"00000002W\",\"dni\":\"00000002W\","
+                        .content("{\"personal_identifier\":\"00000002W\",\"personal_id\":\"00000002W\","
                                 + "\"personal_administrative_number\":\"00000002W\"}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result").value("confirmed"))
@@ -115,15 +118,15 @@ class EntitlementApiIT {
     @Test
     @DisplayName("AC-07 — postEntitlement_unknownHolder_isNotConfirmedWithItsReason")
     void postEntitlement_unknownHolder_isNotConfirmedWithItsReason() throws Exception {
-        SessionId session = journeyWithIdentity("00000009Y");
+        TestHolder holder = journeyWithIdentity("00000009Y");
 
-        mvc.perform(entitlement(session))
+        mvc.perform(entitlement(holder))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result").value("not_confirmed"))
                 .andExpect(jsonPath("$.reason").value("not_found"))
                 .andExpect(jsonPath("$.attestation").doesNotExist());
 
-        mvc.perform(entitlement(session))
+        mvc.perform(entitlement(holder))
                 .andExpect(status().isGone())
                 .andExpect(jsonPath("$.type").value("journey_closed"));
     }
@@ -131,10 +134,11 @@ class EntitlementApiIT {
     @Test
     @DisplayName("AC-01 — postEntitlement_journeyWithoutIdentity_isStepNotAllowed")
     void postEntitlement_journeyWithoutIdentity_isStepNotAllowed() throws Exception {
-        SessionId session = start();
+        TestHolder holder = start();
+        sessions.clear(SANDBOX, journeyOf(holder), Section.IDENTITY);
         int searches = adapter.searches().size();
 
-        mvc.perform(entitlement(session))
+        mvc.perform(entitlement(holder))
                 .andExpect(status().isConflict())
                 .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_PROBLEM_JSON))
                 .andExpect(jsonPath("$.type").value("step_not_allowed"));
@@ -143,51 +147,54 @@ class EntitlementApiIT {
     }
 
     @Test
-    @DisplayName("AC-02 — postEntitlement_noJourney_isStepNotAllowed")
-    void postEntitlement_noJourney_isStepNotAllowed() throws Exception {
-        mvc.perform(post())
-                .andExpect(status().isConflict())
-                .andExpect(jsonPath("$.type").value("step_not_allowed"));
+    @DisplayName("ES-05 (EUD-314) — postEntitlement_holderWithoutJourney_isJourneyClosed")
+    void postEntitlement_holderWithoutJourney_isJourneyClosed() throws Exception {
+        mvc.perform(post().with(TestHolder.of(SANDBOX, holderRefs).token()))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.type").value("journey_closed"));
     }
 
     @Test
     @DisplayName("EC-04 — postEntitlement_withdrawnJourney_isJourneyClosed")
     void postEntitlement_withdrawnJourney_isJourneyClosed() throws Exception {
-        SessionId session = journeyWithIdentity("00000001R");
-        withdrawal.withdraw(SANDBOX, session, JourneyWithdrawal.Cause.NOT_ENTITLED);
+        TestHolder holder = journeyWithIdentity("00000001R");
+        withdrawal.withdraw(SANDBOX, holder.ref(), JourneyWithdrawal.Cause.NOT_ENTITLED);
 
-        mvc.perform(entitlement(session))
+        mvc.perform(entitlement(holder))
                 .andExpect(status().isGone())
                 .andExpect(jsonPath("$.type").value("journey_closed"));
     }
 
-    private SessionId start() throws Exception {
-        Cookie cookie = mvc.perform(MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey")
+    private TestHolder start() throws Exception {
+        TestHolder holder = TestHolder.of(SANDBOX, holderRefs);
+        mvc.perform(MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey")
                         .contextPath(CONTEXT)
-                        .header("X-Requested-With", "issuance-portal")
-                        .with(host()))
-                .andExpect(status().isCreated())
-                .andReturn().getResponse().getCookie("journey_session");
-        return SessionId.parse(cookie.getValue()).orElseThrow();
+                        .with(host())
+                        .with(holder.token()))
+                .andExpect(status().isCreated());
+        return holder;
+    }
+
+    private UUID journeyOf(TestHolder holder) {
+        return sessions.journeyOf(SANDBOX, holder.ref()).orElseThrow();
     }
 
     /** What the journey writes when it opens with the holder's Access Token. */
-    private SessionId journeyWithIdentity(String dni) throws Exception {
-        SessionId session = start();
-        sessions.write(SANDBOX, session, Section.IDENTITY, new HolderIdentity("Lucía", "Prueba",
+    private TestHolder journeyWithIdentity(String dni) throws Exception {
+        TestHolder holder = start();
+        sessions.write(SANDBOX, journeyOf(holder), Section.IDENTITY, new HolderIdentity("Lucía", "Prueba",
                 new es.in2.issuanceportal.session.api.PersonalIdentifier(
-                        es.in2.issuanceportal.session.api.IdentifierType.DNI, dni), null).toJson());
-        return session;
+                        es.in2.issuanceportal.session.api.IdentifierType.PERSONAL_ID, dni), null).toJson());
+        return holder;
     }
 
-    private static MockHttpServletRequestBuilder entitlement(SessionId session) {
-        return post().cookie(new Cookie("journey_session", session.value()));
+    private static MockHttpServletRequestBuilder entitlement(TestHolder holder) {
+        return post().with(holder.token());
     }
 
     private static MockHttpServletRequestBuilder post() {
         return MockMvcRequestBuilders.post(CONTEXT + "/api/v1/entitlement")
                 .contextPath(CONTEXT)
-                .header("X-Requested-With", "issuance-portal")
                 .with(host());
     }
 

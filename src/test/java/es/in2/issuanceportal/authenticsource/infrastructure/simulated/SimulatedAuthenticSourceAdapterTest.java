@@ -39,12 +39,12 @@ class SimulatedAuthenticSourceAdapterTest {
     private void save(TenantId tenant, List<Map<String, Object>> records) {
         rows.put(tenant, new AuthenticSourceConfig(DOCTORID, Set.of(IdentifierType.COLEGIADO), Map.of(DOCTORID,
                 new SourceSettings("DoctorID", "simulated", null, null, null,
-                        Set.of(IdentifierType.DNI, IdentifierType.COLEGIADO), List.of(), null,
+                        Set.of(IdentifierType.PERSONAL_ID, IdentifierType.COLEGIADO), List.of(), null,
                         Map.of("records", records)))));
     }
 
     private static Map<String, Object> entry(String dni, String colegiado, boolean entitled) {
-        return Map.of("dni", dni, "colegiado", colegiado, "entitled", entitled,
+        return Map.of("personal_id", dni, "colegiado", colegiado, "entitled", entitled,
                 "attributes", Map.of("registration_number", colegiado, "medical_boards", List.of("Madrid")));
     }
 
@@ -53,7 +53,7 @@ class SimulatedAuthenticSourceAdapterTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"DNI,00000001R", "COLEGIADO,280000001", "DNI,00000001r"})
+    @CsvSource({"PERSONAL_ID,00000001R", "COLEGIADO,280000001", "PERSONAL_ID,00000001r"})
     @DisplayName("AC-15 — lookup_existingRecord_isFoundByEitherIdentifierWithBoth")
     void lookup_existingRecord_isFoundByEitherIdentifierWithBoth(IdentifierType type, String value) {
         save(CGCOM, List.of(entry("00000001R", "280000001", true)));
@@ -61,7 +61,7 @@ class SimulatedAuthenticSourceAdapterTest {
         LookupResult result = search(CGCOM, type, value);
 
         SourceRecord found = ((LookupResult.Found) result).source();
-        assertThat(found.identifiers()).containsExactly(new PersonalIdentifier(IdentifierType.DNI, "00000001R"),
+        assertThat(found.identifiers()).containsExactly(new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R"),
                 new PersonalIdentifier(IdentifierType.COLEGIADO, "280000001"));
         assertThat(found.entitled()).isTrue();
         assertThat(found.attributes()).containsEntry("registration_number", "280000001");
@@ -72,7 +72,7 @@ class SimulatedAuthenticSourceAdapterTest {
     void lookup_deregistered_isFoundNotEntitled() {
         save(CGCOM, List.of(entry("00000002W", "280000002", false)));
 
-        assertThat(((LookupResult.Found) search(CGCOM, IdentifierType.DNI, "00000002W")).source().entitled()).isFalse();
+        assertThat(((LookupResult.Found) search(CGCOM, IdentifierType.PERSONAL_ID, "00000002W")).source().entitled()).isFalse();
     }
 
     @Test
@@ -80,7 +80,7 @@ class SimulatedAuthenticSourceAdapterTest {
     void lookup_unknownDniOrRegistrationNumber_isNotFound() {
         save(CGCOM, List.of(entry("00000001R", "280000001", true)));
 
-        assertThat(search(CGCOM, IdentifierType.DNI, "00000009Y")).isInstanceOf(LookupResult.NotFound.class);
+        assertThat(search(CGCOM, IdentifierType.PERSONAL_ID, "00000009Y")).isInstanceOf(LookupResult.NotFound.class);
         assertThat(search(CGCOM, IdentifierType.COLEGIADO, "289999999")).isInstanceOf(LookupResult.NotFound.class);
     }
 
@@ -88,7 +88,7 @@ class SimulatedAuthenticSourceAdapterTest {
     void lookup_registrationNumberAsDni_isNotFound() {
         save(CGCOM, List.of(entry("00000001R", "280000001", true)));
 
-        assertThat(search(CGCOM, IdentifierType.DNI, "280000001")).isInstanceOf(LookupResult.NotFound.class);
+        assertThat(search(CGCOM, IdentifierType.PERSONAL_ID, "280000001")).isInstanceOf(LookupResult.NotFound.class);
     }
 
     @Test
@@ -97,7 +97,7 @@ class SimulatedAuthenticSourceAdapterTest {
         save(CGCOM, List.of(entry("00000001R", "280000001", true)));
         save(SANDBOX, List.of(entry("00000005M", "280000005", true)));
 
-        assertThat(search(SANDBOX, IdentifierType.DNI, "00000001R")).isInstanceOf(LookupResult.NotFound.class);
+        assertThat(search(SANDBOX, IdentifierType.PERSONAL_ID, "00000001R")).isInstanceOf(LookupResult.NotFound.class);
     }
 
     @Test
@@ -107,7 +107,7 @@ class SimulatedAuthenticSourceAdapterTest {
         failing.put("fail", true);
         save(CGCOM, List.of(failing));
 
-        assertThatThrownBy(() -> search(CGCOM, IdentifierType.DNI, "00000004G"))
+        assertThatThrownBy(() -> search(CGCOM, IdentifierType.PERSONAL_ID, "00000004G"))
                 .isInstanceOf(IllegalStateException.class);
     }
 
@@ -119,7 +119,7 @@ class SimulatedAuthenticSourceAdapterTest {
         save(CGCOM, List.of(slow));
 
         try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var answer = executor.submit(() -> search(CGCOM, IdentifierType.DNI, "00000003A"));
+            var answer = executor.submit(() -> search(CGCOM, IdentifierType.PERSONAL_ID, "00000003A"));
             assertThatThrownBy(() -> answer.get(300, TimeUnit.MILLISECONDS))
                     .isInstanceOf(TimeoutException.class);
             answer.cancel(true);
@@ -129,10 +129,10 @@ class SimulatedAuthenticSourceAdapterTest {
     @Test
     void lookup_malformedRecords_failsWithoutQuotingThem() {
         rows.put(CGCOM, new AuthenticSourceConfig(DOCTORID, Set.of(), Map.of(DOCTORID,
-                new SourceSettings("DoctorID", "simulated", null, null, null, Set.of(IdentifierType.DNI), List.of(),
+                new SourceSettings("DoctorID", "simulated", null, null, null, Set.of(IdentifierType.PERSONAL_ID), List.of(),
                         null, Map.of("records", "00000001R")))));
 
-        assertThatThrownBy(() -> search(CGCOM, IdentifierType.DNI, "00000001R"))
+        assertThatThrownBy(() -> search(CGCOM, IdentifierType.PERSONAL_ID, "00000001R"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("settings.records of the simulated source is invalid");
     }
@@ -140,20 +140,20 @@ class SimulatedAuthenticSourceAdapterTest {
     @Test
     void lookup_noRecords_isNotFound() {
         rows.put(CGCOM, new AuthenticSourceConfig(DOCTORID, Set.of(), Map.of(DOCTORID,
-                new SourceSettings("DoctorID", "simulated", null, null, null, Set.of(IdentifierType.DNI), List.of(),
+                new SourceSettings("DoctorID", "simulated", null, null, null, Set.of(IdentifierType.PERSONAL_ID), List.of(),
                         null, null))));
 
-        assertThat(search(CGCOM, IdentifierType.DNI, "00000001R"))
+        assertThat(search(CGCOM, IdentifierType.PERSONAL_ID, "00000001R"))
                 .isInstanceOf(LookupResult.NotFound.class);
     }
 
     @Test
     void lookup_entryNoLongerChoosesTheSimulatedAdapter_throws() {
         rows.put(CGCOM, new AuthenticSourceConfig(DOCTORID, Set.of(), Map.of(DOCTORID,
-                new SourceSettings("DoctorID", "cgcom", null, null, null, Set.of(IdentifierType.DNI), List.of(),
+                new SourceSettings("DoctorID", "cgcom", null, null, null, Set.of(IdentifierType.PERSONAL_ID), List.of(),
                         null, Map.of("records", List.of(entry("00000001R", "280000001", true)))))));
 
-        assertThatThrownBy(() -> search(CGCOM, IdentifierType.DNI, "00000001R"))
+        assertThatThrownBy(() -> search(CGCOM, IdentifierType.PERSONAL_ID, "00000001R"))
                 .isInstanceOf(IllegalStateException.class);
     }
 }
