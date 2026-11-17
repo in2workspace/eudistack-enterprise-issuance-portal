@@ -38,6 +38,23 @@ class PortalConfigTest {
     }
 
     @Test
+    void portalConfig_loginAttestationScope_isOptionalAndKept() {
+        assertThat(new PortalConfig(TEXTS, LEGAL_LINKS, SUPPORT, WALLET_URL, null, null).loginAttestationScope())
+                .isNull();
+        assertThat(new PortalConfig(TEXTS, LEGAL_LINKS, SUPPORT, WALLET_URL, AssuranceLevel.SUBSTANTIAL, "doctorid",
+                null).loginAttestationScope()).isEqualTo("doctorid");
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"", "doctorid openid", " doctorid", "doc\"torid", "doc\\torid", "doctorid\n", "médico"})
+    void portalConfig_loginAttestationScopeNotOneScope_isInvalid(String value) {
+        assertThatThrownBy(() -> new PortalConfig(TEXTS, LEGAL_LINKS, SUPPORT, WALLET_URL, AssuranceLevel.HIGH, value,
+                null))
+                .isInstanceOf(InvalidPortalConfigException.class)
+                .hasMessageContaining("login_attestation_scope");
+    }
+
+    @Test
     void assuranceLevel_ofConfig_readsTheContractValuesAndDefaultsToHigh() {
         assertThat(AssuranceLevel.ofConfig(null)).isEqualTo(AssuranceLevel.HIGH);
         assertThat(AssuranceLevel.ofConfig("high")).isEqualTo(AssuranceLevel.HIGH);

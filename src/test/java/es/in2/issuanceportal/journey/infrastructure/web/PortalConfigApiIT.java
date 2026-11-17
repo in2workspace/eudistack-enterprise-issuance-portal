@@ -77,7 +77,8 @@ class PortalConfigApiIT {
                 .andExpect(jsonPath("$.support.schedule").value("L-V 9:00-18:00"))
                 .andExpect(jsonPath("$.support.response_time").value("48 horas"))
                 .andExpect(jsonPath("$.wallet_url").value("https://sandbox.stg.eudistack.net/wallet"))
-                .andExpect(jsonPath("$.assurance_level").value("high"));
+                .andExpect(jsonPath("$.assurance_level").value("high"))
+                .andExpect(jsonPath("$.login_attestation_scope").doesNotExist());
     }
 
     @Test
@@ -89,6 +90,29 @@ class PortalConfigApiIT {
         mvc.perform(get("kpmg.127.0.0.1.nip.io"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.assurance_level").value("substantial"));
+    }
+
+    @Test
+    @DisplayName("AC-13 — getConfig_tenantWithLoginAttestationScope_servesIt")
+    void getConfig_tenantWithLoginAttestationScope_servesIt() throws Exception {
+        save(KPMG, CONFIG_JSON.formatted("kpmg", "kpmg")
+                .replace("\"portal_client_id\"", "\"login_attestation_scope\": \"doctorid\", \"portal_client_id\""));
+
+        mvc.perform(get("kpmg.127.0.0.1.nip.io"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$", aMapWithSize(6)))
+                .andExpect(jsonPath("$.login_attestation_scope").value("doctorid"));
+    }
+
+    @Test
+    @DisplayName("AC-13 — getConfig_loginAttestationScopeNotOneScope_isConfigUnavailable")
+    void getConfig_loginAttestationScopeNotOneScope_isConfigUnavailable() throws Exception {
+        save(KPMG, CONFIG_JSON.formatted("kpmg", "kpmg")
+                .replace("\"portal_client_id\"", "\"login_attestation_scope\": \"doctorid openid\", \"portal_client_id\""));
+
+        mvc.perform(get("kpmg.127.0.0.1.nip.io"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.type").value("config_unavailable"));
     }
 
     @Test
