@@ -99,7 +99,7 @@ dependencies {
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'com.tngtech.archunit:archunit-junit5:1.5.0'
     // The Verifier, the Issuer and the Wallet Unit Service are simulated over HTTP.
-    testImplementation 'org.wiremock:wiremock-standalone:3.13.1'
+    testImplementation 'org.wiremock:wiremock-standalone:3.13.2'
     // A real SMTP server to assert the message the mail adapters send.
     testImplementation 'com.icegreen:greenmail-junit5:2.1.15'
 
