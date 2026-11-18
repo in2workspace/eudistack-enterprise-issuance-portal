@@ -153,6 +153,33 @@ class DisputeApiIT {
     }
 
     @Test
+    @DisplayName("AC-13 — dispute_completedJourneyStillActive_is204AndTheRequestIsUnderReview")
+    void dispute_completedJourneyStillActive_is204AndTheRequestIsUnderReview() throws Exception {
+        TestHolder holder = checkedJourney("00000005M");
+        // The holder obtained and saved the offer of another request: the journey is completed and still active.
+        jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET state = 'completed', step = 'offer_obtained', "
+                + "completed_at = now() WHERE id = :id").param("id", journeyOf(holder)).update();
+
+        mvc.perform(dispute(holder, "r3")).andExpect(status().isNoContent());
+
+        assertThat(section(holder).request("r3").orElseThrow().status())
+                .isEqualTo(EntitlementRecord.Status.UNDER_REVIEW);
+    }
+
+    @Test
+    @DisplayName("ES-08 — dispute_completedJourneyThatEnded_is410JourneyClosed")
+    void dispute_completedJourneyThatEnded_is410JourneyClosed() throws Exception {
+        TestHolder holder = checkedJourney("00000005M");
+        mvc.perform(MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey/withdrawal")
+                        .contextPath(CONTEXT).with(host()).with(holder.token()))
+                .andExpect(status().isOk());
+
+        mvc.perform(dispute(holder, "r3"))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.type").value("journey_closed"));
+    }
+
+    @Test
     @DisplayName("ES-08 — dispute_journeyWithdrawnByTheCheck_is410JourneyClosed")
     void dispute_journeyWithdrawnByTheCheck_is410JourneyClosed() throws Exception {
         TestHolder holder = journeyWith("00000002W");

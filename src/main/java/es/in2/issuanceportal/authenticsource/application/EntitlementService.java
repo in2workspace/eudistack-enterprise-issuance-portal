@@ -215,13 +215,16 @@ public class EntitlementService implements AutoCloseable {
      * The holder says the data of a request is not correct (design.md §3.5, AD-7). The source is told once, if
      * it supports it, and the request becomes under review whatever happens: the notice never blocks the holder.
      *
-     * @throws ProblemException {@code step_not_allowed} without a journey in progress or checked requests,
+     * @throws ProblemException {@code journey_closed} without an active journey (in progress, or completed and not ended),
+     *                          {@code step_not_allowed} without checked requests,
      *                          {@code request_not_found} for an id the journey does not have and
      *                          {@code request_not_available} for a request that is not available
      */
     public void dispute(TenantId tenant, HolderRef holder, String requestId) {
         long started = System.nanoTime();
-        access.requireInProgress(tenant, holder);
+        // A completed journey is still active (EUD-262 design.md AD-18): after saving one request the holder can
+        // still say the data of another is not correct.
+        access.requireActive(tenant, holder);
         UUID journeyId = sessions.journeyOf(tenant, holder)
                 .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
         EntitlementRecord entitlement = checked(tenant, journeyId);
