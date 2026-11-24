@@ -1026,6 +1026,7 @@ class EntitlementServiceTest {
                 new AuthenticSourceAuditTrail() {
                     @Override
                     public void append(TenantId tenant, Event event) {
+                        // Intentionally empty: only the dispute's trail is under test here.
                     }
 
                     @Override

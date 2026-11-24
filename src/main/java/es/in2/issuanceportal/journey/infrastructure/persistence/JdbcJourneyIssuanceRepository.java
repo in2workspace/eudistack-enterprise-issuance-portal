@@ -16,6 +16,8 @@ import java.util.UUID;
 @Repository
 class JdbcJourneyIssuanceRepository implements JourneyIssuanceRepository {
 
+    private static final String JOURNEY = "journey";
+
     private static final RowMapper<JourneyIssuance> ROW = (rs, row) -> {
         Timestamp savedAt = rs.getTimestamp("saved_at");
         return new JourneyIssuance(rs.getObject("journey_id", UUID.class), rs.getString("request_id"),
@@ -35,7 +37,7 @@ class JdbcJourneyIssuanceRepository implements JourneyIssuanceRepository {
     public void insert(TenantId tenant, JourneyIssuance issuance) {
         jdbc.sql("INSERT INTO " + table(tenant) + " (journey_id, request_id, issuance_process_id, created_at, saved_at) "
                         + "VALUES (:journey, :request, :process, :createdAt, :savedAt)")
-                .param("journey", issuance.journeyId())
+                .param(JOURNEY, issuance.journeyId())
                 .param("request", issuance.requestId())
                 .param("process", issuance.issuanceProcessId())
                 .param("createdAt", Timestamp.from(issuance.createdAt()))
@@ -50,7 +52,7 @@ class JdbcJourneyIssuanceRepository implements JourneyIssuanceRepository {
         return jdbc.sql("UPDATE " + table(tenant) + " SET saved_at = :savedAt WHERE journey_id = :journey "
                         + "AND request_id = :request AND saved_at IS NULL")
                 .param("savedAt", Timestamp.from(savedAt))
-                .param("journey", journeyId)
+                .param(JOURNEY, journeyId)
                 .param("request", requestId)
                 .update() == 1;
     }
@@ -61,7 +63,7 @@ class JdbcJourneyIssuanceRepository implements JourneyIssuanceRepository {
     public List<JourneyIssuance> findByJourney(TenantId tenant, UUID journeyId) {
         return jdbc.sql("SELECT journey_id, request_id, issuance_process_id, created_at, saved_at FROM " + table(tenant)
                         + " WHERE journey_id = :journey ORDER BY created_at, request_id")
-                .param("journey", journeyId)
+                .param(JOURNEY, journeyId)
                 .query(ROW)
                 .list();
     }

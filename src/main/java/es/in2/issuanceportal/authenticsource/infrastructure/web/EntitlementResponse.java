@@ -19,7 +19,7 @@ record EntitlementResponse(String result, String reason, List<Request> requests)
     static EntitlementResponse of(EntitlementService.Outcome outcome) {
         List<Request> requests = outcome.requests().stream().map(Request::of).toList();
         return switch (outcome) {
-            case EntitlementService.Outcome.Confirmed _ -> new EntitlementResponse("confirmed", null, requests);
+            case EntitlementService.Outcome.Confirmed(_) -> new EntitlementResponse("confirmed", null, requests);
             case EntitlementService.Outcome.NotConfirmed(var reason, var _) ->
                     new EntitlementResponse("not_confirmed", reason.map(NotConfirmedReason::code).orElse(null),
                             requests);

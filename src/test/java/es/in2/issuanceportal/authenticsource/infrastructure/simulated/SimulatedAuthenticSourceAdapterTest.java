@@ -92,8 +92,11 @@ class SimulatedAuthenticSourceAdapterTest {
         person.put("dispute_supported", false);
         save(CGCOM, List.of(person));
 
-        assertThatThrownBy(() -> adapter.dispute(CGCOM, DOCTORID, holder(IdentifierType.PERSONAL_ID, "00000001R"),
-                "SIM-1", settings(CGCOM), Duration.ofSeconds(10))).isInstanceOf(DisputeNotSupportedException.class);
+        Holder holder = holder(IdentifierType.PERSONAL_ID, "00000001R");
+        SourceSettings settings = settings(CGCOM);
+
+        assertThatThrownBy(() -> adapter.dispute(CGCOM, DOCTORID, holder, "SIM-1", settings, Duration.ofSeconds(10)))
+                .isInstanceOf(DisputeNotSupportedException.class);
     }
 
     @Test
@@ -103,8 +106,11 @@ class SimulatedAuthenticSourceAdapterTest {
         person.put("dispute_fail", true);
         save(CGCOM, List.of(person));
 
-        assertThatThrownBy(() -> adapter.dispute(CGCOM, DOCTORID, holder(IdentifierType.PERSONAL_ID, "00000001R"),
-                "SIM-1", settings(CGCOM), Duration.ofSeconds(10))).isInstanceOf(IllegalStateException.class);
+        Holder holder = holder(IdentifierType.PERSONAL_ID, "00000001R");
+        SourceSettings settings = settings(CGCOM);
+
+        assertThatThrownBy(() -> adapter.dispute(CGCOM, DOCTORID, holder, "SIM-1", settings, Duration.ofSeconds(10)))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @ParameterizedTest

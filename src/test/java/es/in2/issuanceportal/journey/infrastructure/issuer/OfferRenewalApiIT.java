@@ -147,7 +147,9 @@ class OfferRenewalApiIT {
     void renewOffer_409_isOfferNotRenewableWithoutRetries() {
         answers(problem(409, "offer_not_renewable"));
 
-        assertThatThrownBy(() -> api(true).renewOffer(SANDBOX, PROCESS)).isInstanceOf(OfferNotRenewableException.class);
+        IssuanceApi issuanceApi = api(true);
+
+        assertThatThrownBy(() -> issuanceApi.renewOffer(SANDBOX, PROCESS)).isInstanceOf(OfferNotRenewableException.class);
 
         assertThat(requests()).hasSize(1);
     }
@@ -158,7 +160,9 @@ class OfferRenewalApiIT {
     void renewOffer_otherClientErrors_areRejectedWithoutRetries(int status) {
         answers(problem(status, "error"));
 
-        assertThatThrownBy(() -> api(true).renewOffer(SANDBOX, PROCESS)).isInstanceOfSatisfying(
+        IssuanceApi issuanceApi = api(true);
+
+        assertThatThrownBy(() -> issuanceApi.renewOffer(SANDBOX, PROCESS)).isInstanceOfSatisfying(
                 IssuanceRejectedException.class,
                 e -> assertThat(e.reason()).isEqualTo(IssuanceRejectedException.Reason.REQUEST_REJECTED));
 
@@ -170,7 +174,9 @@ class OfferRenewalApiIT {
     void renewOffer_401_isRejectedAndInvalidatesTheSystemToken() {
         answers(problem(401, "unauthorized"));
 
-        assertThatThrownBy(() -> api(false).renewOffer(SANDBOX, PROCESS)).isInstanceOfSatisfying(
+        IssuanceApi issuanceApi = api(false);
+
+        assertThatThrownBy(() -> issuanceApi.renewOffer(SANDBOX, PROCESS)).isInstanceOfSatisfying(
                 IssuanceRejectedException.class,
                 e -> assertThat(e.reason()).isEqualTo(IssuanceRejectedException.Reason.NOT_AUTHORIZED));
 
@@ -193,7 +199,9 @@ class OfferRenewalApiIT {
     void renewOffer_503WithoutRetryOn503_isUnavailableAtOnce() {
         answers(problem(503, "wallet_delivery_timeout"));
 
-        assertThatThrownBy(() -> api(false).renewOffer(SANDBOX, PROCESS)).isInstanceOf(IssuanceUnavailableException.class);
+        IssuanceApi issuanceApi = api(false);
+
+        assertThatThrownBy(() -> issuanceApi.renewOffer(SANDBOX, PROCESS)).isInstanceOf(IssuanceUnavailableException.class);
 
         assertThat(requests()).hasSize(1);
     }
@@ -212,7 +220,9 @@ class OfferRenewalApiIT {
     void renewOffer_neverAnswers_stopsAfterThreeRetries() {
         answers(aResponse().withFault(Fault.CONNECTION_RESET_BY_PEER));
 
-        assertThatThrownBy(() -> api(false).renewOffer(SANDBOX, PROCESS)).isInstanceOf(IssuanceUnavailableException.class);
+        IssuanceApi issuanceApi = api(false);
+
+        assertThatThrownBy(() -> issuanceApi.renewOffer(SANDBOX, PROCESS)).isInstanceOf(IssuanceUnavailableException.class);
 
         assertThat(requests()).hasSize(4);
     }
@@ -223,7 +233,9 @@ class OfferRenewalApiIT {
         answers(aResponse().withStatus(200).withHeader("Content-Type", "application/json")
                 .withBody("{\"responses\":[{\"channel\":\"email\",\"status\":200}]}"));
 
-        assertThatThrownBy(() -> api(false).renewOffer(SANDBOX, PROCESS)).isInstanceOfSatisfying(
+        IssuanceApi issuanceApi = api(false);
+
+        assertThatThrownBy(() -> issuanceApi.renewOffer(SANDBOX, PROCESS)).isInstanceOfSatisfying(
                 IssuanceRejectedException.class,
                 e -> assertThat(e.reason()).isEqualTo(IssuanceRejectedException.Reason.UNEXPECTED_RESPONSE));
     }
@@ -233,7 +245,9 @@ class OfferRenewalApiIT {
     void renewOffer_tenantWithoutSystemToken_failsWithoutCallingTheIssuer() {
         tokens.failWith(SystemTokenUnavailableException.Reason.NO_MACHINE_CREDENTIAL);
 
-        assertThatThrownBy(() -> api(false).renewOffer(SANDBOX, PROCESS))
+        IssuanceApi issuanceApi = api(false);
+
+        assertThatThrownBy(() -> issuanceApi.renewOffer(SANDBOX, PROCESS))
                 .isInstanceOf(SystemTokenUnavailableException.class);
 
         assertThat(requests()).isEmpty();
@@ -243,7 +257,8 @@ class OfferRenewalApiIT {
     @DisplayName("NFR-4 — renewOffer_everyOutcome_logsNeitherTheOfferNorTheProcessNorTheToken")
     void renewOffer_everyOutcome_logsNeitherTheOfferNorTheProcessNorTheToken() {
         answers(problem(409, "offer_not_renewable"));
-        assertThatThrownBy(() -> api(false).renewOffer(SANDBOX, PROCESS)).isInstanceOf(OfferNotRenewableException.class);
+        IssuanceApi issuanceApi = api(false);
+        assertThatThrownBy(() -> issuanceApi.renewOffer(SANDBOX, PROCESS)).isInstanceOf(OfferNotRenewableException.class);
         issuer.resetAll();
         answers(renewed());
         api(false).renewOffer(SANDBOX, PROCESS);

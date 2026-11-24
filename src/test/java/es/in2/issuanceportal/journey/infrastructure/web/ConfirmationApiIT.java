@@ -878,7 +878,7 @@ class ConfirmationApiIT {
 
         // The two shared the key stored by the first: one process, one entry, the second answered the stored offer.
         UUID keyOfR1 = issuer.api().calls().getFirst().idempotencyKey();
-        assertThat(issuer.api().calls()).extracting(call -> call.idempotencyKey()).containsOnly(keyOfR1);
+        assertThat(issuer.api().calls()).extracting(InMemoryIssuanceApi.Call::idempotencyKey).containsOnly(keyOfR1);
         assertThat(issuer.api().processes()).isEqualTo(1);
         assertThat(jdbc.sql("SELECT count(*) FROM \"sandbox_issuance_portal\".journey_issuance WHERE journey_id = :id")
                 .param("id", journeyOf(holder)).query(Long.class).single()).isEqualTo(1L);

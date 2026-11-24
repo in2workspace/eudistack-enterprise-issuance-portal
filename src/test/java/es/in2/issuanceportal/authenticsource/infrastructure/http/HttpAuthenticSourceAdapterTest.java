@@ -92,6 +92,7 @@ class HttpAuthenticSourceAdapterTest {
 
         @Override
         public void invalidate(TenantId tenant) {
+            // Intentionally empty: the fake token holder keeps nothing to invalidate.
         }
     };
     private final SourceSecrets secrets = (tenant, reference) -> "secret-of-" + reference;
@@ -120,26 +121,32 @@ class HttpAuthenticSourceAdapterTest {
                 X509ExtendedTrustManager trustAll = new X509ExtendedTrustManager() {
                     @Override
                     public void checkClientTrusted(X509Certificate[] chain, String type, Socket socket) {
+                        // Intentionally empty: the test server's certificate is trusted without checks.
                     }
 
                     @Override
                     public void checkServerTrusted(X509Certificate[] chain, String type, Socket socket) {
+                        // Intentionally empty: the test server's certificate is trusted without checks.
                     }
 
                     @Override
                     public void checkClientTrusted(X509Certificate[] chain, String type, SSLEngine engine) {
+                        // Intentionally empty: the test server's certificate is trusted without checks.
                     }
 
                     @Override
                     public void checkServerTrusted(X509Certificate[] chain, String type, SSLEngine engine) {
+                        // Intentionally empty: the test server's certificate is trusted without checks.
                     }
 
                     @Override
                     public void checkClientTrusted(X509Certificate[] chain, String type) {
+                        // Intentionally empty: the test server's certificate is trusted without checks.
                     }
 
                     @Override
                     public void checkServerTrusted(X509Certificate[] chain, String type) {
+                        // Intentionally empty: the test server's certificate is trusted without checks.
                     }
 
                     @Override
@@ -296,9 +303,10 @@ class HttpAuthenticSourceAdapterTest {
                 "{\"requests\": [{\"collegiate_number\": \"1\", \"status\": \"eligible\", \"renewal\": \"yes\"}]}",
                 "{\"requests\": [{\"collegiate_number\": \"1\", \"status\": \"eligible\", \"requested_at\": \"ayer\"}]}",
                 "{\"requests\": [{\"collegiate_number\": \"1\", \"status\": \"eligible\", \"data\": [1]}]}");
+        SourceSettings settings = cgcom();
         for (String body : bodies) {
             answerLookup(200, body);
-            assertThatThrownBy(() -> lookup(cgcom())).as(body).isInstanceOf(RuntimeException.class);
+            assertThatThrownBy(() -> lookup(settings)).as(body).isInstanceOf(RuntimeException.class);
         }
     }
 
@@ -327,8 +335,11 @@ class HttpAuthenticSourceAdapterTest {
     @DisplayName("ES-04 — lookup_urlWithoutHttps_isRejectedWhenTheConfigurationLoadsAndNeverCalled")
     void lookup_urlWithoutHttps_isRejectedWhenTheConfigurationLoadsAndNeverCalled() {
         // Rejected when the configuration loads (EUD-359 review F1); the adapter keeps its own https check.
-        assertThatThrownBy(() -> lookup(settings("http://localhost:" + server.httpsPort(), SourceAuth.SYSTEM_TOKEN,
-                cgcomContract()))).isInstanceOf(InvalidSourceConfigException.class);
+        SourceContract contract = cgcomContract();
+        String plainHttpUrl = "http://localhost:" + server.httpsPort();
+
+        assertThatThrownBy(() -> settings(plainHttpUrl, SourceAuth.SYSTEM_TOKEN, contract))
+                .isInstanceOf(InvalidSourceConfigException.class);
         assertThat(server.getAllServeEvents()).isEmpty();
     }
 
@@ -338,8 +349,10 @@ class HttpAuthenticSourceAdapterTest {
         server.stubFor(post(urlEqualTo(LOOKUP)).willReturn(aResponse().withStatus(200).withBody(TWO_REQUESTS)
                 .withFixedDelay(3_000)));
 
+        SourceSettings settings = cgcom();
+
         long start = System.nanoTime();
-        assertThatThrownBy(() -> adapter.lookup(CGCOM, "doctorid.sd.1", HOLDER, cgcom(), Duration.ofSeconds(1)))
+        assertThatThrownBy(() -> adapter.lookup(CGCOM, "doctorid.sd.1", HOLDER, settings, Duration.ofSeconds(1)))
                 .isInstanceOf(RuntimeException.class);
 
         assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(3));
@@ -350,7 +363,9 @@ class HttpAuthenticSourceAdapterTest {
     void lookup_failures_logOnlyTheKindAndTheStatus(CapturedOutput output) {
         answerLookup(500, "{\"detail\": \"JOSÉ ANTONIO 12345678Z 282812345\"}");
 
-        assertThatThrownBy(() -> lookup(cgcom())).isInstanceOf(RuntimeException.class);
+        SourceSettings settings = cgcom();
+
+        assertThatThrownBy(() -> lookup(settings)).isInstanceOf(RuntimeException.class);
 
         assertThat(output.getAll()).contains("answered HTTP 500")
                 .doesNotContain("12345678Z", "JOSÉ", "282812345", "GARCÍA", "system-token");

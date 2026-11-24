@@ -13,12 +13,4 @@ public interface SourceSecrets {
      *                                          prefix; never with the secret
      */
     String secret(TenantId tenant, String reference);
-
-    /** The credential cannot be read. It carries nothing: the store's messages may quote the reference or the secret. */
-    class SourceSecretUnavailableException extends RuntimeException {
-
-        public SourceSecretUnavailableException() {
-            super("Source secret unavailable", null, false, false);
-        }
-    }
 }

@@ -30,14 +30,20 @@ public record SourceContract(String lookupPath, String disputePath, Map<String, 
                              Map<String, String> disputeRequest, Map<String, String> response,
                              Map<String, Map<String, String>> values) {
 
-    private static final Set<String> HOLDER_NAMES = Set.of("given_name", "family_names", "identifier",
+    private static final String IDENTIFIER = "identifier";
+    private static final String REFERENCE = "reference";
+    private static final String REASON = "reason";
+    private static final String STATUS = "status";
+    private static final String DISPUTE_REQUEST = "contract.dispute_request";
+
+    private static final Set<String> HOLDER_NAMES = Set.of("given_name", "family_names", IDENTIFIER,
             "identifier_type");
-    private static final Set<String> DISPUTE_NAMES = Set.of("given_name", "family_names", "identifier",
-            "identifier_type", "reference");
-    private static final Set<String> RESPONSE_NAMES = Set.of("requests", "reference", "status", "reason",
+    private static final Set<String> DISPUTE_NAMES = Set.of("given_name", "family_names", IDENTIFIER,
+            "identifier_type", REFERENCE);
+    private static final Set<String> RESPONSE_NAMES = Set.of("requests", REFERENCE, STATUS, REASON,
             "mismatched_fields", "renewal", "requested_by", "requested_at", "display_identifier", "organization",
             "data");
-    private static final Set<String> VALUE_GROUPS = Set.of("reason", "status", "mismatched_fields");
+    private static final Set<String> VALUE_GROUPS = Set.of(REASON, STATUS, "mismatched_fields");
 
     public SourceContract {
         requirePath(lookupPath, "contract.lookup_path");
@@ -46,14 +52,14 @@ public record SourceContract(String lookupPath, String disputePath, Map<String, 
             requirePath(disputePath, "contract.dispute_path");
         }
         request = names(request, HOLDER_NAMES, "contract.request");
-        require(request, "identifier", "contract.request");
-        disputeRequest = names(disputeRequest, DISPUTE_NAMES, "contract.dispute_request");
+        require(request, IDENTIFIER, "contract.request");
+        disputeRequest = names(disputeRequest, DISPUTE_NAMES, DISPUTE_REQUEST);
         if (disputePath != null) {
-            require(disputeRequest, "identifier", "contract.dispute_request");
-            require(disputeRequest, "reference", "contract.dispute_request");
+            require(disputeRequest, IDENTIFIER, DISPUTE_REQUEST);
+            require(disputeRequest, REFERENCE, DISPUTE_REQUEST);
         }
         response = names(response, RESPONSE_NAMES, "contract.response");
-        for (String required : new String[] {"requests", "reference", "status"}) {
+        for (String required : new String[] {"requests", REFERENCE, STATUS}) {
             require(response, required, "contract.response");
         }
         values = valueGroups(values);
@@ -133,9 +139,9 @@ public record SourceContract(String lookupPath, String disputePath, Map<String, 
             return false;
         }
         return switch (group) {
-            case "reason" -> Set.of(NotConfirmedReason.NOT_FOUND.code(), NotConfirmedReason.NO_REQUESTS.code())
+            case REASON -> Set.of(NotConfirmedReason.NOT_FOUND.code(), NotConfirmedReason.NO_REQUESTS.code())
                     .contains(value);
-            case "status" -> RequestStatus.fromCode(value).filter(status -> status != RequestStatus.UNDER_REVIEW)
+            case STATUS -> RequestStatus.fromCode(value).filter(status -> status != RequestStatus.UNDER_REVIEW)
                     .isPresent();
             default -> MismatchedField.fromCode(value).isPresent();
         };

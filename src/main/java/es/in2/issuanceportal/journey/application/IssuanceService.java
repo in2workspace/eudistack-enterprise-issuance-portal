@@ -236,7 +236,7 @@ public class IssuanceService {
 
     private Optional<JourneyIssuance> processOf(TenantId tenant, UUID journeyId, String requestId) {
         return issuances.findByJourney(tenant, journeyId).stream()
-                .filter(issuance -> issuance.requestId().equals(requestId)).findFirst();
+                .filter(process -> process.requestId().equals(requestId)).findFirst();
     }
 
     /** A request without a process is confirmed only if the source says it is available; otherwise {@code step_not_allowed}. */
@@ -527,7 +527,7 @@ public class IssuanceService {
             throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
         }
         boolean recorded = issuances.findByJourney(tenant, journeyId).stream()
-                .anyMatch(issuance -> issuance.requestId().equals(prepared.requestId()));
+                .anyMatch(process -> process.requestId().equals(prepared.requestId()));
         if (recorded) {
             return Optional.of(storedOffer(tenant, journeyId, prepared.requestId()));
         }

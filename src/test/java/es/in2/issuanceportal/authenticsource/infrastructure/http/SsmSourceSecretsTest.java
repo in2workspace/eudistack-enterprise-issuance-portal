@@ -1,7 +1,7 @@
 package es.in2.issuanceportal.authenticsource.infrastructure.http;
 
 import es.in2.issuanceportal.MutableClock;
-import es.in2.issuanceportal.authenticsource.application.port.SourceSecrets;
+import es.in2.issuanceportal.authenticsource.application.port.SourceSecretUnavailableException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -87,7 +87,7 @@ class SsmSourceSecretsTest {
         when(ssm.getParameter(any(Consumer.class))).thenThrow(SdkClientException.create(REF));
 
         assertThatThrownBy(() -> secrets.secret(CGCOM, REF))
-                .isInstanceOf(SourceSecrets.SourceSecretUnavailableException.class)
+                .isInstanceOf(SourceSecretUnavailableException.class)
                 .hasMessageNotContaining("eudistack");
     }
 
@@ -96,7 +96,7 @@ class SsmSourceSecretsTest {
         stored(" ");
 
         assertThatThrownBy(() -> secrets.secret(CGCOM, REF))
-                .isInstanceOf(SourceSecrets.SourceSecretUnavailableException.class);
+                .isInstanceOf(SourceSecretUnavailableException.class);
     }
 
     @Test
@@ -112,7 +112,7 @@ class SsmSourceSecretsTest {
                 "/eudistack/test/config/apps/issuance-portal/authentic-source/cgcomx/registro",
                 "eudistack/test/config/apps/issuance-portal/authentic-source/cgcom/registro")) {
             assertThatThrownBy(() -> secrets.secret(CGCOM, reference))
-                    .isInstanceOf(SourceSecrets.SourceSecretUnavailableException.class)
+                    .isInstanceOf(SourceSecretUnavailableException.class)
                     .hasMessageNotContaining("eudistack");
         }
 
@@ -127,7 +127,7 @@ class SsmSourceSecretsTest {
             SsmSourceSecrets unconfigured = new SsmSourceSecrets(() -> ssm, clock, Duration.ofMinutes(5), template);
 
             assertThatThrownBy(() -> unconfigured.secret(CGCOM, REF))
-                    .isInstanceOf(SourceSecrets.SourceSecretUnavailableException.class);
+                    .isInstanceOf(SourceSecretUnavailableException.class);
         }
 
         verify(ssm, never()).getParameter(any(Consumer.class));

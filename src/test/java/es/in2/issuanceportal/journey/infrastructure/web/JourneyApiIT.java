@@ -9,7 +9,6 @@ import es.in2.issuanceportal.TestcontainersConfiguration;
 import es.in2.issuanceportal.journey.api.JourneyProgress;
 import es.in2.issuanceportal.journey.api.JourneyWithdrawal;
 import es.in2.issuanceportal.journey.application.JourneyService;
-import es.in2.issuanceportal.session.EntitlementRecords;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.IdentifierType;

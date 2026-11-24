@@ -1173,12 +1173,12 @@ class IssuanceServiceTest {
     @DisplayName("AC-05 — declareSaved_requestInOfferWithItsOffer_savesItAndNeverAsksTheIssuer")
     void declareSaved_requestInOfferWithItsOffer_savesItAndNeverAsksTheIssuer() {
         HolderRef holder = confirmedOnce();
-        int issuances = api.calls().size();
+        int callsBefore = api.calls().size();
 
         service.declareSaved(CGCOM, holder, "r1");
 
         assertSavedWithoutOffer(holder, JourneyAuditTrail.SavedOrigin.HOLDER_DECLARED);
-        assertThat(api.calls()).hasSize(issuances);
+        assertThat(api.calls()).hasSize(callsBefore);
         assertThat(api.renewals()).isEmpty();
         assertThat(stored(holder).state()).isEqualTo(JourneyState.COMPLETED);
     }

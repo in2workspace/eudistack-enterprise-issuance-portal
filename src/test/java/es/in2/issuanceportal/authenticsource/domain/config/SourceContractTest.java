@@ -8,7 +8,6 @@ import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -41,7 +40,7 @@ class SourceContractTest {
                 Map.of("status", Map.of("eligible", "available")));
 
         assertThat(contract.translate("status", "eligible")).contains("available");
-        assertThat(contract.translate("status", "available")).isEqualTo(Optional.empty());
+        assertThat(contract.translate("status", "available")).isEmpty();
     }
 
     @Test

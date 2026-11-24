@@ -23,6 +23,7 @@ import static net.logstash.logback.argument.StructuredArguments.kv;
 class LogJourneyAuditTrail implements JourneyAuditTrail {
 
     private static final String EVENT = "event";
+    private static final String REQUEST_ID = "request_id";
     private static final String JOURNEY_ID = "journey_id";
     private static final String EVENT_ID = "event_id";
     private static final String TENANT = "tenant";
@@ -60,7 +61,7 @@ class LogJourneyAuditTrail implements JourneyAuditTrail {
             audit.info("issuance {} {} {} {} {} {} {} {}",
                     kv(EVENT, "ISSUANCE_REQUESTED"),
                     kv(JOURNEY_ID, event.journeyId()),
-                    kv("request_id", event.requestId()),
+                    kv(REQUEST_ID, event.requestId()),
                     kv(EVENT_ID, event.eventId()),
                     kv(TENANT, tenant.value()),
                     kv(RESULT, event.result().code()),
@@ -78,7 +79,7 @@ class LogJourneyAuditTrail implements JourneyAuditTrail {
             audit.info("request saved {} {} {} {} {} {} {}",
                     kv(EVENT, "REQUEST_SAVED"),
                     kv(JOURNEY_ID, event.journeyId()),
-                    kv("request_id", event.requestId()),
+                    kv(REQUEST_ID, event.requestId()),
                     kv(EVENT_ID, event.eventId()),
                     kv(TENANT, tenant.value()),
                     kv("origin", event.origin().code()),
@@ -95,7 +96,7 @@ class LogJourneyAuditTrail implements JourneyAuditTrail {
             audit.info("offer renewal {} {} {} {} {} {} {}",
                     kv(EVENT, "OFFER_RENEWAL_REQUESTED"),
                     kv(JOURNEY_ID, event.journeyId()),
-                    kv("request_id", event.requestId()),
+                    kv(REQUEST_ID, event.requestId()),
                     kv(EVENT_ID, event.eventId()),
                     kv(TENANT, tenant.value()),
                     kv(RESULT, event.result().code()),

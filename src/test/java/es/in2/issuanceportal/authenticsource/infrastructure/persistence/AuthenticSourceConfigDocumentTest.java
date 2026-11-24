@@ -80,10 +80,12 @@ class AuthenticSourceConfigDocumentTest {
 
     @Test
     @DisplayName("ES-05 — toDomain_mappingOntoTheHolderIdentity_isInvalidWithoutQuotingTheValue")
-    void toDomain_mappingOntoTheHolderIdentity_isInvalidWithoutQuotingTheValue() {
+    void toDomain_mappingOntoTheHolderIdentity_isInvalidWithoutQuotingTheValue() throws Exception {
         for (String claim : List.of("givenName", "familyName", "personal_identifier")) {
-            assertThatThrownBy(() -> parse(HTTP_CONFIG.replace(
-                    "\"claim\": \"medical_board\"", "\"claim\": \"" + claim + "\"")).toDomain())
+            AuthenticSourceConfigDocument document = parse(HTTP_CONFIG.replace(
+                    "\"claim\": \"medical_board\"", "\"claim\": \"" + claim + "\""));
+
+            assertThatThrownBy(document::toDomain)
                     .isInstanceOf(InvalidSourceConfigException.class)
                     .hasMessage("authentic_source.doctorid.sd.1.mapping[0].claim places source data in the identity");
         }
@@ -91,9 +93,11 @@ class AuthenticSourceConfigDocumentTest {
 
     @Test
     @DisplayName("ES-05 — toDomain_claimPlacedFromTheIdentityByTheTenant_isInvalid")
-    void toDomain_claimPlacedFromTheIdentityByTheTenant_isInvalid() {
-        assertThatThrownBy(() -> parse(HTTP_CONFIG.replace("\"medical_board\": \"authentic_source.medical_board\"",
-                "\"medical_board\": \"identity.given_name\"")).toDomain())
+    void toDomain_claimPlacedFromTheIdentityByTheTenant_isInvalid() throws Exception {
+        AuthenticSourceConfigDocument document = parse(HTTP_CONFIG.replace(
+                "\"medical_board\": \"authentic_source.medical_board\"", "\"medical_board\": \"identity.given_name\""));
+
+        assertThatThrownBy(document::toDomain)
                 .isInstanceOf(InvalidSourceConfigException.class)
                 .hasMessage("authentic_source.doctorid.sd.1.mapping[0].claim places source data in the identity");
     }
@@ -114,12 +118,14 @@ class AuthenticSourceConfigDocumentTest {
 
     @Test
     @DisplayName("EUD-359 ES-05 — toDomain_urlThatIsNotAPlainHttpsAddress_isInvalidWithoutQuotingIt")
-    void toDomain_urlThatIsNotAPlainHttpsAddress_isInvalidWithoutQuotingIt() {
+    void toDomain_urlThatIsNotAPlainHttpsAddress_isInvalidWithoutQuotingIt() throws Exception {
         for (String url : List.of("http://adapter.example.org/cgcom-adapter", "https://user:pw@adapter.example.org/a",
                 "https://adapter.example.org/a?next=evil", "https://adapter.example.org/a#x", "https:///no-host",
                 "ftp://adapter.example.org", "not a url")) {
-            assertThatThrownBy(() -> parse(HTTP_CONFIG.replace("https://adapter.example.org/cgcom-adapter", url))
-                    .toDomain())
+            AuthenticSourceConfigDocument document = parse(
+                    HTTP_CONFIG.replace("https://adapter.example.org/cgcom-adapter", url));
+
+            assertThatThrownBy(document::toDomain)
                     .isInstanceOf(InvalidSourceConfigException.class)
                     .hasMessageStartingWith("authentic_source.doctorid.sd.1.url ")
                     .hasMessageNotContaining("adapter.example.org");

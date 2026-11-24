@@ -381,7 +381,7 @@ public class EntitlementService implements AutoCloseable {
 
     private static Set<String> underReview(Optional<EntitlementRecord> previous) {
         Set<String> references = new HashSet<>();
-        previous.ifPresent(record -> record.requests().stream()
+        previous.ifPresent(entitlement -> entitlement.requests().stream()
                 .filter(request -> request.status() == EntitlementRecord.Status.UNDER_REVIEW)
                 .forEach(request -> references.add(request.sourceRef())));
         return references;

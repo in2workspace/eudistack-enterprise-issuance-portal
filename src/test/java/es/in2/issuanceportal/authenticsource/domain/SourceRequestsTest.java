@@ -19,8 +19,9 @@ class SourceRequestsTest {
 
     @Test
     void requests_aSourceRequestUnderReview_isRejected() {
-        assertThatThrownBy(() -> SourceRequests.of(request(RequestStatus.UNDER_REVIEW)))
-                .isInstanceOf(IllegalArgumentException.class);
+        SourceRequest underReview = request(RequestStatus.UNDER_REVIEW);
+
+        assertThatThrownBy(() -> SourceRequests.of(underReview)).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test

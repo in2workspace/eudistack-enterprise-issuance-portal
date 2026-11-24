@@ -84,21 +84,25 @@ class JourneyIssuanceMigrationIT {
             // A completed journey with no end is valid; a withdrawn one without end, or one in progress with it, is not.
             UUID active = UUID.randomUUID();
             insert(jdbc, active, "completed", "offer_obtained", null, COMPLETED, null);
-            assertThatThrownBy(() -> insert(jdbc, UUID.randomUUID(), "withdrawn", "identified", "cancelled", null, null))
+            UUID withdrawn = UUID.randomUUID();
+            assertThatThrownBy(() -> insert(jdbc, withdrawn, "withdrawn", "identified", "cancelled", null, null))
                     .isInstanceOf(DataIntegrityViolationException.class);
-            assertThatThrownBy(() -> insert(jdbc, UUID.randomUUID(), "in_progress", "identified", null, null, COMPLETED))
+            UUID inProgress = UUID.randomUUID();
+            assertThatThrownBy(() -> insert(jdbc, inProgress, "in_progress", "identified", null, null, COMPLETED))
                     .isInstanceOf(DataIntegrityViolationException.class);
-            assertThatThrownBy(() -> insert(jdbc, UUID.randomUUID(), "completed", "offer_obtained", null, null, null))
+            UUID completedWithoutEnd = UUID.randomUUID();
+            assertThatThrownBy(() -> insert(jdbc, completedWithoutEnd, "completed", "offer_obtained", null, null, null))
                     .isInstanceOf(DataIntegrityViolationException.class);
             UUID process = UUID.randomUUID();
             jdbc.sql("INSERT INTO " + SCHEMA + ".journey_issuance" + JOURNEY_ISSUANCE + "VALUES (:j, 'r1', :p, now())")
                     .param("j", active).param("p", process).update();
-            assertThatThrownBy(() -> jdbc.sql("INSERT INTO " + SCHEMA + ".journey_issuance" + JOURNEY_ISSUANCE
-                    + "VALUES (:j, 'r2', :p, now())").param("j", active).param("p", process).update())
-                    .isInstanceOf(DataIntegrityViolationException.class);
-            assertThatThrownBy(() -> jdbc.sql("INSERT INTO " + SCHEMA + ".journey_issuance" + JOURNEY_ISSUANCE
-                    + "VALUES (:j, 'r1', :p, now())").param("j", active).param("p", UUID.randomUUID()).update())
-                    .isInstanceOf(DataIntegrityViolationException.class);
+            JdbcClient.StatementSpec sameProcessTwice = jdbc.sql("INSERT INTO " + SCHEMA + ".journey_issuance"
+                    + JOURNEY_ISSUANCE + "VALUES (:j, 'r2', :p, now())").param("j", active).param("p", process);
+            assertThatThrownBy(sameProcessTwice::update).isInstanceOf(DataIntegrityViolationException.class);
+            JdbcClient.StatementSpec sameRequestTwice = jdbc.sql("INSERT INTO " + SCHEMA + ".journey_issuance"
+                    + JOURNEY_ISSUANCE + "VALUES (:j, 'r1', :p, now())").param("j", active)
+                    .param("p", UUID.randomUUID());
+            assertThatThrownBy(sameRequestTwice::update).isInstanceOf(DataIntegrityViolationException.class);
         }
     }
 

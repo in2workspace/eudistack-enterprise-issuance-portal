@@ -104,7 +104,7 @@ public class JourneyViewService {
         IssuanceRecord issuance = read(tenant, journey.id(), Section.ISSUANCE, IssuanceRecord::fromJson)
                 .orElseGet(IssuanceRecord::empty);
         List<JourneyIssuance> processes = issuances.findByJourney(tenant, journey.id());
-        List<RequestView> requests = entitlement.map(record -> record.requests().stream()
+        List<RequestView> requests = entitlement.map(section -> section.requests().stream()
                 .map(request -> view(tenant, journey.id(), request, processes, issuance)).toList())
                 .orElse(List.of());
         Optional<EmailVerification> emailVerification = read(tenant, journey.id(), Section.EMAIL_VERIFICATION,

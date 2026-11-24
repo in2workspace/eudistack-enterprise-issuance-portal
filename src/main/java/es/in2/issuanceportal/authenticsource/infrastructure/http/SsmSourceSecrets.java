@@ -1,5 +1,6 @@
 package es.in2.issuanceportal.authenticsource.infrastructure.http;
 
+import es.in2.issuanceportal.authenticsource.application.port.SourceSecretUnavailableException;
 import es.in2.issuanceportal.authenticsource.application.port.SourceSecrets;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import lombok.extern.slf4j.Slf4j;
@@ -11,7 +12,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
@@ -41,7 +41,7 @@ final class SsmSourceSecrets implements SourceSecrets {
     private final Duration ttl;
     private final String prefixTemplate;
     private final Map<String, Cached> cache = new ConcurrentHashMap<>();
-    private final AtomicReference<SsmClient> client = new AtomicReference<>();
+    private SsmClient client;
 
     SsmSourceSecrets(Supplier<SsmClient> clientFactory, Clock clock, Duration ttl, String prefixTemplate) {
         this.clientFactory = clientFactory;
@@ -84,18 +84,11 @@ final class SsmSourceSecrets implements SourceSecrets {
                 && !reference.contains("..") && !reference.contains("//");
     }
 
-    /** Created once, on first use; the lock only guards that creation. */
-    private SsmClient ssm() {
-        SsmClient current = client.get();
-        if (current == null) {
-            synchronized (client) {
-                current = client.get();
-                if (current == null) {
-                    current = clientFactory.get();
-                    client.set(current);
-                }
-            }
+    /** Created once, on first use; only reached on a cache miss. */
+    private synchronized SsmClient ssm() {
+        if (client == null) {
+            client = clientFactory.get();
         }
-        return current;
+        return client;
     }
 }
