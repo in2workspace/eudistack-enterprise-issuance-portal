@@ -350,9 +350,10 @@ class HttpAuthenticSourceAdapterTest {
                 .withFixedDelay(3_000)));
 
         SourceSettings settings = cgcom();
+        Duration timeout = Duration.ofSeconds(1);
 
         long start = System.nanoTime();
-        assertThatThrownBy(() -> adapter.lookup(CGCOM, "doctorid.sd.1", HOLDER, settings, Duration.ofSeconds(1)))
+        assertThatThrownBy(() -> adapter.lookup(CGCOM, "doctorid.sd.1", HOLDER, settings, timeout))
                 .isInstanceOf(RuntimeException.class);
 
         assertThat(Duration.ofNanos(System.nanoTime() - start)).isLessThan(Duration.ofSeconds(3));

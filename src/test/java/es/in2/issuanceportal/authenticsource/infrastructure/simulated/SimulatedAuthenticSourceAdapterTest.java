@@ -94,8 +94,9 @@ class SimulatedAuthenticSourceAdapterTest {
 
         Holder holder = holder(IdentifierType.PERSONAL_ID, "00000001R");
         SourceSettings settings = settings(CGCOM);
+        Duration timeout = Duration.ofSeconds(10);
 
-        assertThatThrownBy(() -> adapter.dispute(CGCOM, DOCTORID, holder, "SIM-1", settings, Duration.ofSeconds(10)))
+        assertThatThrownBy(() -> adapter.dispute(CGCOM, DOCTORID, holder, "SIM-1", settings, timeout))
                 .isInstanceOf(DisputeNotSupportedException.class);
     }
 
@@ -108,8 +109,9 @@ class SimulatedAuthenticSourceAdapterTest {
 
         Holder holder = holder(IdentifierType.PERSONAL_ID, "00000001R");
         SourceSettings settings = settings(CGCOM);
+        Duration timeout = Duration.ofSeconds(10);
 
-        assertThatThrownBy(() -> adapter.dispute(CGCOM, DOCTORID, holder, "SIM-1", settings, Duration.ofSeconds(10)))
+        assertThatThrownBy(() -> adapter.dispute(CGCOM, DOCTORID, holder, "SIM-1", settings, timeout))
                 .isInstanceOf(IllegalStateException.class);
     }
 
