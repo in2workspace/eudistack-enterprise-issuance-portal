@@ -30,6 +30,8 @@ class JdbcJourneyIssuanceRepository implements JourneyIssuanceRepository {
     }
 
     @Override
+    // java:S2077 false positive: the table comes from the validated TenantId schema; every value is bound.
+    @SuppressWarnings("java:S2077")
     public void insert(TenantId tenant, JourneyIssuance issuance) {
         jdbc.sql("INSERT INTO " + table(tenant) + " (journey_id, request_id, issuance_process_id, created_at, saved_at) "
                         + "VALUES (:journey, :request, :process, :createdAt, :savedAt)")
@@ -42,6 +44,8 @@ class JdbcJourneyIssuanceRepository implements JourneyIssuanceRepository {
     }
 
     @Override
+    // java:S2077 false positive: the table comes from the validated TenantId schema; every value is bound.
+    @SuppressWarnings("java:S2077")
     public boolean markSaved(TenantId tenant, UUID journeyId, String requestId, Instant savedAt) {
         return jdbc.sql("UPDATE " + table(tenant) + " SET saved_at = :savedAt WHERE journey_id = :journey "
                         + "AND request_id = :request AND saved_at IS NULL")
@@ -52,6 +56,8 @@ class JdbcJourneyIssuanceRepository implements JourneyIssuanceRepository {
     }
 
     @Override
+    // java:S2077 false positive: the table comes from the validated TenantId schema; every value is bound.
+    @SuppressWarnings("java:S2077")
     public List<JourneyIssuance> findByJourney(TenantId tenant, UUID journeyId) {
         return jdbc.sql("SELECT journey_id, request_id, issuance_process_id, created_at, saved_at FROM " + table(tenant)
                         + " WHERE journey_id = :journey ORDER BY created_at, request_id")

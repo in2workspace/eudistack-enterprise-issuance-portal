@@ -11,6 +11,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
 /**
@@ -40,7 +41,7 @@ final class SsmSourceSecrets implements SourceSecrets {
     private final Duration ttl;
     private final String prefixTemplate;
     private final Map<String, Cached> cache = new ConcurrentHashMap<>();
-    private volatile SsmClient client;
+    private final AtomicReference<SsmClient> client = new AtomicReference<>();
 
     SsmSourceSecrets(Supplier<SsmClient> clientFactory, Clock clock, Duration ttl, String prefixTemplate) {
         this.clientFactory = clientFactory;
@@ -83,14 +84,16 @@ final class SsmSourceSecrets implements SourceSecrets {
                 && !reference.contains("..") && !reference.contains("//");
     }
 
+    /** Created once, on first use; the lock only guards that creation. */
     private SsmClient ssm() {
-        SsmClient current = client;
+        SsmClient current = client.get();
         if (current == null) {
-            synchronized (this) {
-                if (client == null) {
-                    client = clientFactory.get();
+            synchronized (client) {
+                current = client.get();
+                if (current == null) {
+                    current = clientFactory.get();
+                    client.set(current);
                 }
-                current = client;
             }
         }
         return current;
