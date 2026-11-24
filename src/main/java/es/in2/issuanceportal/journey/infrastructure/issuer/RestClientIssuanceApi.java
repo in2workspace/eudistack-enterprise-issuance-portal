@@ -43,8 +43,8 @@ import java.util.function.Function;
 
 /**
  * {@code POST /api/v1/issuances} and {@code POST /api/v1/issuances/{id}/credential-offer} of the tenant's Issuer, over
- * the internal network (design.md §3.3, §3.4, AD-6). The renewal follows the contract of the branch
- * {@code feature/EUD-295-renew-credential-offer} of {@code eudistack-core-issuer}, not yet merged: 200 with the same
+ * the internal network (design.md §3.3, §3.4, AD-6). The renewal follows the contract of EUD-295 in
+ * {@code eudistack-core-issuer}: 200 with the same
  * {@code responses[0].body.credential_offer_uri} envelope and no {@code Location}; 409 {@code offer_not_renewable} when
  * the process is no longer a draft; 404, 403 and 400 as a rejection; 503 (delivery failed, previous offer still valid)
  * as an unavailable Issuer, retried like the issuance.

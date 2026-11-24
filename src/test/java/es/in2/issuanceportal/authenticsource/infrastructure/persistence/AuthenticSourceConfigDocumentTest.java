@@ -111,4 +111,18 @@ class AuthenticSourceConfigDocumentTest {
                 "\"url\": \"https://adapter.example.org/cgcom-adapter\",", "")).toDomain())
                 .hasMessage("authentic_source.doctorid.sd.1.url is required");
     }
+
+    @Test
+    @DisplayName("EUD-359 ES-05 — toDomain_urlThatIsNotAPlainHttpsAddress_isInvalidWithoutQuotingIt")
+    void toDomain_urlThatIsNotAPlainHttpsAddress_isInvalidWithoutQuotingIt() {
+        for (String url : List.of("http://adapter.example.org/cgcom-adapter", "https://user:pw@adapter.example.org/a",
+                "https://adapter.example.org/a?next=evil", "https://adapter.example.org/a#x", "https:///no-host",
+                "ftp://adapter.example.org", "not a url")) {
+            assertThatThrownBy(() -> parse(HTTP_CONFIG.replace("https://adapter.example.org/cgcom-adapter", url))
+                    .toDomain())
+                    .isInstanceOf(InvalidSourceConfigException.class)
+                    .hasMessageStartingWith("authentic_source.doctorid.sd.1.url ")
+                    .hasMessageNotContaining("adapter.example.org");
+        }
+    }
 }

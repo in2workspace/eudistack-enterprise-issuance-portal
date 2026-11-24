@@ -18,6 +18,7 @@ import es.in2.issuanceportal.authenticsource.domain.config.SourceSettings;
 import es.in2.issuanceportal.journey.api.JourneyAccess;
 import es.in2.issuanceportal.journey.api.JourneyProgress;
 import es.in2.issuanceportal.journey.api.JourneyWithdrawal;
+import es.in2.issuanceportal.journey.api.SavedRequests;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.HolderRef;
@@ -80,10 +81,12 @@ public class EntitlementService implements AutoCloseable {
     private final Clock clock;
     private final ExecutorService lookups = Executors.newVirtualThreadPerTaskExecutor();
     private final LookupSlots lookupSlots;
+    private final SavedRequests saved;
 
     EntitlementService(JourneyAccess access, JourneyProgress progress, JourneyWithdrawal withdrawal,
                        JourneySessions sessions, AuthenticSourceConfigs configs, AuthenticSourceAuditTrail trail,
-                       TransactionOperations transactions, Clock clock, LookupSlots lookupSlots) {
+                       TransactionOperations transactions, Clock clock, LookupSlots lookupSlots,
+                       SavedRequests saved) {
         this.access = access;
         this.progress = progress;
         this.withdrawal = withdrawal;
@@ -93,6 +96,7 @@ public class EntitlementService implements AutoCloseable {
         this.transactions = transactions;
         this.clock = clock;
         this.lookupSlots = lookupSlots;
+        this.saved = saved;
     }
 
     /** The result the interface gets: the holder's requests, confirmed when at least one is available. */
@@ -218,7 +222,8 @@ public class EntitlementService implements AutoCloseable {
      * @throws ProblemException {@code journey_closed} without an active journey (in progress, or completed and not ended),
      *                          {@code step_not_allowed} without checked requests,
      *                          {@code request_not_found} for an id the journey does not have and
-     *                          {@code request_not_available} for a request that is not available
+     *                          {@code request_not_available} for a request that is not available or is already
+     *                          saved in the wallet
      */
     public void dispute(TenantId tenant, HolderRef holder, String requestId) {
         long started = System.nanoTime();
@@ -233,7 +238,8 @@ public class EntitlementService implements AutoCloseable {
         if (request.status() == EntitlementRecord.Status.UNDER_REVIEW) {
             return;
         }
-        if (request.status() != EntitlementRecord.Status.AVAILABLE) {
+        // A request already saved in the wallet is finished in this journey: the source is not told about it.
+        if (request.status() != EntitlementRecord.Status.AVAILABLE || saved.isSaved(tenant, journeyId, requestId)) {
             throw new ProblemException(ProblemCode.REQUEST_NOT_AVAILABLE);
         }
         HolderIdentity identity = identity(tenant, journeyId);

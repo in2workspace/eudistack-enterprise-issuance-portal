@@ -664,7 +664,7 @@ class IssuanceServiceTest {
 
     @ParameterizedTest
     @EnumSource(OnboardingTicketException.Reason.class)
-    @DisplayName("AC-12 — confirm_ticketNotCreated_isOnboardingUnavailableWithoutOfferAndKeepsOnlyTheProcess")
+    @DisplayName("EUD-277 AC-12 — confirm_ticketNotCreated_isOnboardingUnavailableWithoutOfferAndKeepsOnlyTheProcess")
     void confirm_ticketNotCreated_isOnboardingUnavailableWithoutOfferAndKeepsOnlyTheProcess(
             OnboardingTicketException.Reason reason) {
         withOnboarding();

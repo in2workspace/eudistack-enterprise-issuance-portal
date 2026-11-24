@@ -34,7 +34,7 @@ class SimulatedAdapterStartupTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"pro", "PRO", "prod", "production", " pro", ""})
-    @DisplayName("AC-12 — start_productionOrAnyOtherValue_registryHasNoSimulatedAdapter")
+    @DisplayName("EUD-330 AC-12, EUD-359 EC-11 — start_productionOrAnyOtherValue_registryHasNoSimulatedAdapter")
     void start_productionOrAnyOtherValue_registryHasNoSimulatedAdapter(String env) {
         context.withPropertyValues("issuance-portal.env=" + env).run(started -> {
             assertThat(started).hasNotFailed();

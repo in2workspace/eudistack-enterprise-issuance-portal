@@ -183,7 +183,7 @@ class HttpAuthenticSourceAdapter implements AuthenticSourceAdapter {
     private String bearer(TenantId tenant, SourceSettings settings) {
         return switch (settings.auth()) {
             case SYSTEM_TOKEN -> systemTokens.tokenFor(tenant).value();
-            case SECRET -> secrets.secret(settings.secretRef());
+            case SECRET -> secrets.secret(tenant, settings.secretRef());
         };
     }
 

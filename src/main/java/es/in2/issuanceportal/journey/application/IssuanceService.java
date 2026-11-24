@@ -248,14 +248,20 @@ public class IssuanceService {
 
     /**
      * The new offer of a request with its process, if the address delivered for it expired or none was delivered.
-     * A request that has no process, is saved, or whose address still works is {@code step_not_allowed}: the
-     * current offer keeps serving (design.md §3.4 step 2).
+     * A request that has no process, is saved, is under review because the holder said its data is not correct, or
+     * whose address still works is {@code step_not_allowed}: the current offer keeps serving (design.md §3.4 step 2).
      */
     private Renewal renewalOf(TenantId tenant, UUID journeyId, String requestId, String address,
                               ServiceSettings settings) {
         JourneyIssuance process = processOf(tenant, journeyId, requestId)
                 .orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED));
         if (process.isSaved()) {
+            throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
+        }
+        // The holder said its data is not correct: no more offers of it in this journey (ac.md AC-06).
+        boolean underReview = entitlement(tenant, journeyId).request(requestId)
+                .map(request -> request.status() == EntitlementRecord.Status.UNDER_REVIEW).orElse(false);
+        if (underReview) {
             throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
         }
         Optional<IssuanceRecord.Entry> entry = readIssuance(tenant, journeyId)

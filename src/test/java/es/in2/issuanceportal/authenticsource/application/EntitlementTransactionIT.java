@@ -104,7 +104,7 @@ class EntitlementTransactionIT {
                         null)));
         service = new EntitlementService(journey, progress, journey, sessions,
                 new AuthenticSourceConfigs(tenant -> Optional.of(config), new AdapterRegistry(List.of(adapter))),
-                new RecordingAuthenticSourceAuditTrail(), transactions, clock, new LookupSlots(100, 100));
+                new RecordingAuthenticSourceAuditTrail(), transactions, clock, new LookupSlots(100, 100), (t, j, r) -> false);
         return service;
     }
 

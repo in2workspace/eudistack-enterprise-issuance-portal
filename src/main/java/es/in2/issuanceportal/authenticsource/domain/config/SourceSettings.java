@@ -2,6 +2,8 @@ package es.in2.issuanceportal.authenticsource.domain.config;
 
 import es.in2.issuanceportal.authenticsource.domain.IdentifierType;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.EnumSet;
@@ -17,7 +19,8 @@ import java.util.Set;
  * @param typeName        name of the attestation type in the preview
  * @param adapter         name of the adapter that talks to the source
  * @param url             address of the source; the simulated adapter has none
- * @param secretRef       reference to its credentials in AWS Secrets Manager; never the secret itself
+ * @param secretRef       name of the SSM Parameter Store {@code SecureString} with its credential, under the tenant's
+ *                        prefix; never the secret itself
  * @param timeout         how long the source has to answer, at most 10 seconds
  * @param identifierTypes the identifier types the source is searched by
  * @param mapping         source attribute → attestation claim and label
@@ -72,6 +75,7 @@ public record SourceSettings(String typeName, String adapter, String url, String
         if (url == null || url.isBlank()) {
             throw new InvalidSourceConfigException("url is required");
         }
+        requireHttpsUrl(url);
         if (auth == null) {
             throw new InvalidSourceConfigException("auth is required");
         }
@@ -80,6 +84,25 @@ public record SourceSettings(String typeName, String adapter, String url, String
         }
         if (contract == null) {
             throw new InvalidSourceConfigException("contract is required");
+        }
+    }
+
+    /**
+     * An absolute https address with a host and nothing that could hide where it goes: no user info, query or
+     * fragment (design.md AD-4). Checked when the configuration loads, so a wrong one is {@code config_unavailable}
+     * instead of a failed search for every holder.
+     */
+    private static void requireHttpsUrl(String url) {
+        URI uri;
+        try {
+            uri = new URI(url.strip());
+        } catch (URISyntaxException _) {
+            throw new InvalidSourceConfigException("url is not a valid address");
+        }
+        if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getHost().isBlank()
+                || uri.getRawUserInfo() != null || uri.getRawQuery() != null || uri.getRawFragment() != null) {
+            throw new InvalidSourceConfigException("url must be an https address with a host and no user info, "
+                    + "query or fragment");
         }
     }
 

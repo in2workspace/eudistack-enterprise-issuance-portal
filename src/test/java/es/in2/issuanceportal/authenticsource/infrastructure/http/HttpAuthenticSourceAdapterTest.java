@@ -11,6 +11,7 @@ import es.in2.issuanceportal.authenticsource.domain.PersonalIdentifier;
 import es.in2.issuanceportal.authenticsource.domain.RequestStatus;
 import es.in2.issuanceportal.authenticsource.domain.SourceRequest;
 import es.in2.issuanceportal.authenticsource.domain.SourceRequests;
+import es.in2.issuanceportal.authenticsource.domain.config.InvalidSourceConfigException;
 import es.in2.issuanceportal.authenticsource.domain.config.SourceAuth;
 import es.in2.issuanceportal.authenticsource.domain.config.SourceContract;
 import es.in2.issuanceportal.authenticsource.domain.config.SourceSettings;
@@ -93,7 +94,7 @@ class HttpAuthenticSourceAdapterTest {
         public void invalidate(TenantId tenant) {
         }
     };
-    private final SourceSecrets secrets = reference -> "secret-of-" + reference;
+    private final SourceSecrets secrets = (tenant, reference) -> "secret-of-" + reference;
     private final HttpAuthenticSourceAdapter adapter =
             new HttpAuthenticSourceAdapter(new ObjectMapper(), secrets, tokens, trustAnything());
 
@@ -323,10 +324,11 @@ class HttpAuthenticSourceAdapterTest {
     }
 
     @Test
-    @DisplayName("ES-04 — lookup_urlWithoutHttps_throwsWithoutCalling")
-    void lookup_urlWithoutHttps_throwsWithoutCalling() {
+    @DisplayName("ES-04 — lookup_urlWithoutHttps_isRejectedWhenTheConfigurationLoadsAndNeverCalled")
+    void lookup_urlWithoutHttps_isRejectedWhenTheConfigurationLoadsAndNeverCalled() {
+        // Rejected when the configuration loads (EUD-359 review F1); the adapter keeps its own https check.
         assertThatThrownBy(() -> lookup(settings("http://localhost:" + server.httpsPort(), SourceAuth.SYSTEM_TOKEN,
-                cgcomContract()))).isInstanceOf(HttpAuthenticSourceAdapter.SourceCallException.class);
+                cgcomContract()))).isInstanceOf(InvalidSourceConfigException.class);
         assertThat(server.getAllServeEvents()).isEmpty();
     }
 

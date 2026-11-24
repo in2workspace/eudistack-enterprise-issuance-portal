@@ -84,7 +84,7 @@ class EntitlementServiceTest {
     private final EntitlementService service = new EntitlementService(journey, journey, journey, sessions,
             new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
                     new AdapterRegistry(List.of(adapter))),
-            trail, TransactionOperations.withoutTransaction(), clock, new LookupSlots(100, 100));
+            trail, TransactionOperations.withoutTransaction(), clock, new LookupSlots(100, 100), (t, j, r) -> false);
 
     private static SourceRequest request(String ref, RequestStatus status, Map<String, Object> attributes) {
         return new SourceRequest(ref, status, List.of(), false, null, null, null, null, attributes);
@@ -569,7 +569,7 @@ class EntitlementServiceTest {
                     public void appendDispute(TenantId tenant, DisputeEvent event) {
                         throw new IllegalStateException("log sink down");
                     }
-                }, TransactionOperations.withoutTransaction(), clock, new LookupSlots(100, 100));
+                }, TransactionOperations.withoutTransaction(), clock, new LookupSlots(100, 100), (t, j, r) -> false);
 
         assertThat(failingTrail.check(CGCOM, holder)).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
         assertThat(output.getOut()).contains("Could not record the entitlement check of journey")
@@ -585,7 +585,7 @@ class EntitlementServiceTest {
             throw new IllegalStateException("database down");
         }, sessions, new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
                 new AdapterRegistry(List.of(adapter))), trail, TransactionOperations.withoutTransaction(), clock,
-                new LookupSlots(100, 100));
+                new LookupSlots(100, 100), (t, j, r) -> false);
 
         assertThatThrownBy(() -> failing.check(CGCOM, holder)).isInstanceOf(IllegalStateException.class);
         failing.close();
@@ -613,7 +613,7 @@ class EntitlementServiceTest {
             }
         }, new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
                 new AdapterRegistry(List.of(adapter))), trail, TransactionOperations.withoutTransaction(), clock,
-                new LookupSlots(100, 100));
+                new LookupSlots(100, 100), (t, j, r) -> false);
 
         assertThatThrownBy(() -> failing.check(CGCOM, holder)).isInstanceOf(IllegalStateException.class);
         assertThat(stored(id).step()).isEqualTo(JourneyStep.IDENTIFIED);
@@ -750,7 +750,7 @@ class EntitlementServiceTest {
         EntitlementService oneAtATime = new EntitlementService(journey, journey, journey, sessions,
                 new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
                         new AdapterRegistry(List.of(adapter))), trail, TransactionOperations.withoutTransaction(),
-                clock, new LookupSlots(1, 1));
+                clock, new LookupSlots(1, 1), (t, j, r) -> false);
         HolderRef first = journeyWithDni("00000001R");
         HolderRef second = journeyWithDni("00000001R");
         AtomicReference<EntitlementService.Outcome> firstOutcome = new AtomicReference<>();
@@ -773,7 +773,7 @@ class EntitlementServiceTest {
         EntitlementService oneAtATime = new EntitlementService(journey, journey, journey, sessions,
                 new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
                         new AdapterRegistry(List.of(adapter))), trail, TransactionOperations.withoutTransaction(),
-                clock, new LookupSlots(1, 1));
+                clock, new LookupSlots(1, 1), (t, j, r) -> false);
         HolderRef interrupted = journeyWithDni("00000001R");
         HolderRef next = journeyWithDni("00000001R");
         // The source does not answer until the test lets it: a source that answered before the request
@@ -837,7 +837,7 @@ class EntitlementServiceTest {
         EntitlementService oneAtATime = new EntitlementService(journey, journey, journey, sessions,
                 new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
                         new AdapterRegistry(List.of(adapter))), trail, TransactionOperations.withoutTransaction(),
-                clock, new LookupSlots(1, 1));
+                clock, new LookupSlots(1, 1), (t, j, r) -> false);
         HolderRef slow = journeyWithDni("00000001R");
         HolderRef next = journeyWithDni("00000001R");
         configure(Duration.ofSeconds(1));
@@ -1032,7 +1032,7 @@ class EntitlementServiceTest {
                     public void appendDispute(TenantId tenant, DisputeEvent event) {
                         throw new IllegalStateException("log sink down");
                     }
-                }, TransactionOperations.withoutTransaction(), clock, new LookupSlots(100, 100));
+                }, TransactionOperations.withoutTransaction(), clock, new LookupSlots(100, 100), (t, j, r) -> false);
 
         failingTrail.dispute(CGCOM, holder, "r1");
 

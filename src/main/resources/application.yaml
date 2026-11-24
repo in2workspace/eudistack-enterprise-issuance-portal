@@ -79,6 +79,10 @@ issuance-portal:
     # answers 503 at once. Both at least 1, or the service does not start.
     max-concurrent-lookups: ${PORTAL_AUTHENTIC_SOURCE_MAX_LOOKUPS:100}
     max-concurrent-lookups-per-tenant: ${PORTAL_AUTHENTIC_SOURCE_MAX_LOOKUPS_PER_TENANT:20}
+    # The SSM prefix where a tenant's source credentials live (auth: secret), {tenant} replaced by the tenant, e.g.
+    # /eudistack/dev/config/apps/issuance-portal/authentic-source/{tenant}/. A secret_ref outside its tenant's prefix
+    # is never read. Empty: no source can authenticate with a secret.
+    secret-parameter-template: ${PORTAL_AUTHENTIC_SOURCE_SECRET_TEMPLATE:}
   public-host:
     # The tenant's public host, {tenant} replaced by the tenant, e.g. {tenant}.127.0.0.1.nip.io:4443 locally.
     # Sent as X-Forwarded-Host (with X-Forwarded-Proto https) to the Verifier and the Issuer, so each resolves

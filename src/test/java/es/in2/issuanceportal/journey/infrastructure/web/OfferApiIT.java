@@ -56,6 +56,37 @@ class OfferApiIT extends JourneyRequestsIT {
     }
 
     @Test
+    @DisplayName("EUD-359 AC-06 — postOffers_requestWithProcessUnderReview_is409StepNotAllowedAndNothingIsAsked")
+    void postOffers_requestWithProcessUnderReview_is409StepNotAllowedAndNothingIsAsked() throws Exception {
+        TestHolder holder = confirmedJourney();
+        mvc.perform(post(holder, "/entitlement/requests/r1/dispute", null)).andExpect(status().isNoContent());
+        expireAddressOf(holder, "r1");
+
+        for (String path : List.of(OFFERS, CONFIRMATION)) {
+            mvc.perform(post(holder, path, reference("r1")))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.type").value("step_not_allowed"));
+        }
+
+        assertThat(issuer.api().renewals()).isEmpty();
+        assertThat(issuer.api().calls()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("EUD-359 AC-06 — postDispute_requestAlreadySaved_is409RequestNotAvailableAndTheSourceIsNotTold")
+    void postDispute_requestAlreadySaved_is409RequestNotAvailableAndTheSourceIsNotTold() throws Exception {
+        TestHolder holder = confirmedJourney();
+        mvc.perform(post(holder, "/journey/requests/r1/saved", null)).andExpect(status().isNoContent());
+
+        mvc.perform(post(holder, "/entitlement/requests/r1/dispute", null))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("request_not_available"));
+
+        assertThat(logged()).noneMatch(line -> line.contains("entitlement dispute"));
+        mvc.perform(post(holder, "/entitlement/requests/r2/dispute", null)).andExpect(status().isNoContent());
+    }
+
+    @Test
     @DisplayName("ES-06 — postOffers_addressStillWorking_is409StepNotAllowedAndTheOfferKeepsServing")
     void postOffers_addressStillWorking_is409StepNotAllowedAndTheOfferKeepsServing() throws Exception {
         TestHolder holder = confirmedJourney();
