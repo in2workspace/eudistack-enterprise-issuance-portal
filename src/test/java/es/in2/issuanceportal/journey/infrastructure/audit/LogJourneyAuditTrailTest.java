@@ -171,6 +171,26 @@ class LogJourneyAuditTrailTest {
     }
 
     @Test
+    void append_emailCodeCheckTooManyRequests_writesTheResultWithoutEmailNorCode() {
+        trail.append(SANDBOX, new JourneyAuditTrail.EmailCodeChecked(UUID.randomUUID(), UUID.randomUUID(),
+                JourneyAuditTrail.EmailCodeCheck.TOO_MANY_REQUESTS, Instant.now()));
+
+        ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
+        verify(audit).info(anyString(), arguments.capture());
+        assertThat(java.util.Arrays.stream(arguments.getValue()).map(Object::toString))
+                .contains("result=too_many_requests", "event=EMAIL_CODE_CHECKED", "tenant=sandbox")
+                .noneMatch(argument -> argument.contains("@") || argument.contains("code="));
+    }
+
+    @Test
+    void append_emailCodeCheckWithoutJourney_stillWrites() {
+        trail.append(SANDBOX, new JourneyAuditTrail.EmailCodeChecked(UUID.randomUUID(), null,
+                JourneyAuditTrail.EmailCodeCheck.TOO_MANY_REQUESTS, Instant.now()));
+
+        verify(audit).info(anyString(), any(Object[].class));
+    }
+
+    @Test
     void append_emailCodeCheckWriteFails_doesNotThrow() {
         doThrow(new IllegalStateException("log sink down")).when(audit).info(anyString(), any(Object[].class));
 

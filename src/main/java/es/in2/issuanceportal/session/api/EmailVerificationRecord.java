@@ -19,20 +19,30 @@ import java.util.Objects;
  * @param sends         codes the journey has sent
  * @param lastSentAt    when the last code was sent
  * @param voidedCodeHashes hashes of the codes a newer one replaced, so that they are told from a wrong code
+ * @param checks        when the checks of the last hour were made (design.md §3.6): at most 10, for the limit
+ *                      per journey. Sections written before this limit have none
  */
 public record EmailVerificationRecord(String pendingEmail, String codeHash, Instant codeExpiresAt, int attempts,
-                                      int sends, Instant lastSentAt, List<String> voidedCodeHashes) {
+                                      int sends, Instant lastSentAt, List<String> voidedCodeHashes,
+                                      List<Instant> checks) {
 
-    /** A record that has voided no code. */
+    /** A record that has voided no code and counted no check. */
     public EmailVerificationRecord(String pendingEmail, String codeHash, Instant codeExpiresAt, int attempts,
                                    int sends, Instant lastSentAt) {
-        this(pendingEmail, codeHash, codeExpiresAt, attempts, sends, lastSentAt, List.of());
+        this(pendingEmail, codeHash, codeExpiresAt, attempts, sends, lastSentAt, List.of(), List.of());
+    }
+
+    /** A record that has counted no check. */
+    public EmailVerificationRecord(String pendingEmail, String codeHash, Instant codeExpiresAt, int attempts,
+                                   int sends, Instant lastSentAt, List<String> voidedCodeHashes) {
+        this(pendingEmail, codeHash, codeExpiresAt, attempts, sends, lastSentAt, voidedCodeHashes, List.of());
     }
 
     public EmailVerificationRecord {
         Objects.requireNonNull(pendingEmail, "pending_email");
         Objects.requireNonNull(lastSentAt, "last_sent_at");
         voidedCodeHashes = voidedCodeHashes == null ? List.of() : List.copyOf(voidedCodeHashes);
+        checks = checks == null ? List.of() : List.copyOf(checks);
         if ((codeHash == null) != (codeExpiresAt == null)) {
             throw new IllegalArgumentException("code_hash and code_expires_at come together");
         }
@@ -46,7 +56,7 @@ public record EmailVerificationRecord(String pendingEmail, String codeHash, Inst
 
     public String toJson() {
         return SectionJson.write(new Document(pendingEmail, codeHash, codeExpiresAt, attempts, sends, lastSentAt,
-                voidedCodeHashes));
+                voidedCodeHashes, checks));
     }
 
     /**
@@ -80,8 +90,12 @@ public record EmailVerificationRecord(String pendingEmail, String codeHash, Inst
         if (voided.stream().anyMatch(hash -> hash == null || hash.isBlank())) {
             throw new InvalidSectionException("voided_code_hashes");
         }
+        List<Instant> checks = document.checks() == null ? List.of() : document.checks();
+        if (checks.stream().anyMatch(Objects::isNull)) {
+            throw new InvalidSectionException("checks");
+        }
         return new EmailVerificationRecord(document.pendingEmail(), document.codeHash(), document.codeExpiresAt(),
-                document.attempts(), document.sends(), document.lastSentAt(), voided);
+                document.attempts(), document.sends(), document.lastSentAt(), voided, checks);
     }
 
     private static void requireText(String value, String field) {
@@ -102,7 +116,8 @@ public record EmailVerificationRecord(String pendingEmail, String codeHash, Inst
                     @JsonProperty("attempts") Integer attempts,
                     @JsonProperty("sends") Integer sends,
                     @JsonProperty("last_sent_at") Instant lastSentAt,
-                    @JsonInclude(JsonInclude.Include.NON_EMPTY) @JsonProperty("voided_code_hashes") List<String> voidedCodeHashes) {
+                    @JsonInclude(JsonInclude.Include.NON_EMPTY) @JsonProperty("voided_code_hashes") List<String> voidedCodeHashes,
+                    @JsonInclude(JsonInclude.Include.NON_EMPTY) @JsonProperty("checks") List<Instant> checks) {
 
         @Override
         public String toString() {

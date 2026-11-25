@@ -15,7 +15,8 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * At most {@code limit} requests in any hour from each client: {@value #INCIDENT_LIMIT} incidents (design.md
- * AD-8, ac.md AC-06) and, with its own budget, {@value #EMAIL_CODE_LIMIT} code emails (EUD-358, design.md AD-15).
+ * AD-8, ac.md AC-06) and, each with its own budget, {@value #EMAIL_CODE_LIMIT} code emails (EUD-358, design.md
+ * AD-15) and {@value #EMAIL_CODE_CHECK_LIMIT} checks of the email code (EUD-375, design.md §3.6).
  * A sliding window over the times of the last accepted requests, so one more than the limit within an hour of
  * the oldest is always rejected, also across the turn of the hour. Bucket4j cannot give that guarantee (a fixed
  * window allows twice the limit around its boundary), which is why the window is kept here. The windows live in
@@ -28,6 +29,7 @@ class IncidentRateLimiter {
 
     static final int INCIDENT_LIMIT = 5;
     static final int EMAIL_CODE_LIMIT = 10;
+    static final int EMAIL_CODE_CHECK_LIMIT = 20;
     static final Duration WINDOW = Duration.ofHours(1);
 
     private final Clock clock;

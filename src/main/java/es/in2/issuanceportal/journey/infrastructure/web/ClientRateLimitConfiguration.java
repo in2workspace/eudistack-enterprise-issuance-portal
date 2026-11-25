@@ -1,5 +1,6 @@
 package es.in2.issuanceportal.journey.infrastructure.web;
 
+import es.in2.issuanceportal.journey.application.port.EmailCodeCheckRateLimit;
 import es.in2.issuanceportal.journey.application.port.EmailCodeRateLimit;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -9,8 +10,8 @@ import java.time.Duration;
 import java.util.Optional;
 
 /**
- * The limits per client address, each with its own budget: incidents and code emails never spend each
- * other's.
+ * The limits per client address, each with its own budget: incidents, code emails and checks of the code never
+ * spend each other's.
  */
 @Configuration
 class ClientRateLimitConfiguration {
@@ -34,5 +35,11 @@ class ClientRateLimitConfiguration {
                 limiter.giveBack(clientAddress);
             }
         };
+    }
+
+    @Bean
+    EmailCodeCheckRateLimit emailCodeCheckRateLimit(Clock clock) {
+        IncidentRateLimiter limiter = new IncidentRateLimiter(clock, IncidentRateLimiter.EMAIL_CODE_CHECK_LIMIT);
+        return limiter::tryConsume;
     }
 }

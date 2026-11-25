@@ -16,8 +16,8 @@ import java.util.UUID;
 /**
  * The code that verifies the holder's email, as the journey keeps it (prd.md FR-22 to FR-24, design.md §3.6,
  * AD-15): 6 digits that last 10 minutes and allow 5 attempts, a new code voids the previous one, at least
- * 180 seconds between sends and 3 sends per journey. The code itself is never kept, only its hash. The
- * pending email is personal data, so the text form never shows it.
+ * 180 seconds between sends and 3 sends per journey, and at most 10 checks of the journey an hour (AD-15). The
+ * code itself is never kept, only its hash. The pending email is personal data, so the text form never shows it.
  *
  * <p>Once the right code is checked the email is verified: the code and its expiry are dropped, so it stops
  * working, while the sends stay so that the limits of the journey still apply to a new code.
@@ -30,14 +30,19 @@ import java.util.UUID;
  * @param lastSentAt    when the last code was sent
  * @param voidedCodeHashes the hashes of the codes a newer one replaced: they are not wrong but expired (ac.md AC-04,
  *                      openapi {@code expired_code}), which only a record of them can tell from a wrong code
+ * @param checks        when the checks of the last hour were made, whatever their result: at most
+ *                      {@link #MAX_CHECKS}, oldest first. A new code does not clear them
  */
 public record EmailVerification(String pendingEmail, String codeHash, Instant codeExpiresAt, int attempts,
-                                int sends, Instant lastSentAt, List<String> voidedCodeHashes) {
+                                int sends, Instant lastSentAt, List<String> voidedCodeHashes,
+                                List<Instant> checks) {
 
     public static final Duration CODE_LIFETIME = Duration.ofMinutes(10);
     public static final int MAX_ATTEMPTS = 5;
     public static final Duration RESEND_INTERVAL = Duration.ofSeconds(180);
     public static final int MAX_SENDS = 3;
+    public static final int MAX_CHECKS = 10;
+    public static final Duration CHECKS_WINDOW = Duration.ofHours(1);
 
     private static final int CODE_DIGITS = 6;
     private static final int CODE_BOUND = 1_000_000;
@@ -47,6 +52,13 @@ public record EmailVerification(String pendingEmail, String codeHash, Instant co
     public record Check(Outcome outcome, EmailVerification next) {
 
         public enum Outcome { VERIFIED, INVALID_CODE, EXPIRED_CODE, TOO_MANY_ATTEMPTS }
+    }
+
+    /**
+     * What came of counting a check against the journey's limit: {@code retryAfter} is set when the limit is
+     * reached, and then {@code next} is unchanged; otherwise {@code next} has the check counted.
+     */
+    public record CheckCount(Optional<Duration> retryAfter, EmailVerification next) {
     }
 
     /** Why a new code cannot be sent yet. {@code retryAfter} is empty when waiting does not help. */
@@ -59,6 +71,7 @@ public record EmailVerification(String pendingEmail, String codeHash, Instant co
         Objects.requireNonNull(pendingEmail, "pendingEmail");
         Objects.requireNonNull(lastSentAt, "lastSentAt");
         voidedCodeHashes = voidedCodeHashes == null ? List.of() : List.copyOf(voidedCodeHashes);
+        checks = checks == null ? List.of() : List.copyOf(checks);
         if ((codeHash == null) != (codeExpiresAt == null)) {
             throw new IllegalArgumentException("codeHash and codeExpiresAt come together");
         }
@@ -67,10 +80,16 @@ public record EmailVerification(String pendingEmail, String codeHash, Instant co
         }
     }
 
-    /** A verification that has voided no code. */
+    /** A verification that has voided no code and counted no check. */
     public EmailVerification(String pendingEmail, String codeHash, Instant codeExpiresAt, int attempts, int sends,
                              Instant lastSentAt) {
-        this(pendingEmail, codeHash, codeExpiresAt, attempts, sends, lastSentAt, List.of());
+        this(pendingEmail, codeHash, codeExpiresAt, attempts, sends, lastSentAt, List.of(), List.of());
+    }
+
+    /** A verification that has counted no check. */
+    public EmailVerification(String pendingEmail, String codeHash, Instant codeExpiresAt, int attempts, int sends,
+                             Instant lastSentAt, List<String> voidedCodeHashes) {
+        this(pendingEmail, codeHash, codeExpiresAt, attempts, sends, lastSentAt, voidedCodeHashes, List.of());
     }
 
     /**
@@ -103,7 +122,8 @@ public record EmailVerification(String pendingEmail, String codeHash, Instant co
     public static EmailVerification sent(String email, String codeHash, EmailVerification previous, Instant now) {
         int sends = previous == null ? 1 : previous.sends + 1;
         List<String> voided = previous == null ? List.of() : previous.voidedWithItsCode();
-        return new EmailVerification(email, codeHash, now.plus(CODE_LIFETIME), 0, sends, now, voided);
+        List<Instant> checks = previous == null ? List.of() : previous.checks;
+        return new EmailVerification(email, codeHash, now.plus(CODE_LIFETIME), 0, sends, now, voided, checks);
     }
 
     /** Whether the text has the shape of a code: exactly 6 ASCII digits. */
@@ -130,6 +150,22 @@ public record EmailVerification(String pendingEmail, String codeHash, Instant co
     }
 
     /**
+     * Counts a check of this journey made at {@code now} against the limit of {@link #MAX_CHECKS} an hour: a
+     * sliding window over the moments of the checks. At the limit nothing is counted and the wait is the time
+     * until the oldest check of the window leaves it.
+     */
+    public CheckCount countCheck(Instant now) {
+        Instant windowStart = now.minus(CHECKS_WINDOW);
+        List<Instant> inWindow = new ArrayList<>(checks.stream().filter(at -> at.isAfter(windowStart)).toList());
+        if (inWindow.size() >= MAX_CHECKS) {
+            return new CheckCount(Optional.of(Duration.between(windowStart, inWindow.getFirst())), this);
+        }
+        inWindow.add(now);
+        return new CheckCount(Optional.empty(), new EmailVerification(pendingEmail, codeHash, codeExpiresAt,
+                attempts, sends, lastSentAt, voidedCodeHashes, inWindow));
+    }
+
+    /**
      * Checks a code that has the shape of one against the pending code (design.md section 3.6): with 5 failed
      * attempts the code no longer serves, whatever it is; after its expiry neither; otherwise the hashes are
      * compared in constant time. A wrong code spends an attempt; a code a newer one replaced is expired and
@@ -150,13 +186,13 @@ public record EmailVerification(String pendingEmail, String codeHash, Instant co
         String typed = hash(journeyId, code);
         if (sameHash(codeHash, typed)) {
             return new Check(Check.Outcome.VERIFIED, new EmailVerification(pendingEmail, null, null, 0, sends,
-                    lastSentAt));
+                    lastSentAt, List.of(), checks));
         }
         if (voidedCodeHashes.stream().anyMatch(voided -> sameHash(voided, typed))) {
             return new Check(Check.Outcome.EXPIRED_CODE, this);
         }
         return new Check(Check.Outcome.INVALID_CODE, new EmailVerification(pendingEmail, codeHash, codeExpiresAt,
-                attempts + 1, sends, lastSentAt, voidedCodeHashes));
+                attempts + 1, sends, lastSentAt, voidedCodeHashes, checks));
     }
 
     private static boolean sameHash(String stored, String typed) {

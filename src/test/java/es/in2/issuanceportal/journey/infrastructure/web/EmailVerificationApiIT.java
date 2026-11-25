@@ -42,6 +42,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -650,6 +651,162 @@ class EmailVerificationApiIT {
         assertThat(storedVerification(holder).attempts()).isEqualTo(5);
     }
 
+    // --- EUD-375: limits of the checks (AC-02, AC-03, EC-01 to EC-07) ---
+
+    @Test
+    @DisplayName("AC-02 — postCode_twentyChecksFromTheSameAddress_theTwentyFirstIs429AndSpendsNothing")
+    void postCode_twentyChecksFromTheSameAddress_theTwentyFirstIs429AndSpendsNothing() throws Exception {
+        TestHolder holder = entitledJourney();
+        String code = sentCode(holder);
+        for (int i = 0; i < 20; i++) {
+            mvc.perform(check(holder, code("12ab"))).andExpect(status().isBadRequest());
+        }
+
+        MvcResult result = mvc.perform(check(holder, code(code)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.type").value("too_many_requests"))
+                .andReturn();
+
+        assertThat(Long.parseLong(result.getResponse().getHeader(HttpHeaders.RETRY_AFTER))).isBetween(1L, 3600L);
+        assertThat(storedVerification(holder).attempts()).isZero();
+        assertThat(storedVerification(holder).checks()).isEmpty();
+        // EC-01: another address is not limited and the right code, which the 429 did not spend, verifies.
+        client = "198.51.100.251";
+        mvc.perform(check(holder, code(code))).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("EC-03 — postCode_malformedCodeOverTheAddressLimit_is429NotBadRequest")
+    void postCode_malformedCodeOverTheAddressLimit_is429NotBadRequest() throws Exception {
+        TestHolder holder = entitledJourney();
+        sentCode(holder);
+        for (int i = 0; i < 20; i++) {
+            mvc.perform(check(holder, code("12ab"))).andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.type").value("bad_request"));
+        }
+
+        mvc.perform(check(holder, code("12ab"))).andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.type").value("too_many_requests"));
+    }
+
+    @Test
+    @DisplayName("AC-03 — postCode_tenChecksOfTheJourney_theEleventhIs429CountingTheExhaustedCodeToo")
+    void postCode_tenChecksOfTheJourney_theEleventhIs429CountingTheExhaustedCodeToo() throws Exception {
+        TestHolder holder = entitledJourney();
+        String code = sentCode(holder);
+        for (int i = 0; i < 5; i++) {
+            mvc.perform(check(holder, code(wrongCodeFor(code)))).andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.type").value("invalid_code"));
+        }
+        // EC-02: with the code exhausted the checks still count, and what they count is kept with their 400.
+        for (int i = 0; i < 5; i++) {
+            mvc.perform(check(holder, code(code))).andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.type").value("too_many_attempts"));
+        }
+        assertThat(storedVerification(holder).checks()).hasSize(10);
+
+        MvcResult result = mvc.perform(check(holder, code(code)))
+                .andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.type").value("too_many_requests"))
+                .andReturn();
+
+        assertThat(Long.parseLong(result.getResponse().getHeader(HttpHeaders.RETRY_AFTER))).isBetween(1L, 3600L);
+        assertThat(storedVerification(holder).attempts()).isEqualTo(5);
+        assertThat(storedVerification(holder).checks()).hasSize(10);
+
+        // EC-04: a new code does not restart the limit of the journey.
+        backdate(holder, storedVerification(holder), Duration.ofMinutes(4));
+        String second = sentCode(holder);
+        assertThat(storedVerification(holder).checks()).hasSize(10);
+        mvc.perform(check(holder, code(second))).andExpect(status().isTooManyRequests())
+                .andExpect(jsonPath("$.type").value("too_many_requests"));
+        assertThat(storedVerification(holder).attempts()).isZero();
+    }
+
+    @Test
+    @DisplayName("EC-01 — postCode_limitedWithFourAttemptsSpent_theRightCodeVerifiesWhenTheWindowHasSlid")
+    void postCode_limitedWithFourAttemptsSpent_theRightCodeVerifiesWhenTheWindowHasSlid() throws Exception {
+        TestHolder holder = entitledJourney();
+        String code = sentCode(holder);
+        for (int i = 0; i < 4; i++) {
+            mvc.perform(check(holder, code(wrongCodeFor(code)))).andExpect(status().isBadRequest());
+        }
+        writeChecks(holder, Instant.now().minusSeconds(60), 10);
+
+        mvc.perform(check(holder, code(code))).andExpect(status().isTooManyRequests());
+        assertThat(storedVerification(holder).attempts()).isEqualTo(4);
+
+        // EC-05: a minute later than an hour after the oldest, the window has slid.
+        writeChecks(holder, Instant.now().minus(Duration.ofHours(1)).minusSeconds(30), 10);
+        mvc.perform(check(holder, code(code))).andExpect(status().isOk());
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL)).isPresent();
+    }
+
+    @Test
+    @DisplayName("EC-06 — postCode_checksAndSendsFromTheSameAddress_neverSpendEachOthersBudget")
+    void postCode_checksAndSendsFromTheSameAddress_neverSpendEachOthersBudget() throws Exception {
+        TestHolder holder = entitledJourney();
+        String code = sentCode(holder);
+        for (int i = 0; i < 20; i++) {
+            mvc.perform(check(holder, code("12ab"))).andExpect(status().isBadRequest());
+        }
+        mvc.perform(check(holder, code(code))).andExpect(status().isTooManyRequests());
+
+        // The 9 sends left of the address's budget of 10 still go out.
+        for (int i = 0; i < 9; i++) {
+            mvc.perform(send(entitledJourney(), "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
+        }
+
+        // And the sends of an address do not spend its checks.
+        client = "198.51.100.252";
+        for (int i = 0; i < 10; i++) {
+            mvc.perform(send(entitledJourney(), "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isAccepted());
+        }
+        mvc.perform(send(entitledJourney(), "{\"email\":\"" + EMAIL + "\"}", null)).andExpect(status().isTooManyRequests());
+        mvc.perform(check(holder, code(code))).andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("EC-07 — postCode_twoChecksAtOnce_bothCountForTheJourney")
+    void postCode_twoChecksAtOnce_bothCountForTheJourney() throws Exception {
+        TestHolder holder = entitledJourney();
+        String code = sentCode(holder);
+        CyclicBarrier together = new CyclicBarrier(2);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<Integer>> answers = new ArrayList<>();
+            for (int i = 0; i < 2; i++) {
+                answers.add(pool.submit(() -> {
+                    together.await(10, TimeUnit.SECONDS);
+                    return mvc.perform(check(holder, code(wrongCodeFor(code)))).andReturn().getResponse().getStatus();
+                }));
+            }
+            for (Future<Integer> answer : answers) {
+                assertThat(answer.get(30, TimeUnit.SECONDS)).isEqualTo(400);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+
+        assertThat(storedVerification(holder).checks()).hasSize(2);
+        assertThat(storedVerification(holder).attempts()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("AC-06 — postCode_limited_logsTheResultButNoEmailNorCode")
+    void postCode_limited_logsTheResultButNoEmailNorCode() throws Exception {
+        TestHolder holder = entitledJourney();
+        String code = sentCode(holder);
+        writeChecks(holder, Instant.now().minusSeconds(60), 10);
+
+        mvc.perform(check(holder, code(code))).andExpect(status().isTooManyRequests());
+
+        String everything = logs.list.stream().map(ILoggingEvent::getFormattedMessage)
+                .collect(Collectors.joining("\n"));
+        assertThat(everything).contains("EMAIL_CODE_CHECKED", "result=too_many_requests")
+                .doesNotContain(EMAIL, code, storedVerification(holder).codeHash());
+    }
+
     // --- GET /journey: email_verification ---
 
     @Test
@@ -710,7 +867,20 @@ class EmailVerificationApiIT {
     private void backdate(TestHolder holder, EmailVerificationRecord before, Duration by) {
         sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION, new EmailVerificationRecord(before.pendingEmail(),
                 before.codeHash(), before.codeExpiresAt() == null ? null : before.codeExpiresAt().minus(by),
-                before.attempts(), before.sends(), before.lastSentAt().minus(by), before.voidedCodeHashes()).toJson());
+                before.attempts(), before.sends(), before.lastSentAt().minus(by), before.voidedCodeHashes(),
+                before.checks()).toJson());
+    }
+
+    /** Rewrites the stored section as if the journey had made {@code count} checks, one a second from {@code from}. */
+    private void writeChecks(TestHolder holder, Instant from, int count) {
+        EmailVerificationRecord before = storedVerification(holder);
+        List<Instant> checks = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            checks.add(from.plusSeconds(i));
+        }
+        sessions.write(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION, new EmailVerificationRecord(
+                before.pendingEmail(), before.codeHash(), before.codeExpiresAt(), before.attempts(), before.sends(),
+                before.lastSentAt(), before.voidedCodeHashes(), checks).toJson());
     }
 
     private void assertNothingSent(TestHolder holder) {

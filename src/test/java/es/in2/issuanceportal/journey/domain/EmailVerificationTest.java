@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -238,5 +239,96 @@ class EmailVerificationTest {
     void constructor_noSendCounted_isRejected() {
         assertThatThrownBy(() -> new EmailVerification(EMAIL, "h", NOW, 0, 0, NOW))
                 .isInstanceOf(IllegalArgumentException.class);
+    }
+
+    // --- EUD-375: limit of checks per journey (AC-03, EC-02, EC-04, EC-05) ---
+
+    private static EmailVerification withChecks(int attempts, List<Instant> checks) {
+        return new EmailVerification(EMAIL, "h", NOW.plusSeconds(600), attempts, 1, NOW, List.of(), checks);
+    }
+
+    private static List<Instant> checksFrom(Instant from, int count) {
+        return java.util.stream.IntStream.range(0, count).mapToObj(from::plusSeconds).toList();
+    }
+
+    @Test
+    @DisplayName("AC-03 — countCheck_underTheLimit_addsTheMomentAndKeepsTheRest")
+    void countCheck_underTheLimit_addsTheMomentAndKeepsTheRest() {
+        EmailVerification verification = withChecks(2, checksFrom(NOW.minusSeconds(100), 9));
+
+        EmailVerification.CheckCount count = verification.countCheck(NOW);
+
+        assertThat(count.retryAfter()).isEmpty();
+        assertThat(count.next().checks()).hasSize(10).endsWith(NOW);
+        assertThat(count.next().attempts()).isEqualTo(2);
+        assertThat(count.next().codeHash()).isEqualTo("h");
+    }
+
+    @Test
+    @DisplayName("AC-03 — countCheck_tenInTheLastHour_isRefusedWithTheWaitUntilTheOldestLeaves")
+    void countCheck_tenInTheLastHour_isRefusedWithTheWaitUntilTheOldestLeaves() {
+        EmailVerification verification = withChecks(0, checksFrom(NOW.minusSeconds(600), 10));
+
+        EmailVerification.CheckCount count = verification.countCheck(NOW);
+
+        assertThat(count.retryAfter()).contains(Duration.ofMinutes(50));
+        assertThat(count.next()).isSameAs(verification);
+    }
+
+    @Test
+    @DisplayName("EC-05 — countCheck_windowSlides_theOldestLeavesAndTheNextIsCounted")
+    void countCheck_windowSlides_theOldestLeavesAndTheNextIsCounted() {
+        EmailVerification verification = withChecks(0, checksFrom(NOW.minusSeconds(600), 10));
+
+        EmailVerification.CheckCount count = verification.countCheck(NOW.plus(Duration.ofMinutes(50)).plusSeconds(1));
+
+        assertThat(count.retryAfter()).isEmpty();
+        // The two oldest have completed the hour by then; the rest stay and the new one is added.
+        assertThat(count.next().checks()).hasSize(9).doesNotContain(NOW.minusSeconds(600), NOW.minusSeconds(599));
+    }
+
+    @Test
+    @DisplayName("EC-05 — countCheck_oldestCompletesTheHourExactly_isNoLongerInTheWindow")
+    void countCheck_oldestCompletesTheHourExactly_isNoLongerInTheWindow() {
+        EmailVerification verification = withChecks(0, checksFrom(NOW.minusSeconds(600), 10));
+
+        assertThat(verification.countCheck(NOW.plus(Duration.ofMinutes(50))).retryAfter()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("AC-03 — countCheck_oldestAboutToLeave_waitIsStillPositive")
+    void countCheck_oldestAboutToLeave_waitIsStillPositive() {
+        EmailVerification verification = withChecks(0, checksFrom(NOW.minusSeconds(3599), 10));
+
+        assertThat(verification.countCheck(NOW).retryAfter()).hasValueSatisfying(
+                wait -> assertThat(wait).isPositive());
+    }
+
+    @Test
+    @DisplayName("EC-02 — check_everyOutcome_keepsTheChecksOfTheState")
+    void check_everyOutcome_keepsTheChecksOfTheState() {
+        UUID journey = UUID.randomUUID();
+        List<Instant> checks = checksFrom(NOW.minusSeconds(60), 3);
+        String hash = EmailVerification.hash(journey, "123456");
+        EmailVerification fresh = new EmailVerification(EMAIL, hash, NOW.plusSeconds(600), 0, 1, NOW, List.of(), checks);
+        EmailVerification spent = new EmailVerification(EMAIL, hash, NOW.plusSeconds(600), 5, 1, NOW, List.of(), checks);
+        EmailVerification expired = new EmailVerification(EMAIL, hash, NOW.minusSeconds(1), 0, 1, NOW, List.of(), checks);
+
+        assertThat(fresh.check(journey, "123456", NOW).next().checks()).isEqualTo(checks);
+        assertThat(fresh.check(journey, "654321", NOW).next().checks()).isEqualTo(checks);
+        assertThat(spent.check(journey, "123456", NOW).next().checks()).isEqualTo(checks);
+        assertThat(expired.check(journey, "123456", NOW).next().checks()).isEqualTo(checks);
+    }
+
+    @Test
+    @DisplayName("EC-04 — sent_newCode_keepsTheChecks")
+    void sent_newCode_keepsTheChecks() {
+        List<Instant> checks = checksFrom(NOW.minusSeconds(60), 10);
+        EmailVerification previous = withChecks(3, checks);
+
+        EmailVerification second = EmailVerification.sent(EMAIL, "hash-2", previous, NOW.plusSeconds(200));
+
+        assertThat(second.checks()).isEqualTo(checks);
+        assertThat(second.attempts()).isZero();
     }
 }
