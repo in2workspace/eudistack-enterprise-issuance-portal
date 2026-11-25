@@ -8,6 +8,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **EUD-375 — límite de comprobaciones del código del correo**:
+  - `POST /journey/email-verification/code` admite como mucho 20 comprobaciones por IP y hora, contadas antes de mirar el código o el recorrido (también un código mal formado o sin código pendiente), y 10 por recorrido y hora, contadas tras confirmar que hay un código pendiente y antes de compararlo. Por encima, 429 `too_many_requests` con `Retry-After` (de 1 a 3600 s) hasta que la comprobación más antigua de la ventana cumple la hora, sin gastar intentos del código.
+  - El límite por recorrido vive en la sección cifrada `email_verification` (campo `checks`, vacío si falta: sin migración), es exacto entre instancias y no se reinicia con un código nuevo. Cuentan todas las comprobaciones, también las que responden `invalid_code`, `expired_code` o `too_many_attempts`. El límite por IP es en memoria, por instancia, y es independiente del de envíos.
+  - Nueva traza `EMAIL_CODE_CHECKED` `result=too_many_requests`, sin el correo ni el código; con el límite por IP no lleva el recorrido.
+
 - **EUD-359 — varias solicitudes por recorrido, datos no correctos y atestación guardada**:
   - Fuente auténtica con la identidad completa (nombre, apellidos, identificador y su tipo; el pasaporte va como `personal_id`) y la lista de solicitudes de la fuente, cada una con su estado: `available`, `identifier_mismatch`, `identity_mismatch` o `under_review`. `POST /entitlement` responde el contrato 2: `confirmed` o `not_confirmed` (`not_found`, `no_requests` o sin motivo con la lista) y las solicitudes con un `id` opaco y estable en el recorrido (`r1`, `r2`…).
   - Un tipo de identificador que la fuente no acepta da `not_found` sin consultarla y retira el recorrido.
