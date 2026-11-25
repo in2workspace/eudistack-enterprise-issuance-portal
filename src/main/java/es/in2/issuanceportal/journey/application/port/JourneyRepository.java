@@ -20,13 +20,6 @@ public interface JourneyRepository {
      */
     boolean update(TenantId tenant, Journey journey, JourneyState readInState);
 
-    /**
-     * Stores the issuance process of the journey on its own, so that a journey read earlier without the
-     * process can never erase it when it is saved with {@link #update}, which does not write it. A journey has
-     * a single process: false when it already has a different one, and nothing was written.
-     */
-    boolean recordIssuanceProcess(TenantId tenant, UUID journeyId, UUID processId);
-
     Optional<Journey> findById(TenantId tenant, UUID id);
 
     /**
@@ -40,21 +33,22 @@ public interface JourneyRepository {
     // so a request that renews the activity in between is never overwritten by the sweep.
 
     /**
-     * Journeys with a session that may have to close: withdrawn (a session left behind) or with no
+     * Journeys with a session that may have to close: ended (a session left behind) or with no
      * activity since {@code cutoff}. Ordered by id and paged after {@code afterId}, so a journey that
      * fails and is skipped does not come back in every batch.
      */
     List<UUID> findExpiryCandidates(TenantId tenant, Instant cutoff, UUID afterId, int limit);
 
     /**
-     * Saves a journey withdrawn as expired only if it is still in progress and still has no activity
-     * since {@code cutoff}. False when a request used it in the meantime.
+     * Saves a journey that ends by inactivity (withdrawn as expired, or a completed one that ends) only if it is
+     * still in the state it was read in, still active and still without activity since {@code cutoff}. False when
+     * a request used it in the meantime.
      */
-    boolean updateIfInactive(TenantId tenant, Journey journey, Instant cutoff);
+    boolean updateIfInactive(TenantId tenant, Journey journey, JourneyState readInState, Instant cutoff);
 
     /**
-     * Deletes the journey's session only if the journey is withdrawn or has no activity since
-     * {@code cutoff}. False when there was nothing to delete or a request used the journey meanwhile.
+     * Deletes the journey's session only if the journey has ended or has no activity since {@code cutoff}.
+     * False when there was nothing to delete or a request used the journey meanwhile.
      */
     boolean deleteSessionIfClosedOrInactive(TenantId tenant, UUID journeyId, Instant cutoff);
 }

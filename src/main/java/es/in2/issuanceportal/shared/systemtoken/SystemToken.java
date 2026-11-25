@@ -1,4 +1,4 @@
-package es.in2.issuanceportal.journey.application.port;
+package es.in2.issuanceportal.shared.systemtoken;
 
 import java.time.Instant;
 import java.util.Objects;

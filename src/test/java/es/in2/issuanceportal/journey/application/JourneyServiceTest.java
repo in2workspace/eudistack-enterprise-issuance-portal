@@ -21,6 +21,7 @@ import es.in2.issuanceportal.session.api.PersonalIdentifier;
 import es.in2.issuanceportal.session.api.Section;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.transaction.support.TransactionOperations;
 
@@ -190,7 +191,8 @@ class JourneyServiceTest {
     }
 
     @Test
-    void cancel_completedJourney_onlyClosesSession() {
+    @DisplayName("AC-25 — cancel_completedJourney_endsItAndDeletesItsSession")
+    void cancel_completedJourney_endsItAndDeletesItsSession() {
         Started started = open(service);
         complete(started);
 
@@ -199,7 +201,51 @@ class JourneyServiceTest {
         assertThat(journey.state()).isEqualTo(JourneyState.COMPLETED);
         assertThat(journey.step()).isEqualTo(JourneyStep.OFFER_OBTAINED);
         assertThat(stored(started).state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(stored(started).endedAt()).contains(clock.instant());
         assertThat(sessions.journeyOf(SANDBOX, started.holder())).isEmpty();
+        assertThat(trail.events().getLast().kind()).isEqualTo(JourneyAuditTrail.Kind.ENDED);
+        assertJourneyClosed(() -> service.current(SANDBOX, started.holder()));
+    }
+
+    @Test
+    @DisplayName("AC-25 — current_completedAndActiveJourney_isServedAndCountsAsActivity")
+    void current_completedAndActiveJourney_isServedAndCountsAsActivity() {
+        Started started = open(service);
+        complete(started);
+        clock.advance(Duration.ofMinutes(10));
+
+        service.current(SANDBOX, started.holder());
+        clock.advance(Duration.ofMinutes(10));
+
+        assertThat(service.current(SANDBOX, started.holder()).state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(stored(started).endedAt()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("AC-25 — current_completedJourneyInactiveForFifteenMinutes_endsOnTheRequest")
+    void current_completedJourneyInactiveForFifteenMinutes_endsOnTheRequest() {
+        Started started = open(service);
+        complete(started);
+        clock.advance(Duration.ofMinutes(15));
+
+        assertJourneyClosed(() -> service.current(SANDBOX, started.holder()));
+
+        assertThat(stored(started).state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(stored(started).endedAt()).isPresent();
+        assertThat(sessions.journeyOf(SANDBOX, started.holder())).isEmpty();
+    }
+
+    @Test
+    @DisplayName("AC-25 — open_holderWhoseCompletedJourneyEnded_opensANewOne")
+    void open_holderWhoseCompletedJourneyEnded_opensANewOne() {
+        Started started = open(service);
+        complete(started);
+        service.cancel(SANDBOX, started.holder());
+
+        JourneyService.Opened opened = service.open(SANDBOX, started.holder(), IDENTITY, null);
+
+        assertThat(opened.created()).isTrue();
+        assertThat(opened.journey().id()).isNotEqualTo(started.journey().id());
     }
 
     @Test
@@ -258,10 +304,11 @@ class JourneyServiceTest {
         used.touch(clock.instant());
         journeys.update(SANDBOX, used, JourneyState.IN_PROGRESS);
         Journey staleRead = Journey.restore(used.id(), JourneyState.IN_PROGRESS, JourneyStep.STARTED, null, null,
-                null, used.createdAt(), used.createdAt(), null);
+                used.createdAt(), null, used.createdAt(), null);
         staleRead.withdraw(WithdrawalReason.EXPIRED, clock.instant());
 
-        assertThat(journeys.updateIfInactive(SANDBOX, staleRead, clock.instant().minus(Journey.INACTIVITY_LIMIT)))
+        assertThat(journeys.updateIfInactive(SANDBOX, staleRead, JourneyState.IN_PROGRESS,
+                clock.instant().minus(Journey.INACTIVITY_LIMIT)))
                 .isFalse();
         assertThat(journeys.deleteSessionIfClosedOrInactive(SANDBOX, used.id(),
                 clock.instant().minus(Journey.INACTIVITY_LIMIT))).isFalse();
@@ -330,7 +377,8 @@ class JourneyServiceTest {
     }
 
     @Test
-    void expireInactive_inactiveCompletedJourney_onlyClosesSession() {
+    @DisplayName("AC-25 — expireInactive_inactiveCompletedJourney_endsItAndStaysCompleted")
+    void expireInactive_inactiveCompletedJourney_endsItAndStaysCompleted() {
         Started started = open(service);
         complete(started);
         clock.advance(Duration.ofMinutes(15));
@@ -338,7 +386,9 @@ class JourneyServiceTest {
         assertThat(service.expireInactive(SANDBOX)).isEqualTo(1);
 
         assertThat(stored(started).state()).isEqualTo(JourneyState.COMPLETED);
+        assertThat(stored(started).endedAt()).isPresent();
         assertThat(sessions.journeyOf(SANDBOX, started.holder())).isEmpty();
+        assertThat(trail.events().getLast().kind()).isEqualTo(JourneyAuditTrail.Kind.ENDED);
     }
 
     @Test

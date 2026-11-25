@@ -3,9 +3,10 @@ package es.in2.issuanceportal.authenticsource.infrastructure.web;
 import es.in2.issuanceportal.TestcontainersConfiguration;
 import es.in2.issuanceportal.authenticsource.StubAdapter;
 import es.in2.issuanceportal.authenticsource.domain.IdentifierType;
-import es.in2.issuanceportal.authenticsource.domain.LookupResult;
 import es.in2.issuanceportal.authenticsource.domain.PersonalIdentifier;
-import es.in2.issuanceportal.authenticsource.domain.SourceRecord;
+import es.in2.issuanceportal.authenticsource.domain.RequestStatus;
+import es.in2.issuanceportal.authenticsource.domain.SourceRequest;
+import es.in2.issuanceportal.authenticsource.domain.SourceRequests;
 import es.in2.issuanceportal.journey.api.JourneyWithdrawal;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.JourneySessions;
@@ -82,9 +83,10 @@ class EntitlementApiIT {
                            "mapping": [{"attribute": "registration_number", "claim": "personal_administrative_number",
                                         "label": "Número de colegiado"}]}}}""")
                 .update();
-        adapter.answering(searched -> searched.sameAs(ACTIVE)
-                ? LookupResult.found(new SourceRecord(List.of(ACTIVE), true, Map.of("registration_number", "280000001")))
-                : LookupResult.notFound());
+        adapter.answering(searched -> searched.identifier().sameAs(ACTIVE)
+                ? SourceRequests.of(new SourceRequest("SIM-1", RequestStatus.AVAILABLE, List.of(), false, null, null,
+                        null, null, Map.of("registration_number", "280000001")))
+                : SourceRequests.notFound());
     }
 
     /** The container is shared with the other integration tests, which expect no configuration. */
@@ -105,12 +107,17 @@ class EntitlementApiIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result").value("confirmed"))
                 .andExpect(jsonPath("$.reason").doesNotExist())
-                .andExpect(jsonPath("$.attestation.type_name").value("DoctorID"))
-                .andExpect(jsonPath("$.attestation.fields[0].label").value("Nombre y apellidos"))
-                .andExpect(jsonPath("$.attestation.fields[0].value").value("Lucía Prueba"))
-                .andExpect(jsonPath("$.attestation.fields[1].value").value("280000001"))
-                .andExpect(jsonPath("$.attestation.email").doesNotExist())
-                .andExpect(jsonPath("$.attestation.email_required").value(true));
+                .andExpect(jsonPath("$.requests.length()").value(1))
+                .andExpect(jsonPath("$.requests[0].id").value("r1"))
+                .andExpect(jsonPath("$.requests[0].status").value("available"))
+                .andExpect(jsonPath("$.requests[0].renewal").value(false))
+                .andExpect(jsonPath("$.requests[0].source_ref").doesNotExist())
+                .andExpect(jsonPath("$.requests[0].attestation.type_name").value("DoctorID"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[0].label").value("Nombre y apellidos"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[0].value").value("Lucía Prueba"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[1].value").value("280000001"))
+                .andExpect(jsonPath("$.requests[0].attestation.email").doesNotExist())
+                .andExpect(jsonPath("$.requests[0].attestation.email_required").doesNotExist());
 
         assertThat(adapter.searches()).last().isEqualTo(ACTIVE);
     }
@@ -124,6 +131,7 @@ class EntitlementApiIT {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.result").value("not_confirmed"))
                 .andExpect(jsonPath("$.reason").value("not_found"))
+                .andExpect(jsonPath("$.requests").isEmpty())
                 .andExpect(jsonPath("$.attestation").doesNotExist());
 
         mvc.perform(entitlement(holder))

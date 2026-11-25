@@ -10,6 +10,7 @@ import es.in2.issuanceportal.journey.api.JourneyProgress;
 import es.in2.issuanceportal.journey.domain.EmailVerification;
 import es.in2.issuanceportal.session.api.EmailRecord;
 import es.in2.issuanceportal.session.api.EmailVerificationRecord;
+import es.in2.issuanceportal.session.EntitlementRecords;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.IdentifierType;
@@ -229,11 +230,14 @@ class EmailVerificationApiIT {
     }
 
     @Test
-    @DisplayName("EC-04 — postEmailVerification_offerAlreadyDelivered_is409StepNotAllowed")
-    void postEmailVerification_offerAlreadyDelivered_is409StepNotAllowed() throws Exception {
+    @DisplayName("EC-12 — postEmailVerification_afterTheFirstConfirmation_is409StepNotAllowed")
+    void postEmailVerification_afterTheFirstConfirmation_is409StepNotAllowed() throws Exception {
         TestHolder holder = entitledJourney();
+        sessions.write(SANDBOX, journeyOf(holder), Section.ISSUANCE, es.in2.issuanceportal.session.api.IssuanceRecord
+                .empty().with("r1", es.in2.issuanceportal.session.api.IssuanceRecord.Entry
+                        .withKey(java.util.UUID.randomUUID(), EMAIL)).toJson());
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET state = 'completed', step = 'offer_obtained', "
-                        + "ended_at = now() WHERE id = :id")
+                        + "completed_at = now() WHERE id = :id")
                 .param("id", journeyOf(holder)).update();
 
         mvc.perform(send(holder, "{\"email\":\"" + EMAIL + "\"}", null))
@@ -666,18 +670,18 @@ class EmailVerificationApiIT {
     }
 
     @Test
-    @DisplayName("AC-09 — getJourney_offerObtained_hasNoEmailVerification")
-    void getJourney_offerObtained_hasNoEmailVerification() throws Exception {
+    @DisplayName("AC-21 — getJourney_completedAndActive_keepsTheEmailVerificationUntilTheJourneyEnds")
+    void getJourney_completedAndActive_keepsTheEmailVerificationUntilTheJourneyEnds() throws Exception {
         TestHolder holder = entitledJourney();
         sentCode(holder);
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET state = 'completed', step = 'offer_obtained', "
-                        + "ended_at = now() WHERE id = :id")
+                        + "completed_at = now() WHERE id = :id")
                 .param("id", journeyOf(holder)).update();
 
         mvc.perform(get(holder))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.state").value("completed"))
-                .andExpect(jsonPath("$.email_verification").doesNotExist());
+                .andExpect(jsonPath("$.email_verification.email").exists());
     }
 
     @Test
@@ -749,9 +753,9 @@ class EmailVerificationApiIT {
     /** What Identification and Authentic source leave in the journey before the holder reaches Data. */
     private TestHolder entitledJourney() throws Exception {
         TestHolder holder = identifiedJourney();
-        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.PERSONAL_ID,
+        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, EntitlementRecords.available(IdentifierType.PERSONAL_ID,
                 Map.of("legally_entitled", true),
-                new EntitlementRecord.Preview("DoctorID", List.of(), null, true), clock.instant()).toJson());
+                new EntitlementRecord.Preview("DoctorID", List.of()), null, clock.instant()).toJson());
         progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
         return holder;
     }

@@ -5,6 +5,7 @@ import es.in2.issuanceportal.journey.domain.JourneyState;
 import es.in2.issuanceportal.journey.domain.JourneyStep;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.slf4j.Logger;
@@ -70,13 +71,45 @@ class LogJourneyAuditTrailTest {
         UUID process = UUID.randomUUID();
 
         trail.append(SANDBOX, new JourneyAuditTrail.IssuanceRequested(UUID.randomUUID(), UUID.randomUUID(),
-                JourneyAuditTrail.IssuanceOutcome.ISSUED, Optional.of(process), Instant.now()));
+                "r2", JourneyAuditTrail.IssuanceOutcome.ISSUED, Optional.of(process), Instant.now()));
 
         ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
         verify(audit).info(anyString(), arguments.capture());
         assertThat(java.util.Arrays.stream(arguments.getValue()).map(Object::toString))
                 .contains("result=issued", "issuance_process_id=" + process, "event=ISSUANCE_REQUESTED",
-                        "tenant=sandbox");
+                        "tenant=sandbox", "request_id=r2");
+    }
+
+    @Test
+    @DisplayName("EUD-359 AC-11 — append_requestSaved_writesTheRequestAndItsOriginWithoutPersonalData")
+    void append_requestSaved_writesTheRequestAndItsOriginWithoutPersonalData() {
+        UUID journey = UUID.randomUUID();
+
+        trail.append(SANDBOX, new JourneyAuditTrail.RequestSaved(UUID.randomUUID(), journey, "r3",
+                JourneyAuditTrail.SavedOrigin.OFFER_NOT_RENEWABLE, Instant.now()));
+
+        ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
+        verify(audit).info(anyString(), arguments.capture());
+        assertThat(java.util.Arrays.stream(arguments.getValue()).map(Object::toString))
+                .contains("event=REQUEST_SAVED", "journey_id=" + journey, "request_id=r3",
+                        "origin=offer_not_renewable", "tenant=sandbox")
+                .allSatisfy(argument -> assertThat(argument).doesNotContain("@", "SIM-", "280000"));
+    }
+
+    @Test
+    @DisplayName("EUD-359 AC-11 — append_offerRenewal_writesTheRequestAndItsResultWithoutPersonalData")
+    void append_offerRenewal_writesTheRequestAndItsResultWithoutPersonalData() {
+        UUID journey = UUID.randomUUID();
+
+        trail.append(SANDBOX, new JourneyAuditTrail.OfferRenewalRequested(UUID.randomUUID(), journey, "r1",
+                JourneyAuditTrail.RenewalOutcome.REQUEST_SAVED, Instant.now()));
+
+        ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
+        verify(audit).info(anyString(), arguments.capture());
+        assertThat(java.util.Arrays.stream(arguments.getValue()).map(Object::toString))
+                .contains("event=OFFER_RENEWAL_REQUESTED", "journey_id=" + journey, "request_id=r1",
+                        "result=request_saved", "tenant=sandbox")
+                .allSatisfy(argument -> assertThat(argument).doesNotContain("@", "SIM-", "280000"));
     }
 
     @Test
@@ -84,7 +117,7 @@ class LogJourneyAuditTrailTest {
         doThrow(new IllegalStateException("log sink down")).when(audit).info(anyString(), any(Object[].class));
 
         assertThatNoException().isThrownBy(() -> trail.append(SANDBOX, new JourneyAuditTrail.IssuanceRequested(
-                UUID.randomUUID(), UUID.randomUUID(), JourneyAuditTrail.IssuanceOutcome.UNAVAILABLE,
+                UUID.randomUUID(), UUID.randomUUID(), "r1", JourneyAuditTrail.IssuanceOutcome.UNAVAILABLE,
                 Optional.empty(), Instant.now())));
     }
 

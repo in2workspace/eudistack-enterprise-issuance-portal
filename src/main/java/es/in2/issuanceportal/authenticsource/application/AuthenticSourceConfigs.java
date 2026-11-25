@@ -17,7 +17,8 @@ import java.util.Set;
 /**
  * The tenant's source for the journey's attestation type, checked against the adapters of this
  * deployment before any search (ac.md decision 6). A configuration that cannot be honoured answers
- * {@code config_unavailable}: it fails when it is loaded, never half-way through a search.
+ * {@code config_unavailable}: it fails when it is loaded, never half-way through a search. A login whose
+ * identifier type the source does not accept is not a configuration error: the check finds nobody (design.md §3.2).
  */
 @Slf4j
 @Service
@@ -43,9 +44,6 @@ public class AuthenticSourceConfigs {
                 .orElseThrow(() -> invalid(tenant, config, "adapter is not available in this environment"));
         if (!adapter.supportedIdentifierTypes().containsAll(settings.identifierTypes())) {
             throw invalid(tenant, config, "identifier_types has a type the adapter cannot search by");
-        }
-        if (!settings.identifierTypes().containsAll(config.loginIdentifierTypes())) {
-            throw invalid(tenant, config, "identifier_types does not cover every type the login can give");
         }
         return new Current(config.attestationType(), settings, adapter);
     }

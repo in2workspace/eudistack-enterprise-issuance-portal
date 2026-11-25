@@ -9,9 +9,6 @@ import es.in2.issuanceportal.shared.error.ProblemException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtendWith;
-import org.springframework.boot.test.system.CapturedOutput;
-import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.util.HashMap;
 import java.util.List;
@@ -22,7 +19,6 @@ import java.util.Set;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-@ExtendWith(OutputCaptureExtension.class)
 class AuthenticSourceConfigsTest {
 
     private static final TenantId CGCOM = new TenantId("cgcom");
@@ -89,23 +85,19 @@ class AuthenticSourceConfigsTest {
     }
 
     @Test
-    @DisplayName("AC-13 — current_sourceNotCoveringTheDoctorIdLogin_isConfigUnavailable")
-    void current_sourceNotCoveringTheDoctorIdLogin_isConfigUnavailable(CapturedOutput output) {
+    @DisplayName("AC-20 — current_sourceNotCoveringTheDoctorIdLogin_isNotAConfigurationError")
+    void current_sourceNotCoveringTheDoctorIdLogin_isNotAConfigurationError() {
         save(Set.of(IdentifierType.COLEGIADO), source("simulated", Set.of(IdentifierType.PERSONAL_ID)));
 
-        assertThatThrownBy(() -> configs.current(CGCOM)).isInstanceOfSatisfying(ProblemException.class,
-                e -> assertThat(e.problem()).isEqualTo(ProblemCode.CONFIG_UNAVAILABLE));
-        assertThat(output.getOut()).contains("Authentic source configuration of tenant cgcom for doctorid.sd.1 is invalid: "
-                + "authentic_source.identifier_types does not cover every type the login can give");
+        assertThat(configs.current(CGCOM).identifierTypes()).containsExactly(IdentifierType.PERSONAL_ID);
     }
 
     @Test
-    @DisplayName("AC-13 — current_sourceNotCoveringTheCertificateLogin_isConfigUnavailable")
-    void current_sourceNotCoveringTheCertificateLogin_isConfigUnavailable() {
+    @DisplayName("AC-20 — current_sourceNotCoveringTheCertificateLogin_isNotAConfigurationError")
+    void current_sourceNotCoveringTheCertificateLogin_isNotAConfigurationError() {
         save(Set.of(), source("simulated", Set.of(IdentifierType.COLEGIADO)));
 
-        assertThatThrownBy(() -> configs.current(CGCOM)).isInstanceOfSatisfying(ProblemException.class,
-                e -> assertThat(e.problem()).isEqualTo(ProblemCode.CONFIG_UNAVAILABLE));
+        assertThat(configs.current(CGCOM).identifierTypes()).containsExactly(IdentifierType.COLEGIADO);
         assertThat(simulated.searches()).isEmpty();
     }
 }

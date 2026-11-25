@@ -88,9 +88,12 @@ class AccessTokenApiIT {
         GET_JOURNEY(HttpMethod.GET, "/journey"),
         WITHDRAWAL(HttpMethod.POST, "/journey/withdrawal"),
         ENTITLEMENT(HttpMethod.POST, "/entitlement"),
+        DISPUTE(HttpMethod.POST, "/entitlement/requests/r1/dispute"),
         EMAIL_CODE(HttpMethod.POST, "/journey/email-verification"),
         EMAIL_CHECK(HttpMethod.POST, "/journey/email-verification/code"),
-        CONFIRMATION(HttpMethod.POST, "/journey/confirmation");
+        CONFIRMATION(HttpMethod.POST, "/journey/confirmation"),
+        OFFERS(HttpMethod.POST, "/journey/offers"),
+        SAVED(HttpMethod.POST, "/journey/requests/r1/saved");
 
         final HttpMethod method;
         final String path;

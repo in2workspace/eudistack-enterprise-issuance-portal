@@ -128,7 +128,7 @@ class IncidentApiIT {
         assertThat(jdbc.sql("SELECT table_name FROM information_schema.tables "
                         + "WHERE table_schema = 'sandbox_issuance_portal' AND table_name <> 'flyway_schema_history'")
                 .query(String.class).list())
-                .containsExactlyInAnyOrder("journey", "journey_session", "shedlock", "portal_config");
+                .containsExactlyInAnyOrder("journey", "journey_issuance", "journey_session", "shedlock", "portal_config");
     }
 
     @Test

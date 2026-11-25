@@ -15,7 +15,7 @@ import java.util.UUID;
  */
 public interface JourneyAuditTrail {
 
-    enum Kind { STARTED, STEP_REACHED, COMPLETED, WITHDRAWN }
+    enum Kind { STARTED, STEP_REACHED, COMPLETED, WITHDRAWN, ENDED }
 
     record Event(
             UUID eventId,
@@ -53,10 +53,11 @@ public interface JourneyAuditTrail {
     }
 
     /**
-     * A request to the issuance API (design.md §3.5): the result and, when there was one, the process. No
-     * email, attestation data, offer or token.
+     * A request to the issuance API (design.md §3.5): the request of the journey by its opaque id, the result and,
+     * when there was one, the process. No email, attestation data, offer or token.
      */
-    record IssuanceRequested(UUID eventId, UUID journeyId, IssuanceOutcome result, Optional<UUID> issuanceProcessId,
+    record IssuanceRequested(UUID eventId, UUID journeyId, String requestId, IssuanceOutcome result,
+                             Optional<UUID> issuanceProcessId,
                              Instant occurredAt) {
     }
 
@@ -141,7 +142,65 @@ public interface JourneyAuditTrail {
     record EmailCodeChecked(UUID eventId, UUID journeyId, EmailCodeCheck result, Instant occurredAt) {
     }
 
+    /** What came of asking the issuance API for a new offer of a request (design.md §3.4, §3.5). */
+    enum RenewalOutcome {
+
+        /** The Issuer gave a new offer. */
+        RENEWED("renewed"),
+        /** The Issuer said the process can no longer be renewed: the request is saved. */
+        REQUEST_SAVED("request_saved"),
+        /** The Issuer refused the request, or the tenant has no system token. */
+        REJECTED("rejected"),
+        /** The Issuer did not answer, also after the retries. */
+        UNAVAILABLE("unavailable");
+
+        private final String code;
+
+        RenewalOutcome(String code) {
+            this.code = code;
+        }
+
+        public String code() {
+            return code;
+        }
+    }
+
+    /**
+     * A request for a new offer (design.md §3.5): the request of the journey by its opaque id and the result. No
+     * email, offer, address or token.
+     */
+    record OfferRenewalRequested(UUID eventId, UUID journeyId, String requestId, RenewalOutcome result,
+                                 Instant occurredAt) {
+    }
+
+    /** Why a request became saved (design.md §3.4, §3.8). */
+    enum SavedOrigin {
+
+        /** The holder pressed "I have saved it". */
+        HOLDER_DECLARED("holder_declared"),
+        /** The Issuer said the offer can no longer be renewed. */
+        OFFER_NOT_RENEWABLE("offer_not_renewable");
+
+        private final String code;
+
+        SavedOrigin(String code) {
+            this.code = code;
+        }
+
+        public String code() {
+            return code;
+        }
+    }
+
+    /** A request became saved (design.md §3.5): the opaque id and why. No offer, address or data. */
+    record RequestSaved(UUID eventId, UUID journeyId, String requestId, SavedOrigin origin, Instant occurredAt) {
+    }
+
     void append(TenantId tenant, Event event);
+
+    void append(TenantId tenant, RequestSaved event);
+
+    void append(TenantId tenant, OfferRenewalRequested event);
 
     void append(TenantId tenant, IssuanceRequested event);
 

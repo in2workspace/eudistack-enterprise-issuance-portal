@@ -10,10 +10,11 @@ import com.github.tomakehurst.wiremock.core.WireMockConfiguration;
 import com.github.tomakehurst.wiremock.verification.LoggedRequest;
 import es.in2.issuanceportal.TestcontainersConfiguration;
 import es.in2.issuanceportal.journey.api.JourneyProgress;
-import es.in2.issuanceportal.journey.application.port.SystemTokenProvider;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenProvider;
 import es.in2.issuanceportal.journey.infrastructure.systemtoken.MachineCredentialFixture;
 import es.in2.issuanceportal.session.api.EmailRecord;
 import es.in2.issuanceportal.session.api.EmailVerificationRecord;
+import es.in2.issuanceportal.session.EntitlementRecords;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.IdentifierType;
@@ -56,6 +57,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.aResponse;
 import static com.github.tomakehurst.wiremock.client.WireMock.post;
 import static com.github.tomakehurst.wiremock.client.WireMock.postRequestedFor;
 import static com.github.tomakehurst.wiremock.client.WireMock.urlEqualTo;
+import static com.github.tomakehurst.wiremock.client.WireMock.urlPathMatching;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -225,6 +227,11 @@ abstract class SystemIssuanceITSupport {
 
     void issuerIssues() {
         WIRE.stubFor(post(urlEqualTo(ISSUANCES_PATH)).willReturn(issued()));
+        // The new offer of the branch EUD-295 of the Issuer: the same envelope, and no Location.
+        WIRE.stubFor(post(urlPathMatching(ISSUANCES_PATH + "/[0-9a-f-]{36}/credential-offer")).willReturn(aResponse()
+                .withStatus(200).withHeader("Content-Type", "application/json")
+                .withBody("{\"responses\":[{\"channel\":\"ui\",\"status\":200,"
+                        + "\"body\":{\"credential_offer_uri\":\"" + OFFER + "\"}}]}")));
     }
 
     void walletUnitServiceCreatesTicket() {
@@ -271,12 +278,14 @@ abstract class SystemIssuanceITSupport {
     }
 
     UUID processOf(TestHolder holder) {
-        return jdbc.sql("SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
+        return jdbc.sql("SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey_issuance WHERE journey_id = :id")
                 .param("id", journeyOf(holder)).query(UUID.class).optional().orElse(null);
     }
 
     Map<String, Object> rowOf(TestHolder holder) {
-        return jdbc.sql("SELECT state, step, issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
+        return jdbc.sql("SELECT state, step, (SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey_issuance "
+                        + "WHERE journey_id = journey.id ORDER BY created_at LIMIT 1) AS issuance_process_id "
+                        + "FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
                 .param("id", journeyOf(holder)).query().singleRow();
     }
 
@@ -313,23 +322,29 @@ abstract class SystemIssuanceITSupport {
     /** What Identification and Authentic source leave in the journey before the holder verifies the email. */
     TestHolder entitledJourneyWithoutEmail() throws Exception {
         TestHolder holder = identifiedJourney();
-        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.PERSONAL_ID, Map.of(
+        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, EntitlementRecords.available(IdentifierType.PERSONAL_ID, Map.of(
                 "personal_administrative_number", ADMINISTRATIVE_NUMBER,
                 "medical_board", List.of(MEDICAL_BOARD),
                 "medical_speciality", List.of(SPECIALITY),
                 "legally_entitled", true),
-                new EntitlementRecord.Preview("DoctorID", List.of(), null, true), clock.instant()).toJson());
+                new EntitlementRecord.Preview("DoctorID", List.of()), null, clock.instant()).toJson());
         progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
         return holder;
     }
 
     /** The holder's call, with the holder's own token: it must never go on to another system (NFR-4). It has no body. */
     static MockHttpServletRequestBuilder confirmation(TestHolder holder) {
+        return confirmation(holder, "r1");
+    }
+
+    static MockHttpServletRequestBuilder confirmation(TestHolder holder, String requestId) {
         String token = holder.mint(Instant.now(), tokens -> tokens.claim("exp", Instant.now().plus(Duration.ofHours(2))));
         HOLDER_TOKENS.add(token);
         return MockMvcRequestBuilders.post(CONTEXT + "/api/v1/journey/confirmation")
                 .contextPath(CONTEXT)
                 .header("Authorization", "Bearer " + token)
+                .contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                .content("{\"request_id\":\"" + requestId + "\"}")
                 .with(host());
     }
 

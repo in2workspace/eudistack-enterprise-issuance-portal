@@ -20,6 +20,7 @@ import es.in2.issuanceportal.session.api.EmailRecord;
 import es.in2.issuanceportal.session.api.EmailVerificationRecord;
 import es.in2.issuanceportal.session.api.HolderRef;
 import es.in2.issuanceportal.session.api.InvalidSectionException;
+import es.in2.issuanceportal.session.api.IssuanceRecord;
 import es.in2.issuanceportal.session.api.JourneySessions;
 import es.in2.issuanceportal.session.api.Section;
 import es.in2.issuanceportal.shared.error.ProblemCode;
@@ -99,7 +100,7 @@ public class EmailVerificationService {
 
     private EmailVerification sendLocked(TenantId tenant, UUID journeyId, String rawEmail,
                                          EmailLanguage language, String clientAddress) {
-        requireOpenForCode(lock(tenant, journeyId));
+        requireOpenForCode(tenant, lock(tenant, journeyId));
         requireSection(tenant, journeyId, Section.IDENTITY);
         requireSection(tenant, journeyId, Section.ENTITLEMENT);
         EmailAddress email = email(rawEmail);
@@ -177,7 +178,7 @@ public class EmailVerificationService {
     private EmailVerification.Check.Outcome checkLocked(TenantId tenant, UUID journeyId,
                                                         String code) {
         Journey journey = lock(tenant, journeyId);
-        requireOpenForCode(journey);
+        requireInProgress(journey);
         // No code pending: never sent, or already verified (ES-03).
         EmailVerification pending = readVerification(tenant, journeyId)
                 .filter(EmailVerification::isPending)
@@ -220,16 +221,39 @@ public class EmailVerificationService {
     }
 
     /**
-     * A journey that already has its offer cannot send a code (EC-04) and answers {@code step_not_allowed}; one
-     * that is withdrawn is closed. The pre-check of the caller did not look at it: it may have changed since.
+     * The email is verified once per journey, before the first confirmation (design.md §3.6 step 2): as soon as a
+     * request has an idempotency key a code cannot be sent (EC-12) and the answer is {@code step_not_allowed}, in
+     * a journey in progress and in a completed one alike. A journey that ended is closed. The pre-check of the
+     * caller did not look at it: it may have changed since.
      */
-    private static void requireOpenForCode(Journey journey) {
+    private void requireOpenForCode(TenantId tenant, Journey journey) {
+        if (!journey.isActive()) {
+            throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
+        }
+        if (hasIdempotencyKey(tenant, journey.id())) {
+            throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
+        }
+    }
+
+    /** A pending code is only checked while the journey is in progress; one that ended is closed. */
+    private static void requireInProgress(Journey journey) {
         if (journey.state() == JourneyState.COMPLETED) {
             throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
         }
         if (!journey.isInProgress()) {
             throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
         }
+    }
+
+    /** A section that cannot be read counts as having one: nothing is sent where an issuance may exist. */
+    private boolean hasIdempotencyKey(TenantId tenant, UUID journeyId) {
+        return sessions.read(tenant, journeyId, Section.ISSUANCE).map(section -> {
+            try {
+                return !IssuanceRecord.fromJson(section).requests().isEmpty();
+            } catch (InvalidSectionException _) {
+                return true;
+            }
+        }).orElse(false);
     }
 
     private void requireSection(TenantId tenant, UUID journeyId, Section section) {

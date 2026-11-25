@@ -1,85 +1,98 @@
 package es.in2.issuanceportal.authenticsource.domain;
 
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/** The table of design.md §3.3 for an answer of the source. */
 class EntitlementRulesTest {
 
-    private static final PersonalIdentifier DNI = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R");
-    private static final PersonalIdentifier COLEGIADO = new PersonalIdentifier(IdentifierType.COLEGIADO, "280000001");
-
-    private static SourceRecord sourceRecord(boolean entitled, PersonalIdentifier... identifiers) {
-        return new SourceRecord(List.of(identifiers), entitled, Map.of("medical_board", List.of("Madrid")));
+    private static SourceRequest request(String ref, RequestStatus status) {
+        return new SourceRequest(ref, status, List.of(), false, null, null, null, null,
+                Map.of("registration_number", "280000001"));
     }
 
     @Test
-    void decide_notFound_isNotConfirmedNotFound() {
-        assertThat(EntitlementRules.decide(DNI, LookupResult.notFound()))
-                .isEqualTo(new EntitlementDecision.NotConfirmed(NotConfirmedReason.NOT_FOUND));
+    void decide_notFound_isNotConfirmedNotFoundWithoutRequests() {
+        assertThat(EntitlementRules.decide(SourceRequests.notFound(), Set.of()))
+                .isEqualTo(new EntitlementDecision.NotConfirmed(Optional.of(NotConfirmedReason.NOT_FOUND), List.of()));
     }
 
     @Test
-    void decide_samePersonEntitled_isConfirmedWithTheRecord() {
-        SourceRecord found = sourceRecord(true, DNI, COLEGIADO);
-
-        assertThat(EntitlementRules.decide(DNI, LookupResult.found(found)))
-                .isEqualTo(new EntitlementDecision.Confirmed(found));
+    void decide_noRequests_isNotConfirmedNoRequests() {
+        assertThat(EntitlementRules.decide(SourceRequests.noRequests(), Set.of()))
+                .isEqualTo(new EntitlementDecision.NotConfirmed(Optional.of(NotConfirmedReason.NO_REQUESTS), List.of()));
     }
 
     @Test
-    void decide_searchedByColegiado_comparesTheColegiado() {
-        SourceRecord found = sourceRecord(true, DNI, COLEGIADO);
-
-        assertThat(EntitlementRules.decide(COLEGIADO, LookupResult.found(found)))
-                .isEqualTo(new EntitlementDecision.Confirmed(found));
+    void decide_emptyListOfRequests_isNoRequests() {
+        assertThat(EntitlementRules.decide(new SourceRequests.Requests(List.of()), Set.of()))
+                .isEqualTo(new EntitlementDecision.NotConfirmed(Optional.of(NotConfirmedReason.NO_REQUESTS), List.of()));
     }
 
     @Test
-    void decide_samePersonNotEntitled_isNotConfirmedNotEntitled() {
-        assertThat(EntitlementRules.decide(DNI, LookupResult.found(sourceRecord(false, DNI, COLEGIADO))))
-                .isEqualTo(new EntitlementDecision.NotConfirmed(NotConfirmedReason.NOT_ENTITLED));
+    @DisplayName("EC-08 — decide_oneAvailableAndOneMismatch_isConfirmedWithBothInTheSourceOrder")
+    void decide_oneAvailableAndOneMismatch_isConfirmedWithBothInTheSourceOrder() {
+        SourceRequest mismatch = request("B", RequestStatus.IDENTITY_MISMATCH);
+        SourceRequest available = request("A", RequestStatus.AVAILABLE);
+
+        EntitlementDecision decision = EntitlementRules.decide(SourceRequests.of(mismatch, available), Set.of());
+
+        assertThat(decision).isEqualTo(new EntitlementDecision.Confirmed(List.of(mismatch, available)));
     }
 
     @Test
-    void decide_anotherPerson_isIdentifierMismatch() {
-        PersonalIdentifier other = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000002W");
+    @DisplayName("AC-04 — decide_noRequestAvailable_isNotConfirmedWithoutReasonAndKeepsTheRequests")
+    void decide_noRequestAvailable_isNotConfirmedWithoutReasonAndKeepsTheRequests() {
+        SourceRequest identity = request("A", RequestStatus.IDENTITY_MISMATCH);
+        SourceRequest identifier = request("B", RequestStatus.IDENTIFIER_MISMATCH);
 
-        assertThat(EntitlementRules.decide(DNI, LookupResult.found(sourceRecord(true, other, COLEGIADO))))
-                .isEqualTo(new EntitlementDecision.NotConfirmed(NotConfirmedReason.IDENTIFIER_MISMATCH));
+        assertThat(EntitlementRules.decide(SourceRequests.of(identity, identifier), Set.of()))
+                .isEqualTo(new EntitlementDecision.NotConfirmed(Optional.empty(), List.of(identity, identifier)));
     }
 
     @Test
-    void decide_anotherPersonNotEntitled_isIdentifierMismatchNotNotEntitled() {
-        PersonalIdentifier other = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000002W");
+    @DisplayName("EC-02 — decide_requestAlreadyUnderReview_staysUnderReviewEvenIfTheSourceGivesItAvailable")
+    void decide_requestAlreadyUnderReview_staysUnderReviewEvenIfTheSourceGivesItAvailable() {
+        SourceRequest first = request("A", RequestStatus.AVAILABLE);
+        SourceRequest second = request("B", RequestStatus.AVAILABLE);
 
-        assertThat(EntitlementRules.decide(DNI, LookupResult.found(sourceRecord(false, other))))
-                .isEqualTo(new EntitlementDecision.NotConfirmed(NotConfirmedReason.IDENTIFIER_MISMATCH));
+        EntitlementDecision decision = EntitlementRules.decide(SourceRequests.of(first, second), Set.of("A"));
+
+        assertThat(decision).isInstanceOf(EntitlementDecision.Confirmed.class);
+        assertThat(decision.requests()).extracting(SourceRequest::status)
+                .containsExactly(RequestStatus.UNDER_REVIEW, RequestStatus.AVAILABLE);
     }
 
     @Test
-    void decide_withoutIdentifierOfTheSearchedType_isIdentifierMismatch() {
-        assertThat(EntitlementRules.decide(COLEGIADO, LookupResult.found(sourceRecord(true, DNI))))
-                .isEqualTo(new EntitlementDecision.NotConfirmed(NotConfirmedReason.IDENTIFIER_MISMATCH));
+    void decide_onlyRequestUnderReview_isNotConfirmedWithoutReason() {
+        EntitlementDecision decision = EntitlementRules.decide(
+                SourceRequests.of(request("A", RequestStatus.AVAILABLE)), Set.of("A"));
+
+        assertThat(decision).isInstanceOf(EntitlementDecision.NotConfirmed.class);
+        assertThat(((EntitlementDecision.NotConfirmed) decision).reason()).isEmpty();
+        assertThat(decision.requests()).extracting(SourceRequest::status).containsExactly(RequestStatus.UNDER_REVIEW);
     }
 
     @Test
-    void decide_sameValueOfAnotherType_isIdentifierMismatch() {
-        PersonalIdentifier dniWithColegiadoValue = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "280000001");
+    void decide_underReviewOfAnotherReference_changesNothing() {
+        SourceRequest available = request("A", RequestStatus.AVAILABLE);
 
-        assertThat(EntitlementRules.decide(COLEGIADO, LookupResult.found(sourceRecord(true, dniWithColegiadoValue))))
-                .isEqualTo(new EntitlementDecision.NotConfirmed(NotConfirmedReason.IDENTIFIER_MISMATCH));
+        assertThat(EntitlementRules.decide(SourceRequests.of(available), Set.of("Z")))
+                .isEqualTo(new EntitlementDecision.Confirmed(List.of(available)));
     }
 
     @Test
-    void decide_identifierWithOtherCaseAndSpaces_isTheSamePerson() {
-        PersonalIdentifier lowerCase = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001r");
-        SourceRecord found = sourceRecord(true, new PersonalIdentifier(IdentifierType.PERSONAL_ID, " 0000 0001R "));
+    void decide_mismatchAlreadyReportedByTheSource_isNeverMadeUnderReview() {
+        SourceRequest mismatch = request("A", RequestStatus.IDENTITY_MISMATCH);
 
-        assertThat(EntitlementRules.decide(lowerCase, LookupResult.found(found)))
-                .isEqualTo(new EntitlementDecision.Confirmed(found));
+        assertThat(EntitlementRules.decide(SourceRequests.of(mismatch), Set.of("A")).requests())
+                .containsExactly(mismatch);
     }
 }

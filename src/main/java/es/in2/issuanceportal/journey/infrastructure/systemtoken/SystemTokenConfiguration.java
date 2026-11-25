@@ -1,6 +1,6 @@
 package es.in2.issuanceportal.journey.infrastructure.systemtoken;
 
-import es.in2.issuanceportal.journey.application.port.SystemTokenProvider;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenProvider;
 import es.in2.issuanceportal.shared.tenant.PublicHostProperties;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.annotation.Bean;

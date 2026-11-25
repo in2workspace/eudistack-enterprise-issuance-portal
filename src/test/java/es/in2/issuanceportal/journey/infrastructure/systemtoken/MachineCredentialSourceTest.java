@@ -2,8 +2,8 @@ package es.in2.issuanceportal.journey.infrastructure.systemtoken;
 
 import com.nimbusds.jose.jwk.Curve;
 import com.nimbusds.jose.jwk.gen.ECKeyGenerator;
-import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
-import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException.Reason;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException.Reason;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;

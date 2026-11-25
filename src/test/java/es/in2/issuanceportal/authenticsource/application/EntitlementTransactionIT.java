@@ -5,9 +5,10 @@ import es.in2.issuanceportal.TestcontainersConfiguration;
 import es.in2.issuanceportal.authenticsource.RecordingAuthenticSourceAuditTrail;
 import es.in2.issuanceportal.authenticsource.StubAdapter;
 import es.in2.issuanceportal.authenticsource.domain.IdentifierType;
-import es.in2.issuanceportal.authenticsource.domain.LookupResult;
 import es.in2.issuanceportal.authenticsource.domain.PersonalIdentifier;
-import es.in2.issuanceportal.authenticsource.domain.SourceRecord;
+import es.in2.issuanceportal.authenticsource.domain.RequestStatus;
+import es.in2.issuanceportal.authenticsource.domain.SourceRequest;
+import es.in2.issuanceportal.authenticsource.domain.SourceRequests;
 import es.in2.issuanceportal.authenticsource.domain.config.AuthenticSourceConfig;
 import es.in2.issuanceportal.authenticsource.domain.config.SourceSettings;
 import es.in2.issuanceportal.journey.api.JourneyProgress;
@@ -73,8 +74,13 @@ class EntitlementTransactionIT {
     private final AtomicInteger connectionsDuringLookup = new AtomicInteger(-1);
     private final StubAdapter adapter = StubAdapter.searchingByBoth("stub").answering(searched -> {
         connectionsDuringLookup.set(activeConnections());
-        return LookupResult.found(new SourceRecord(List.of(ACTIVE), true, Map.of("registration_number", "280000001")));
+        return available();
     });
+
+    private static SourceRequests available() {
+        return SourceRequests.of(new SourceRequest("SIM-1", RequestStatus.AVAILABLE, List.of(), false, null, null,
+                null, null, Map.of("registration_number", "280000001")));
+    }
 
     private int activeConnections() {
         try {
@@ -98,7 +104,7 @@ class EntitlementTransactionIT {
                         null)));
         service = new EntitlementService(journey, progress, journey, sessions,
                 new AuthenticSourceConfigs(tenant -> Optional.of(config), new AdapterRegistry(List.of(adapter))),
-                new RecordingAuthenticSourceAuditTrail(), transactions, clock, new LookupSlots(100, 100));
+                new RecordingAuthenticSourceAuditTrail(), transactions, clock, new LookupSlots(100, 100), (t, j, r) -> false);
         return service;
     }
 
@@ -176,8 +182,7 @@ class EntitlementTransactionIT {
         EntitlementService checks = serviceWith(journey);
         adapter.answering(searched -> {
             journey.cancel(SANDBOX, holder);
-            return LookupResult.found(
-                    new SourceRecord(List.of(ACTIVE), true, Map.of("registration_number", "280000001")));
+            return available();
         });
 
         assertThatThrownBy(() -> checks.check(SANDBOX, holder))
@@ -195,7 +200,7 @@ class EntitlementTransactionIT {
         EntitlementService checks = serviceWith(journey);
         adapter.answering(searched -> {
             journey.cancel(SANDBOX, holder);
-            return LookupResult.found(new SourceRecord(List.of(ACTIVE), false, Map.of()));
+            return SourceRequests.noRequests();
         });
 
         assertThatThrownBy(() -> checks.check(SANDBOX, holder)).isInstanceOf(JourneyClosedException.class);

@@ -27,10 +27,11 @@ class JdbcJourneyRepository implements JourneyRepository {
     private static final String CUTOFF = "cutoff";
 
     private static final String COLUMNS =
-            "id, state, step, withdrawal_reason, identification_method, issuance_process_id, created_at, last_activity, ended_at";
+            "id, state, step, withdrawal_reason, identification_method, created_at, completed_at, last_activity, ended_at";
 
     private static final RowMapper<Journey> ROW = (rs, row) -> {
         String reason = rs.getString("withdrawal_reason");
+        Timestamp completedAt = rs.getTimestamp("completed_at");
         Timestamp endedAt = rs.getTimestamp("ended_at");
         return Journey.restore(
                 rs.getObject(ID, UUID.class),
@@ -38,8 +39,8 @@ class JdbcJourneyRepository implements JourneyRepository {
                 JourneyStep.fromCode(rs.getString(STEP)),
                 reason == null ? null : WithdrawalReason.fromCode(reason),
                 rs.getString("identification_method"),
-                rs.getObject("issuance_process_id", UUID.class),
                 rs.getTimestamp("created_at").toInstant(),
+                completedAt == null ? null : completedAt.toInstant(),
                 rs.getTimestamp("last_activity").toInstant(),
                 endedAt == null ? null : endedAt.toInstant());
     };
@@ -69,27 +70,16 @@ class JdbcJourneyRepository implements JourneyRepository {
     @SuppressWarnings("java:S1192")
     public boolean update(TenantId tenant, Journey journey, JourneyState readInState) {
         return jdbc.sql("UPDATE " + table(tenant) + " SET state = :state, step = :step, withdrawal_reason = :reason, "
-                        + "last_activity = :lastActivity, ended_at = :endedAt "
+                        + "last_activity = :lastActivity, completed_at = :completedAt, ended_at = :endedAt "
                         + "WHERE id = :id AND state = :readInState")
                 .param(STATE, journey.state().code())
                 .param(STEP, journey.step().code())
                 .param("reason", journey.withdrawalReason().map(WithdrawalReason::code).orElse(null))
                 .param("lastActivity", Timestamp.from(journey.lastActivity()))
+                .param("completedAt", journey.completedAt().map(Timestamp::from).orElse(null))
                 .param("endedAt", journey.endedAt().map(Timestamp::from).orElse(null))
                 .param(ID, journey.id())
                 .param("readInState", readInState.code())
-                .update() == 1;
-    }
-
-    @Override
-    // "UPDATE " is kept written in each statement: the statements are reviewed as a whole for the tenant schema
-    // they are built with (java:S2077, false positive), and extracting the keyword rewrites them and reopens it.
-    @SuppressWarnings("java:S1192")
-    public boolean recordIssuanceProcess(TenantId tenant, UUID journeyId, UUID processId) {
-        return jdbc.sql("UPDATE " + table(tenant) + " SET issuance_process_id = :processId "
-                        + "WHERE id = :id AND (issuance_process_id IS NULL OR issuance_process_id = :processId)")
-                .param("processId", processId)
-                .param(ID, journeyId)
                 .update() == 1;
     }
 
@@ -114,9 +104,8 @@ class JdbcJourneyRepository implements JourneyRepository {
         // Starts from journey_session, which only holds open journeys, and looks each one up by key.
         // <= matches Journey.isInactive: a journey exactly at the limit is already inactive.
         return jdbc.sql("SELECT s.journey_id FROM " + sessionTable(tenant) + " s JOIN " + table(tenant)
-                        + " j ON j.id = s.journey_id WHERE (j.state = :withdrawn OR j.last_activity <= :cutoff)"
+                        + " j ON j.id = s.journey_id WHERE (j.ended_at IS NOT NULL OR j.last_activity <= :cutoff)"
                         + " AND s.journey_id > :afterId ORDER BY s.journey_id LIMIT :limit")
-                .param("withdrawn", JourneyState.WITHDRAWN.code())
                 .param(CUTOFF, Timestamp.from(cutoff))
                 .param("afterId", afterId)
                 .param("limit", limit)
@@ -128,15 +117,16 @@ class JdbcJourneyRepository implements JourneyRepository {
     // "UPDATE " is kept written in each statement: the statements are reviewed as a whole for the tenant schema
     // they are built with (java:S2077, false positive), and extracting the keyword rewrites them and reopens it.
     @SuppressWarnings("java:S1192")
-    public boolean updateIfInactive(TenantId tenant, Journey journey, Instant cutoff) {
+    public boolean updateIfInactive(TenantId tenant, Journey journey, JourneyState readInState, Instant cutoff) {
         return jdbc.sql("UPDATE " + table(tenant) + " SET state = :state, step = :step, withdrawal_reason = :reason, "
-                        + "ended_at = :endedAt WHERE id = :id AND state = :inProgress AND last_activity <= :cutoff")
+                        + "ended_at = :endedAt WHERE id = :id AND state = :readIn AND ended_at IS NULL "
+                        + "AND last_activity <= :cutoff")
                 .param(STATE, journey.state().code())
                 .param(STEP, journey.step().code())
                 .param("reason", journey.withdrawalReason().map(WithdrawalReason::code).orElse(null))
                 .param("endedAt", journey.endedAt().map(Timestamp::from).orElse(null))
                 .param(ID, journey.id())
-                .param("inProgress", JourneyState.IN_PROGRESS.code())
+                .param("readIn", readInState.code())
                 .param(CUTOFF, Timestamp.from(cutoff))
                 .update() == 1;
     }
@@ -145,9 +135,8 @@ class JdbcJourneyRepository implements JourneyRepository {
     public boolean deleteSessionIfClosedOrInactive(TenantId tenant, UUID journeyId, Instant cutoff) {
         return jdbc.sql("DELETE FROM " + sessionTable(tenant) + " s USING " + table(tenant) + " j "
                         + "WHERE s.journey_id = :id AND j.id = s.journey_id "
-                        + "AND (j.state = :withdrawn OR j.last_activity <= :cutoff)")
+                        + "AND (j.ended_at IS NOT NULL OR j.last_activity <= :cutoff)")
                 .param(ID, journeyId)
-                .param("withdrawn", JourneyState.WITHDRAWN.code())
                 .param(CUTOFF, Timestamp.from(cutoff))
                 .update() > 0;
     }

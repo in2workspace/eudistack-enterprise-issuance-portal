@@ -14,9 +14,10 @@ import es.in2.issuanceportal.journey.application.port.IssuanceRequest;
 import es.in2.issuanceportal.journey.application.port.IssuanceResult;
 import es.in2.issuanceportal.journey.application.port.IssuanceUnavailableException;
 import es.in2.issuanceportal.journey.application.port.OnboardingTicketException;
-import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException;
 import es.in2.issuanceportal.session.api.EmailRecord;
 import es.in2.issuanceportal.session.api.EmailVerificationRecord;
+import es.in2.issuanceportal.session.EntitlementRecords;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.IdentifierType;
@@ -49,6 +50,7 @@ import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
 import org.springframework.test.web.servlet.request.RequestPostProcessor;
 
 import java.time.Clock;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -156,6 +158,11 @@ class ConfirmationApiIT {
             }
             return delegate.issue(tenant, idempotencyKey, request);
         }
+
+        @Override
+        public IssuanceResult renewOffer(TenantId tenant, UUID processId) {
+            return delegate.renewOffer(tenant, processId);
+        }
     }
 
     @TestConfiguration
@@ -227,7 +234,7 @@ class ConfirmationApiIT {
                 .andReturn();
         assertThat(tickets.calls()).isEmpty();
 
-        UUID process = jdbc.sql("SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
+        UUID process = jdbc.sql("SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey_issuance WHERE journey_id = :id")
                 .param("id", journeyOf(holder)).query(UUID.class).single();
         assertThat(result.getResponse().getContentAsString()).doesNotContain(process.toString());
         assertThat(issuer.api().calls()).hasSize(1);
@@ -272,7 +279,7 @@ class ConfirmationApiIT {
         });
         UUID process = processOf(holder);
         assertThat(result.getResponse().getContentAsString()).doesNotContain(process.toString());
-        IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow());
+        IssuanceRecord.Entry stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).entry("r1").orElseThrow();
         assertThat(stored.onboarding()).contains("https://sandbox.wallet.test/t/ticket-1");
         assertThat(stored.offerUri()).contains(answer.get("credential_offer_uri").asText());
         mvc.perform(MockMvcRequestBuilders.get(CONTEXT + "/api/v1/journey").contextPath(CONTEXT).with(host())
@@ -323,7 +330,7 @@ class ConfirmationApiIT {
                 .param("id", journeyOf(holder)).query().singleRow();
         assertThat(row).containsEntry("state", "in_progress")
                 .containsEntry("step", "email_verified");
-        IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow());
+        IssuanceRecord.Entry stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).entry("r1").orElseThrow();
         assertThat(stored.offerUri()).isEmpty();
         assertThat(stored.offerExpiresAt()).isNull();
         assertThat(stored.onboarding()).isEmpty();
@@ -335,8 +342,8 @@ class ConfirmationApiIT {
     }
 
     @Test
-    @DisplayName("AC-12 — postConfirmation_afterTheTicketFailed_isOnboardingUnavailableUntilTheRenewalExists")
-    void postConfirmation_afterTheTicketFailed_isOnboardingUnavailableUntilTheRenewalExists() throws Exception {
+    @DisplayName("ES-07 — postConfirmation_afterTheTicketFailed_renewsTheOfferOfTheSameProcess")
+    void postConfirmation_afterTheTicketFailed_renewsTheOfferOfTheSameProcess() throws Exception {
         configure(CONFIG_WITH_ONBOARDING);
         TestHolder holder = entitledJourney();
         tickets.failWith(OnboardingTicketException.Reason.REJECTED);
@@ -344,11 +351,14 @@ class ConfirmationApiIT {
         tickets.recover();
 
         mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.credential_offer_uri").exists())
+                .andExpect(jsonPath("$.onboarding_url").exists());
 
         assertThat(issuer.api().calls()).hasSize(1);
-        assertThat(tickets.calls()).hasSize(1);
+        assertThat(issuer.api().renewals()).containsExactly(processOf(holder));
+        assertThat(issuer.api().processes()).isEqualTo(1);
+        assertThat(tickets.calls()).hasSize(2);
     }
 
     @Test
@@ -489,10 +499,9 @@ class ConfirmationApiIT {
                 .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
         tickets.recover();
 
-        // The renewal of the offer of a process that already exists is EUD-295: until then the answer is the same
-        // 503, but it is never step_not_allowed, because the verified email is still the journey's.
-        mvc.perform(confirmation(holder, null)).andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
+        // The process exists: the confirmation renews its offer, and it is never step_not_allowed because the verified
+        // email is still the journey's.
+        mvc.perform(confirmation(holder, null)).andExpect(status().isOk());
 
         assertThat(EmailRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL).orElseThrow()).address())
                 .isEqualTo(EMAIL);
@@ -503,7 +512,7 @@ class ConfirmationApiIT {
     @Test
     @DisplayName("ES-06 — postConfirmation_noJourney_isJourneyClosed")
     void postConfirmation_noJourney_isJourneyClosed() throws Exception {
-        mvc.perform(post().contentType(MediaType.APPLICATION_JSON).content("{\"email\":\"" + EMAIL + "\"}"))
+        mvc.perform(post().contentType(MediaType.APPLICATION_JSON).content("{\"request_id\":\"r1\"}"))
                 .andExpect(status().isGone())
                 .andExpect(jsonPath("$.type").value("journey_closed"));
         mvc.perform(confirmation(TestHolder.of(SANDBOX, holderRefs), "{\"email\":\"" + EMAIL + "\"}"))
@@ -514,16 +523,21 @@ class ConfirmationApiIT {
     }
 
     @Test
-    @DisplayName("EC-09 — postConfirmation_completedJourney_isJourneyClosedAndNoSystemIsCalled")
-    void postConfirmation_completedJourney_isJourneyClosedAndNoSystemIsCalled() throws Exception {
+    @DisplayName("ES-06 — postConfirmation_requestAlreadyInOffer_is409StepNotAllowedAndTheJourneyStaysActive")
+    void postConfirmation_requestAlreadyInOffer_is409StepNotAllowedAndTheJourneyStaysActive() throws Exception {
         TestHolder holder = entitledJourney();
         mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}")).andExpect(status().isOk());
 
+        // The journey is completed and active (AD-18): not closed. The address delivered still works, so there is
+        // no new offer and nothing is asked of the Issuer.
         mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
-                .andExpect(status().isGone())
-                .andExpect(jsonPath("$.type").value("journey_closed"));
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("step_not_allowed"));
+        assertThat(issuer.api().renewals()).isEmpty();
 
         assertThat(issuer.api().calls()).hasSize(1);
+        assertThat(jdbc.sql("SELECT state = 'completed' AND ended_at IS NULL FROM \"sandbox_issuance_portal\".journey "
+                + "WHERE id = :id").param("id", journeyOf(holder)).query(Boolean.class).single()).isTrue();
     }
 
     @Test
@@ -580,8 +594,7 @@ class ConfirmationApiIT {
                 .andExpect(status().isServiceUnavailable())
                 .andExpect(jsonPath("$.type").value("issuance_unavailable"));
         assertInProgressWithEntitlement(holder);
-        UUID keptKey = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow())
-                .idempotencyKey();
+        UUID keptKey = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).entry("r1").orElseThrow().idempotencyKey();
         issuer.api().recover();
 
         mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}")).andExpect(status().isOk());
@@ -622,7 +635,7 @@ class ConfirmationApiIT {
         assertThat(issuer.api().calls()).extracting(c -> c.request().email()).containsExactly(EMAIL, OTHER_EMAIL);
         assertThat(issuer.api().calls().get(1).idempotencyKey())
                 .isNotEqualTo(issuer.api().calls().get(0).idempotencyKey());
-        IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow());
+        IssuanceRecord.Entry stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).entry("r1").orElseThrow();
         assertThat(stored.idempotencyKey()).isEqualTo(issuer.api().calls().get(1).idempotencyKey());
         assertThat(stored.isForEmail(OTHER_EMAIL)).isTrue();
         assertThat(processOf(holder)).isNotNull();
@@ -633,7 +646,8 @@ class ConfirmationApiIT {
     void postConfirmation_issuanceRecordWithoutEmailAndNoProcess_sendsANewKey() throws Exception {
         TestHolder holder = entitledJourney();
         UUID legacyKey = UUID.randomUUID();
-        sessions.write(SANDBOX, journeyOf(holder), Section.ISSUANCE, "{\"idempotency_key\":\"" + legacyKey + "\"}");
+        sessions.write(SANDBOX, journeyOf(holder), Section.ISSUANCE,
+                IssuanceRecord.empty().with("r1", IssuanceRecord.Entry.withKey(legacyKey, null)).toJson());
 
         mvc.perform(confirmation(holder, null)).andExpect(status().isOk());
 
@@ -650,35 +664,32 @@ class ConfirmationApiIT {
         mvc.perform(confirmation(holder, null)).andExpect(status().isServiceUnavailable());
         tickets.recover();
         UUID process = processOf(holder);
-        UUID key = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow())
-                .idempotencyKey();
+        UUID key = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).entry("r1").orElseThrow().idempotencyKey();
         verifyEmail(holder, OTHER_EMAIL);
 
-        // The renewal of the offer of a process that exists is EUD-295: until then the answer is onboarding_unavailable.
-        mvc.perform(confirmation(holder, null)).andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
+        // The process exists: the confirmation asks for a new offer of it, with the email the journey has.
+        mvc.perform(confirmation(holder, null)).andExpect(status().isOk());
 
         assertThat(issuer.api().calls()).singleElement().satisfies(call ->
                 assertThat(call.idempotencyKey()).isEqualTo(key));
         assertThat(issuer.api().processes()).isEqualTo(1);
         assertThat(processOf(holder)).isEqualTo(process);
-        assertThat(IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow())
-                .idempotencyKey()).isEqualTo(key);
+        assertThat(IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).entry("r1").orElseThrow().idempotencyKey()).isEqualTo(key);
     }
 
     @Test
-    @DisplayName("EC-04 — postConfirmation_processAlreadyRecorded_isOnboardingUnavailableWithoutAskingTheIssuer")
-    void postConfirmation_processAlreadyRecorded_isOnboardingUnavailableWithoutAskingTheIssuer() throws Exception {
+    @DisplayName("EC-04 — postConfirmation_processAlreadyRecorded_renewsItsOfferWithoutAskingForAnotherIssuance")
+    void postConfirmation_processAlreadyRecorded_renewsItsOfferWithoutAskingForAnotherIssuance() throws Exception {
         TestHolder holder = entitledJourney();
         UUID process = UUID.randomUUID();
-        jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET issuance_process_id = :process WHERE id = :id")
+        jdbc.sql("INSERT INTO \"sandbox_issuance_portal\".journey_issuance (journey_id, request_id, issuance_process_id, created_at) "
+                        + "VALUES (:id, 'r1', :process, now())")
                 .param("process", process).param("id", journeyOf(holder)).update();
 
-        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}"))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
+        mvc.perform(confirmation(holder, "{\"email\":\"" + EMAIL + "\"}")).andExpect(status().isOk());
 
         assertThat(issuer.api().calls()).isEmpty();
+        assertThat(issuer.api().renewals()).containsExactly(process);
         assertThat(processOf(holder)).isEqualTo(process);
     }
 
@@ -753,13 +764,13 @@ class ConfirmationApiIT {
     }
 
     private void assertInProgressWithEntitlement(TestHolder holder) {
-        Map<String, Object> row = jdbc.sql("SELECT state, step, issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
+        Map<String, Object> row = jdbc.sql("SELECT state, step FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
                 .param("id", journeyOf(holder)).query().singleRow();
         assertThat(row).containsEntry("state", "in_progress")
                 .containsEntry("step", "email_verified");
-        assertThat(row.get("issuance_process_id")).isNull();
+        assertThat(processOf(holder)).isNull();
         assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.ENTITLEMENT)).isPresent();
-        assertThat(IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).offerUri())
+        assertThat(IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).entry("r1").orElseThrow().offerUri())
                 .isEmpty();
     }
 
@@ -778,7 +789,7 @@ class ConfirmationApiIT {
     }
 
     private UUID processOf(TestHolder holder) {
-        return jdbc.sql("SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
+        return jdbc.sql("SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey_issuance WHERE journey_id = :id")
                 .param("id", journeyOf(holder)).query(UUID.class).optional().orElse(null);
     }
 
@@ -794,6 +805,165 @@ class ConfirmationApiIT {
                         .with(holder.token()))
                 .andExpect(status().isCreated());
         return holder;
+    }
+
+    // --- EUD-359 task 3: one confirmation per request ---
+
+    private static EntitlementRecord.Request requestOf(String id, EntitlementRecord.Status status, String number) {
+        boolean carriesData = status.carriesData();
+        return new EntitlementRecord.Request(id, "SIM-" + id, status, List.of(), false, "Hospital", null, null, null,
+                carriesData ? Map.of("personal_administrative_number", number,
+                        "medical_board", List.of("Colegio de Medicos de Prueba"),
+                        "medical_speciality", List.of("Cardiology"), "legally_entitled", true) : Map.of(),
+                carriesData ? new EntitlementRecord.Preview("DoctorID", List.of()) : null);
+    }
+
+    private void withRequests(TestHolder holder, EntitlementRecord.Request... requests) {
+        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, new EntitlementRecord(
+                IdentifierType.PERSONAL_ID, null, List.of(requests), clock.instant()).toJson());
+    }
+
+    private static MockHttpServletRequestBuilder confirmationOf(TestHolder holder, String requestId) {
+        return rawConfirmation(holder, "{\"request_id\":\"" + requestId + "\"}");
+    }
+
+    @Test
+    @DisplayName("AC-05 — postConfirmation_twoRequests_twoProcessesWithDifferentKeysAndNoNewEmailVerification")
+    void postConfirmation_twoRequests_twoProcessesWithDifferentKeysAndNoNewEmailVerification() throws Exception {
+        TestHolder holder = entitledJourney();
+        withRequests(holder, requestOf("r1", EntitlementRecord.Status.AVAILABLE, "280000001"),
+                requestOf("r2", EntitlementRecord.Status.AVAILABLE, "280000002"));
+        String verification = sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION).orElseThrow();
+
+        MvcResult first = mvc.perform(confirmationOf(holder, "r1")).andExpect(status().isOk()).andReturn();
+        MvcResult second = mvc.perform(confirmationOf(holder, "r2")).andExpect(status().isOk()).andReturn();
+
+        assertThat(first.getResponse().getContentAsString()).isNotEqualTo(second.getResponse().getContentAsString());
+        assertThat(issuer.api().calls()).hasSize(2);
+        assertThat(issuer.api().calls().get(0).idempotencyKey())
+                .isNotEqualTo(issuer.api().calls().get(1).idempotencyKey());
+        assertThat(jdbc.sql("SELECT request_id FROM \"sandbox_issuance_portal\".journey_issuance WHERE journey_id = :id "
+                + "ORDER BY created_at, request_id").param("id", journeyOf(holder)).query(String.class).list())
+                .containsExactly("r1", "r2");
+        assertThat(jdbc.sql("SELECT count(DISTINCT issuance_process_id) FROM \"sandbox_issuance_portal\".journey_issuance "
+                + "WHERE journey_id = :id").param("id", journeyOf(holder)).query(Long.class).single()).isEqualTo(2L);
+        // The email was verified once for the whole journey: its verification is untouched.
+        assertThat(sessions.read(SANDBOX, journeyOf(holder), Section.EMAIL_VERIFICATION)).contains(verification);
+        IssuanceRecord section = IssuanceRecord.fromJson(
+                sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow());
+        assertThat(section.requests().keySet()).containsExactly("r1", "r2");
+        assertThat(jdbc.sql("SELECT state = 'completed' AND completed_at IS NOT NULL AND ended_at IS NULL "
+                + "FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
+                .param("id", journeyOf(holder)).query(Boolean.class).single()).isTrue();
+    }
+
+    @Test
+    @DisplayName("EC-03 — postConfirmation_sameRequestAtTheSameTime_oneProcessAndTheLateDuplicateIsStepNotAllowed")
+    void postConfirmation_sameRequestAtTheSameTime_oneProcessAndTheLateDuplicateIsStepNotAllowed() throws Exception {
+        TestHolder holder = entitledJourney();
+        withRequests(holder, requestOf("r1", EntitlementRecord.Status.AVAILABLE, "280000001"),
+                requestOf("r2", EntitlementRecord.Status.AVAILABLE, "280000002"));
+        // Both confirmations of r1 reach the Issuer together: neither has recorded a process yet.
+        issuer.bothInFlight();
+        List<Future<Integer>> answers = new ArrayList<>();
+        try (ExecutorService pool = Executors.newVirtualThreadPerTaskExecutor()) {
+            for (int i = 0; i < 2; i++) {
+                answers.add(pool.submit(() ->
+                        mvc.perform(confirmationOf(holder, "r1")).andReturn().getResponse().getStatus()));
+            }
+            for (Future<Integer> answer : answers) {
+                assertThat(answer.get(20, TimeUnit.SECONDS)).isEqualTo(200);
+            }
+        }
+
+        // The two shared the key stored by the first: one process, one entry, the second answered the stored offer.
+        UUID keyOfR1 = issuer.api().calls().getFirst().idempotencyKey();
+        assertThat(issuer.api().calls()).extracting(InMemoryIssuanceApi.Call::idempotencyKey).containsOnly(keyOfR1);
+        assertThat(issuer.api().processes()).isEqualTo(1);
+        assertThat(jdbc.sql("SELECT count(*) FROM \"sandbox_issuance_portal\".journey_issuance WHERE journey_id = :id")
+                .param("id", journeyOf(holder)).query(Long.class).single()).isEqualTo(1L);
+
+        // A duplicate that arrives later finds the address delivered still working: the offer keeps serving.
+        mvc.perform(confirmationOf(holder, "r1"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("step_not_allowed"));
+        assertThat(issuer.api().renewals()).isEmpty();
+
+        // Another request of the journey gets its own key and process.
+        issuer.reset();
+        mvc.perform(confirmationOf(holder, "r2")).andExpect(status().isOk());
+        assertThat(issuer.api().calls()).singleElement().satisfies(call ->
+                assertThat(call.idempotencyKey()).isNotEqualTo(keyOfR1));
+        assertThat(jdbc.sql("SELECT count(DISTINCT issuance_process_id) FROM \"sandbox_issuance_portal\".journey_issuance "
+                + "WHERE journey_id = :id").param("id", journeyOf(holder)).query(Long.class).single()).isEqualTo(2L);
+    }
+
+    @Test
+    @DisplayName("ES-01 — postConfirmation_withoutRequestIdOrWithAnInvalidOne_is400AndNothingIsAsked")
+    void postConfirmation_withoutRequestIdOrWithAnInvalidOne_is400AndNothingIsAsked() throws Exception {
+        TestHolder holder = entitledJourney();
+
+        for (String body : List.of("{}", "{\"request_id\":null}", "{\"request_id\":\"\"}", "{\"request_id\":\"  \"}",
+                "{\"request_id\":\"" + "r".repeat(65) + "\"}", "{\"request_id\":12}", "[]", "not json",
+                "{\"email\":\"" + EMAIL + "\"}")) {
+            mvc.perform(rawConfirmation(holder, body))
+                    .andExpect(status().isBadRequest())
+                    .andExpect(jsonPath("$.type").value("bad_request"));
+        }
+        mvc.perform(post().with(holder.token())).andExpect(status().is4xxClientError());
+
+        assertThat(issuer.api().calls()).isEmpty();
+        assertThat(tickets.calls()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("AC-10 — postConfirmation_requestNotAvailableOrNotOfTheJourney_is409StepNotAllowedAndNothingIsAsked")
+    void postConfirmation_requestNotAvailableOrNotOfTheJourney_is409StepNotAllowedAndNothingIsAsked() throws Exception {
+        TestHolder holder = entitledJourney();
+        withRequests(holder, requestOf("r1", EntitlementRecord.Status.IDENTITY_MISMATCH, "1"),
+                requestOf("r2", EntitlementRecord.Status.UNDER_REVIEW, "2"),
+                requestOf("r3", EntitlementRecord.Status.IDENTIFIER_MISMATCH, "3"),
+                requestOf("r4", EntitlementRecord.Status.AVAILABLE, "4"));
+
+        for (String id : List.of("r1", "r2", "r3", "r9", "r".repeat(64))) {
+            mvc.perform(confirmationOf(holder, id))
+                    .andExpect(status().isConflict())
+                    .andExpect(jsonPath("$.type").value("step_not_allowed"));
+        }
+
+        assertThat(issuer.api().calls()).isEmpty();
+        assertThat(processOf(holder)).isNull();
+    }
+
+    @Test
+    @DisplayName("AC-10 — postConfirmation_savedRequest_is409StepNotAllowedAndNothingIsAsked")
+    void postConfirmation_savedRequest_is409StepNotAllowedAndNothingIsAsked() throws Exception {
+        TestHolder holder = entitledJourney();
+        withRequests(holder, requestOf("r1", EntitlementRecord.Status.AVAILABLE, "280000001"),
+                requestOf("r2", EntitlementRecord.Status.AVAILABLE, "280000002"));
+        mvc.perform(confirmationOf(holder, "r1")).andExpect(status().isOk());
+        jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey_issuance SET saved_at = now() WHERE journey_id = :id "
+                + "AND request_id = 'r1'").param("id", journeyOf(holder)).update();
+
+        mvc.perform(confirmationOf(holder, "r1"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("step_not_allowed"));
+        mvc.perform(confirmationOf(holder, "r2")).andExpect(status().isOk());
+
+        assertThat(issuer.api().calls()).hasSize(2);
+    }
+
+    @Test
+    @DisplayName("ES-08 — postConfirmation_endedJourney_is410JourneyClosed")
+    void postConfirmation_endedJourney_is410JourneyClosed() throws Exception {
+        TestHolder holder = entitledJourney();
+        mvc.perform(confirmationOf(holder, "r1")).andExpect(status().isOk());
+        jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET ended_at = now() WHERE id = :id")
+                .param("id", journeyOf(holder)).update();
+
+        mvc.perform(confirmationOf(holder, "r1"))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.type").value("journey_closed"));
     }
 
     /** What the holder has before confirming: the entitlement and the email verified with a code. */
@@ -812,12 +982,12 @@ class ConfirmationApiIT {
         TestHolder holder = startedJourney();
         sessions.write(SANDBOX, journeyOf(holder), Section.IDENTITY, identity());
         progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.IDENTIFIED);
-        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.PERSONAL_ID, Map.of(
+        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, EntitlementRecords.available(IdentifierType.PERSONAL_ID, Map.of(
                 "personal_administrative_number", ADMINISTRATIVE_NUMBER,
                 "medical_board", List.of("Colegio de Medicos de Prueba"),
                 "medical_speciality", List.of("Cardiology"),
                 "legally_entitled", true),
-                new EntitlementRecord.Preview("DoctorID", List.of(), null, true), clock.instant()).toJson());
+                new EntitlementRecord.Preview("DoctorID", List.of()), null, clock.instant()).toJson());
         progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
         return holder;
     }
@@ -827,9 +997,17 @@ class ConfirmationApiIT {
                 "elena.token@example.test").toJson();
     }
 
+    /** The confirmation of {@code r1}: a body of other fields gets the request id added, as the interface sends it. */
     private static MockHttpServletRequestBuilder confirmation(TestHolder holder, String body) {
-        MockHttpServletRequestBuilder request = post().with(holder.token());
-        return body == null ? request : request.contentType(MediaType.APPLICATION_JSON).content(body);
+        String given = body == null ? "{}" : body;
+        String withRequest = given.contains("request_id") ? given : given.trim().equals("{}")
+                ? "{\"request_id\":\"r1\"}" : given.replaceFirst("[{]", "{\"request_id\":\"r1\",");
+        return post().with(holder.token()).contentType(MediaType.APPLICATION_JSON).content(withRequest);
+    }
+
+    /** The body exactly as given, with no request id added. */
+    private static MockHttpServletRequestBuilder rawConfirmation(TestHolder holder, String body) {
+        return post().with(holder.token()).contentType(MediaType.APPLICATION_JSON).content(body);
     }
 
     private static MockHttpServletRequestBuilder post() {

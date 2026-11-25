@@ -8,8 +8,9 @@ import es.in2.issuanceportal.journey.application.port.IssuanceRejectedException.
 import es.in2.issuanceportal.journey.application.port.IssuanceRequest;
 import es.in2.issuanceportal.journey.application.port.IssuanceResult;
 import es.in2.issuanceportal.journey.application.port.IssuanceUnavailableException;
-import es.in2.issuanceportal.journey.application.port.SystemToken;
-import es.in2.issuanceportal.journey.application.port.SystemTokenProvider;
+import es.in2.issuanceportal.journey.application.port.OfferNotRenewableException;
+import es.in2.issuanceportal.shared.systemtoken.SystemToken;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenProvider;
 import es.in2.issuanceportal.shared.tenant.PublicHostProperties;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import io.github.resilience4j.bulkhead.Bulkhead;
@@ -38,9 +39,15 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.function.Function;
 
 /**
- * {@code POST /api/v1/issuances} of the tenant's Issuer, over the internal network (design.md §3.3, AD-6).
+ * {@code POST /api/v1/issuances} and {@code POST /api/v1/issuances/{id}/credential-offer} of the tenant's Issuer, over
+ * the internal network (design.md §3.3, §3.4, AD-6). The renewal follows the contract of EUD-295 in
+ * {@code eudistack-core-issuer}: 200 with the same
+ * {@code responses[0].body.credential_offer_uri} envelope and no {@code Location}; 409 {@code offer_not_renewable} when
+ * the process is no longer a draft; 404, 403 and 400 as a rejection; 503 (delivery failed, previous offer still valid)
+ * as an unavailable Issuer, retried like the issuance.
  *
  * <p>The call carries the system token of the tenant (never the holder's: NFR-4), the tenant ({@code X-Tenant}),
  * the idempotency key and the tenant's public host and scheme as forwarded headers, so the Issuer resolves its
@@ -68,6 +75,7 @@ final class RestClientIssuanceApi implements IssuanceApi {
     // The path is part of the issuance API contract; the base URL is the configurable part (issuer-internal-url).
     @SuppressWarnings("java:S1075")
     private static final String ISSUANCES_PATH = "/api/v1/issuances";
+    private static final String RENEWAL_PATH = "/credential-offer";
 
     private final RestClient http;
     private final String issuancesUrl;
@@ -99,8 +107,19 @@ final class RestClientIssuanceApi implements IssuanceApi {
 
     @Override
     public IssuanceResult issue(TenantId tenant, UUID idempotencyKey, IssuanceRequest request) {
-        SystemToken token = systemTokens.tokenFor(tenant);
         RequestBody body = RequestBody.of(request);
+        return run(tenant, token -> resultOf(tenant, send(tenant, token, issuancesUrl, idempotencyKey, body), null));
+    }
+
+    @Override
+    public IssuanceResult renewOffer(TenantId tenant, UUID processId) {
+        String url = issuancesUrl + "/" + processId + RENEWAL_PATH;
+        return run(tenant, token -> resultOf(tenant, send(tenant, token, url, null, null), processId));
+    }
+
+    /** One call to the Issuer with the bulkhead, the circuit breaker and the retries of the tenant. */
+    private IssuanceResult run(TenantId tenant, Function<SystemToken, IssuanceResult> attempt) {
+        SystemToken token = systemTokens.tokenFor(tenant);
         Bulkhead bulkhead = bulkheads.computeIfAbsent(tenant, this::newBulkhead);
         if (!bulkhead.tryAcquirePermission()) {
             log.warn("The issuance API of tenant {} has {} issuances in progress: not called", tenant,
@@ -109,8 +128,7 @@ final class RestClientIssuanceApi implements IssuanceApi {
         }
         CircuitBreaker circuit = circuitBreakers.computeIfAbsent(tenant, this::newCircuitBreaker);
         try {
-            return retry.executeSupplier(() -> circuit.executeSupplier(
-                    () -> attempt(tenant, idempotencyKey, token, body)));
+            return retry.executeSupplier(() -> circuit.executeSupplier(() -> attempt.apply(token)));
         } catch (CallNotPermittedException _) {
             log.warn("The circuit of the issuance API of tenant {} is {}: not called", tenant, circuit.getState());
             throw new IssuanceUnavailableException(IssuanceUnavailableException.Reason.CIRCUIT_OPEN);
@@ -142,20 +160,22 @@ final class RestClientIssuanceApi implements IssuanceApi {
                 .build());
     }
 
-    private IssuanceResult attempt(TenantId tenant, UUID idempotencyKey, SystemToken token, RequestBody body) {
+    /** The call of one attempt; the renewal has neither an idempotency key nor a body. */
+    private Answer send(TenantId tenant, SystemToken token, String url, UUID idempotencyKey, RequestBody body) {
         String publicHost = publicHosts.hostOf(tenant);
-        Answer answer;
         try {
-            answer = http.post()
-                    .uri(issuancesUrl)
+            RestClient.RequestBodySpec call = http.post()
+                    .uri(url)
                     .contentType(MediaType.APPLICATION_JSON)
                     .accept(MediaType.APPLICATION_JSON)
                     .header(HttpHeaders.AUTHORIZATION, "Bearer " + token.value())
                     .header("X-Tenant", tenant.value())
-                    .header("X-Idempotency-Key", idempotencyKey.toString())
                     .header("X-Forwarded-Host", publicHost)
-                    .header("X-Forwarded-Proto", "https")
-                    .body(body)
+                    .header("X-Forwarded-Proto", "https");
+            if (idempotencyKey != null) {
+                call = call.header("X-Idempotency-Key", idempotencyKey.toString());
+            }
+            return (body == null ? call : call.body(body))
                     .exchange((req, res) -> Answer.of(res.getStatusCode(), res.getHeaders(),
                             res.getStatusCode().is2xxSuccessful() ? res.bodyTo(ResponseBody.class) : null));
         } catch (ResourceAccessException e) {
@@ -166,19 +186,23 @@ final class RestClientIssuanceApi implements IssuanceApi {
             log.warn("The issuance API of tenant {} sent a response that cannot be read", tenant);
             throw new IssuanceRejectedException(Reason.UNEXPECTED_RESPONSE);
         }
-        return resultOf(tenant, answer);
     }
 
-    private IssuanceResult resultOf(TenantId tenant, Answer answer) {
+    /** @param renewed the process of a renewal, which the answer does not name; {@code null} for an issuance */
+    private IssuanceResult resultOf(TenantId tenant, Answer answer, UUID renewed) {
         int status = answer.status.value();
         if (answer.status.is2xxSuccessful()) {
-            return success(tenant, answer);
+            return success(tenant, answer, renewed);
         }
         log.warn("The issuance API of tenant {} answered {}", tenant, status);
         if (status == 401) {
             // The cached token may have been revoked or the Verifier rotated: the next request asks for another.
             systemTokens.invalidate(tenant);
             throw new IssuanceRejectedException(Reason.NOT_AUTHORIZED);
+        }
+        if (renewed != null && status == 409) {
+            // The only 409 of the renewal: offer_not_renewable.
+            throw new OfferNotRenewableException();
         }
         if (answer.status.is4xxClientError()) {
             throw new IssuanceRejectedException(Reason.REQUEST_REJECTED);
@@ -198,8 +222,8 @@ final class RestClientIssuanceApi implements IssuanceApi {
         throw new IssuanceRejectedException(Reason.UNEXPECTED_RESPONSE);
     }
 
-    private IssuanceResult success(TenantId tenant, Answer answer) {
-        Optional<UUID> process = processIdOf(answer.location);
+    private IssuanceResult success(TenantId tenant, Answer answer, UUID renewed) {
+        Optional<UUID> process = renewed != null ? Optional.of(renewed) : processIdOf(answer.location);
         Optional<String> offer = answer.body == null ? Optional.empty() : answer.body.offer();
         if (process.isEmpty() || offer.isEmpty()) {
             log.warn("The issuance API of tenant {} answered {} without {}", tenant, answer.status.value(),
@@ -208,7 +232,7 @@ final class RestClientIssuanceApi implements IssuanceApi {
         }
         // The Issuer says nothing about the offer's expiry (EUD-277): it lasts the validity of the issuance.
         Instant expiresAt = clock.instant().plus(DEFAULT_OFFER_VALIDITY);
-        log.info("Issuance {} obtained for tenant {}", process.get(), tenant);
+        log.info("Issuance {} {} for tenant {}", process.get(), renewed != null ? "offer renewed" : "obtained", tenant);
         return new IssuanceResult(process.get(), offer.get(), expiresAt);
     }
 

@@ -8,6 +8,20 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **EUD-359 — varias solicitudes por recorrido, datos no correctos y atestación guardada**:
+  - Fuente auténtica con la identidad completa (nombre, apellidos, identificador y su tipo; el pasaporte va como `personal_id`) y la lista de solicitudes de la fuente, cada una con su estado: `available`, `identifier_mismatch`, `identity_mismatch` o `under_review`. `POST /entitlement` responde el contrato 2: `confirmed` o `not_confirmed` (`not_found`, `no_requests` o sin motivo con la lista) y las solicitudes con un `id` opaco y estable en el recorrido (`r1`, `r2`…).
+  - Un tipo de identificador que la fuente no acepta da `not_found` sin consultarla y retira el recorrido.
+  - Adaptador HTTP de solicitudes configurable por tenant (`url`, `auth` `system_token` o `secret` en SSM, `timeout_seconds`, `identifier_types`, `mapping` y `contract` con nombres y equivalencias), solo HTTPS y sin redirecciones; los valores de la fuente se usan sin traducir. Simulado con varias solicitudes por persona (`settings.people`).
+  - `POST /entitlement/requests/{id}/dispute`: el titular dice que los datos de una solicitud no son correctos; se avisa a la fuente si lo admite y la solicitud queda `under_review` aunque la fuente no lo reciba (204).
+  - Recorrido con varias solicitudes: tabla `journey_issuance` (una fila por solicitud con proceso) y `journey.completed_at` (migración V6). `POST /journey/confirmation` con `request_id`, con una clave de idempotencia y un proceso de emisión por solicitud. El recorrido se completa con la primera oferta y sigue activo hasta que el titular termina o caduca.
+  - `POST /journey/offers` con `request_id`: oferta nueva del proceso de esa solicitud, contra la renovación del Issuer (`POST /api/v1/issuances/{id}/credential-offer`), y otro ticket de alta. Si el Issuer responde que ya no se puede renovar, la solicitud queda guardada y responde 409 `request_saved`.
+  - `POST /journey/requests/{request_id}/saved`: el titular declara guardada la atestación de una solicitud (204), sin llamar al Issuer.
+  - `GET /journey` del contrato 5: `known_email` y las solicitudes con su estado (`available`, `in_offer`, `saved`, `not_available`), su organización, su identificador, su vista y su oferta.
+  - Trazas con la solicitud por su id opaco, recuentos por estado, resultado del aviso, renovación y solicitud guardada con su origen; sin datos personales.
+  - El aviso de datos no correctos funciona también en un recorrido completado y activo, tras guardar otra solicitud. Una solicitud ya guardada responde 409 `request_not_available` sin avisar a la fuente, y una solicitud en revisión con proceso ya no obtiene ofertas nuevas (409 `step_not_allowed`).
+  - La `url` de una fuente HTTP se valida al cargar la configuración: `https`, con host y sin credenciales, parámetros ni fragmento; si no, `config_unavailable`. Una credencial `secret_ref` solo se lee de SSM bajo el prefijo del propio tenant (`PORTAL_AUTHENTIC_SOURCE_SECRET_TEMPLATE`, con `{tenant}`); sin la plantilla, ninguna fuente puede autenticarse con secreto.
+  - Pruebas de rendimiento (p95 < 300 ms) de la comprobación, la oferta nueva, la declaración de guardada y el aviso, además de la confirmación.
+
 - **EUD-314 — el recorrido con el Access Token del Verifier**:
   - Servidor de recursos OAuth 2.0: cada llamada del recorrido exige un Access Token del Verifier del tenant, validado con su JWKS (leído por la red interna, en caché 10 minutos y recargado ante un `kid` desconocido; solo ES256). Comprueba `iss`, `aud` con `portal_client_id`, `exp` e `iat` (obligatorias) y `nbf` con 30 s de margen, `tenant` y `acr` del nivel del tenant o superior, y que sea un Access Token y no un ID Token (exige `jti`; rechaza `nonce` y `auth_time`).
   - Un token que no vale responde 401 `unauthenticated` con `WWW-Authenticate: Bearer`; un `kid` desconocido dentro de la ventana de recarga del JWKS, 401; sin JWKS ni nada en caché, 503 `service_unavailable`; un token válido en un tenant sin `portal_client_id`, 503 `config_unavailable` (el token se valida antes de leer la configuración). El `jwks_uri` del descubrimiento solo aporta su camino, que debe empezar por `/`; el host es siempre el interno.
@@ -49,6 +63,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **EUD-359**: el código del correo solo se puede pedir antes de la primera confirmación, y sirve para todas las solicitudes. `SystemTokenProvider` pasa a `shared.systemtoken`. Las secciones `entitlement` e `issuance` cambian de forma: los recorridos en curso durante el despliegue acaban en `step_not_allowed`. `journey_closed` queda para los recorridos terminados.
+
 - **EUD-314**: el tipo de identificador `dni` pasa a `personal_id` (DNI, NIE o pasaporte), también en `identifier_types` de `authentic_source` y en los registros del adaptador simulado.
 - **EUD-314**: sin recorrido activo del titular, todas las llamadas del recorrido responden 410 `journey_closed`; `POST /entitlement` respondía 409 `step_not_allowed`.
 
@@ -61,6 +77,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Health y métricas en la raíz del servicio, como en el resto de servicios de la plataforma (`management.endpoints.web.base-path: /`): `/issuance-portal/health`, `/issuance-portal/health/liveness`, `/issuance-portal/health/readiness` y `/issuance-portal/prometheus`, en lugar de `/issuance-portal/actuator/...`. Los filtros de la cabecera `X-Requested-With` y del tenant dejan pasar solo esas rutas.
 
 ### Removed
+
+- **EUD-359**: el formato `records` del adaptador simulado (sustituido por `people`), los motivos `not_entitled` e `identifier_mismatch` de `POST /entitlement` y la regla de un solo proceso de emisión por recorrido. `journey.issuance_process_id` deja de escribirse.
 
 - **EUD-314**: la cookie `journey_session`, el filtro de `X-Requested-With` con su 403 `request_not_allowed` y `SessionId`. Los recorridos abiertos con la cookie quedan sin titular y caducan solos.
 

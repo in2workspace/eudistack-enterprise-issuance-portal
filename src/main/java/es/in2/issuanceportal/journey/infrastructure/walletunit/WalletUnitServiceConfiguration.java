@@ -1,7 +1,7 @@
 package es.in2.issuanceportal.journey.infrastructure.walletunit;
 
 import es.in2.issuanceportal.journey.application.port.OnboardingTickets;
-import es.in2.issuanceportal.journey.application.port.SystemTokenProvider;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenProvider;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.JdkClientHttpRequestFactory;

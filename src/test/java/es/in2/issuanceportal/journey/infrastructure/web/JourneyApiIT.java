@@ -289,7 +289,7 @@ class JourneyApiIT {
         String[] parts = operation.split(" ");
         MockHttpServletRequestBuilder request = MockMvcRequestBuilders.request(HttpMethod.valueOf(parts[0]), API + parts[1])
                 .contextPath(CONTEXT).with(host(SANDBOX_HOST)).with(holder.token())
-                .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"123456\",\"email\":\"ana@example.org\"}");
+                .contentType(MediaType.APPLICATION_JSON).content("{\"code\":\"123456\",\"email\":\"ana@example.org\",\"request_id\":\"r1\"}");
 
         mvc.perform(request)
                 .andExpect(status().isGone())
@@ -463,12 +463,12 @@ class JourneyApiIT {
     }
 
     @Test
-    @DisplayName("EC-02 — postWithdrawal_completedJourney_onlyClosesSession")
-    void postWithdrawal_completedJourney_onlyClosesSession() throws Exception {
+    @DisplayName("AC-25 — postWithdrawal_completedJourney_endsItStaysCompletedAndDeletesTheSession")
+    void postWithdrawal_completedJourney_endsItStaysCompletedAndDeletesTheSession() throws Exception {
         TestHolder holder = start();
         UUID journeyId = journeyOf(holder);
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET state = 'completed', step = 'offer_obtained', "
-                + "ended_at = now() WHERE id = :id").param("id", journeyId).update();
+                + "completed_at = now() WHERE id = :id").param("id", journeyId).update();
 
         mvc.perform(post(JOURNEY + "/withdrawal", holder))
                 .andExpect(status().isOk())
@@ -476,25 +476,29 @@ class JourneyApiIT {
                 .andExpect(jsonPath("$.step").value("offer_obtained"));
 
         assertThat(journeyRow(journeyId)).containsEntry("state", "completed");
+        assertThat(journeyRow(journeyId).get("ended_at")).isNotNull();
         assertThat(sessionRows(journeyId)).isZero();
+        mvc.perform(get(JOURNEY, holder)).andExpect(status().isGone())
+                .andExpect(jsonPath("$.type").value("journey_closed"));
     }
 
     @Test
-    @DisplayName("AC-10 — postJourney_holderWithCompletedJourneyStillOpen_returnsItWithItsOffer")
-    void postJourney_holderWithCompletedJourneyStillOpen_returnsItWithItsOffer() throws Exception {
+    @DisplayName("AC-25 — postJourney_holderWithCompletedJourneyStillActive_returnsItWithItsRequestsAndOffer")
+    void postJourney_holderWithCompletedJourneyStillActive_returnsItWithItsRequestsAndOffer() throws Exception {
         TestHolder holder = start();
         UUID journeyId = journeyOf(holder);
+        sessions.write(SANDBOX, journeyId, Section.ENTITLEMENT, entitlement());
         jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey SET state = 'completed', step = 'offer_obtained', "
-                + "ended_at = now() WHERE id = :id").param("id", journeyId).update();
-        sessions.write(SANDBOX, journeyId, Section.ISSUANCE, new IssuanceRecord(UUID.randomUUID(), null,
-                "openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fissuer%2Foffer%2F1",
-                Instant.parse("2030-01-01T10:10:00Z"), "https://sandbox.127.0.0.1.nip.io:4443/t/Zk3q9Xw2",
-                Instant.parse("2030-01-01T10:09:00Z")).toJson());
+                + "completed_at = now() WHERE id = :id").param("id", journeyId).update();
+        insertProcess(journeyId, "r1");
+        sessions.write(SANDBOX, journeyId, Section.ISSUANCE, offerOf("r1").toJson());
 
         mvc.perform(open(holder))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.state").value("completed"))
-                .andExpect(jsonPath("$.offer.credential_offer_uri").exists());
+                .andExpect(jsonPath("$.requests[0].id").value("r1"))
+                .andExpect(jsonPath("$.requests[0].status").value("in_offer"))
+                .andExpect(jsonPath("$.requests[0].offer.credential_offer_uri").exists());
 
         assertThat(journeyOf(holder)).isEqualTo(journeyId);
     }
@@ -561,51 +565,77 @@ class JourneyApiIT {
     }
 
     @Test
-    @DisplayName("AC-16, EUD-277 — getJourney_entitlementConfirmed_returnsAttestationPreview")
-    void getJourney_entitlementConfirmed_returnsAttestationPreview() throws Exception {
+    @DisplayName("AC-01 — getJourney_requestsChecked_returnsEachRequestWithItsStatusAndTheKnownEmail")
+    void getJourney_requestsChecked_returnsEachRequestWithItsStatusAndTheKnownEmail() throws Exception {
         TestHolder holder = start();
         progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.IDENTIFIED);
         sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, entitlement());
         progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
 
-        mvc.perform(get(JOURNEY, holder))
+        String body = mvc.perform(get(JOURNEY, holder))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.step").value("entitlement_confirmed"))
-                .andExpect(jsonPath("$.attestation.type_name").value("DoctorID"))
-                .andExpect(jsonPath("$.attestation.fields[0].label").value("Nombre y apellidos"))
-                .andExpect(jsonPath("$.attestation.fields[0].value").value("Lucía Prueba Sintética"))
-                .andExpect(jsonPath("$.attestation.fields[1].value").value("280000001"))
-                .andExpect(jsonPath("$.attestation.email").value("lucia.prueba@example.org"))
-                .andExpect(jsonPath("$.attestation.email_required").value(true))
-                .andExpect(jsonPath("$.offer").doesNotExist());
+                .andExpect(jsonPath("$.known_email").value("lucia.prueba@example.org"))
+                .andExpect(jsonPath("$.requests.length()").value(2))
+                .andExpect(jsonPath("$.requests[0].id").value("r1"))
+                .andExpect(jsonPath("$.requests[0].status").value("available"))
+                .andExpect(jsonPath("$.requests[0].renewal").value(true))
+                .andExpect(jsonPath("$.requests[0].requested_by").value("Hospital Ejemplo"))
+                .andExpect(jsonPath("$.requests[0].requested_at").value("2026-11-03T08:00:00Z"))
+                .andExpect(jsonPath("$.requests[0].display_identifier").value("280000001"))
+                .andExpect(jsonPath("$.requests[0].organization").value("Colegio de Prueba"))
+                .andExpect(jsonPath("$.requests[1].display_identifier").value("280000002"))
+                .andExpect(jsonPath("$.requests[1].organization").doesNotExist())
+                .andExpect(jsonPath("$.requests[0].attestation.type_name").value("DoctorID"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[0].label").value("Nombre y apellidos"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[0].value").value("Lucía Prueba Sintética"))
+                .andExpect(jsonPath("$.requests[0].attestation.fields[1].value").value("280000001"))
+                .andExpect(jsonPath("$.requests[0].offer").doesNotExist())
+                .andExpect(jsonPath("$.requests[1].id").value("r2"))
+                .andExpect(jsonPath("$.requests[1].status").value("not_available"))
+                .andExpect(jsonPath("$.requests[1].not_available_reason").value("identity_mismatch"))
+                .andExpect(jsonPath("$.requests[1].attestation").doesNotExist())
+                .andExpect(jsonPath("$.attestation").doesNotExist())
+                .andExpect(jsonPath("$.offer").doesNotExist())
+                .andReturn().getResponse().getContentAsString();
+
+        assertThat(body).doesNotContain("SIM-1", "SIM-2", "source_ref");
     }
 
     @Test
-    @DisplayName("AC-17, EUD-277 — getJourney_offerObtained_returnsOfferAsStored")
-    void getJourney_offerObtained_returnsOfferAsStored() throws Exception {
+    @DisplayName("AC-05 — getJourney_oneRequestInOfferAndOneSaved_returnsEachWithItsStatusAndOnlyTheInOfferOffer")
+    void getJourney_oneRequestInOfferAndOneSaved_returnsEachWithItsStatusAndOnlyTheInOfferOffer() throws Exception {
         TestHolder holder = start();
         progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.IDENTIFIED);
         sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, entitlement());
         progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
-        Instant expires = Instant.parse("2030-01-01T10:10:00Z");
-        Instant onboardingExpires = Instant.parse("2030-01-01T10:09:00Z");
-        sessions.write(SANDBOX, journeyOf(holder), Section.ISSUANCE, new IssuanceRecord(
-                UUID.randomUUID(), null, "openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fissuer%2Foffer%2F1",
-                expires, "https://sandbox.127.0.0.1.nip.io:4443/t/Zk3q9Xw2", onboardingExpires).toJson());
+        insertProcess(journeyOf(holder), "r1");
+        sessions.write(SANDBOX, journeyOf(holder), Section.ISSUANCE, offerOf("r1").toJson());
 
         mvc.perform(get(JOURNEY, holder))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.attestation.type_name").value("DoctorID"))
-                .andExpect(jsonPath("$.offer.credential_offer_uri")
+                .andExpect(jsonPath("$.requests[0].status").value("in_offer"))
+                .andExpect(jsonPath("$.requests[0].attestation.type_name").value("DoctorID"))
+                .andExpect(jsonPath("$.requests[0].offer.credential_offer_uri")
                         .value("openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fissuer%2Foffer%2F1"))
-                .andExpect(jsonPath("$.offer.expires_at").value("2030-01-01T10:10:00Z"))
-                .andExpect(jsonPath("$.offer.onboarding_url").value("https://sandbox.127.0.0.1.nip.io:4443/t/Zk3q9Xw2"))
-                .andExpect(jsonPath("$.offer.onboarding_expires_at").value("2030-01-01T10:09:00Z"));
+                .andExpect(jsonPath("$.requests[0].offer.expires_at").value("2030-01-01T10:10:00Z"))
+                .andExpect(jsonPath("$.requests[0].offer.onboarding_url")
+                        .value("https://sandbox.127.0.0.1.nip.io:4443/t/Zk3q9Xw2"))
+                .andExpect(jsonPath("$.requests[0].offer.onboarding_expires_at").value("2030-01-01T10:09:00Z"));
+
+        jdbc.sql("UPDATE \"sandbox_issuance_portal\".journey_issuance SET saved_at = now() WHERE journey_id = :id")
+                .param("id", journeyOf(holder)).update();
+
+        mvc.perform(get(JOURNEY, holder))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.requests[0].status").value("saved"))
+                .andExpect(jsonPath("$.requests[0].attestation").doesNotExist())
+                .andExpect(jsonPath("$.requests[0].offer").doesNotExist());
     }
 
     @Test
-    @DisplayName("EC-12, EUD-277 — postJourneyAndWithdrawal_answerWithoutAttestationOrOffer")
-    void postJourneyAndWithdrawal_answerWithoutAttestationOrOffer() throws Exception {
+    @DisplayName("EC-12, EUD-277 — postJourneyAndWithdrawal_answerWithoutRequestsOrEmail")
+    void postJourneyAndWithdrawal_answerWithoutRequestsOrEmail() throws Exception {
         TestHolder holder = start();
         progress.reach(SANDBOX, holder.ref(), JourneyProgress.Step.IDENTIFIED);
         sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, entitlement());
@@ -613,19 +643,35 @@ class JourneyApiIT {
 
         mvc.perform(post(JOURNEY + "/withdrawal", holder))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.attestation").doesNotExist())
-                .andExpect(jsonPath("$.offer").doesNotExist());
+                .andExpect(jsonPath("$.requests").doesNotExist())
+                .andExpect(jsonPath("$.known_email").doesNotExist());
         mvc.perform(get(JOURNEY, holder))
                 .andExpect(status().isGone());
     }
 
+    private void insertProcess(UUID journeyId, String requestId) {
+        jdbc.sql("INSERT INTO \"sandbox_issuance_portal\".journey_issuance "
+                        + "(journey_id, request_id, issuance_process_id, created_at) VALUES (:j, :r, :p, now())")
+                .param("j", journeyId).param("r", requestId).param("p", UUID.randomUUID()).update();
+    }
+
+    private static IssuanceRecord offerOf(String requestId) {
+        return IssuanceRecord.empty().with(requestId, new IssuanceRecord.Entry(UUID.randomUUID(), null,
+                "openid-credential-offer://?credential_offer_uri=https%3A%2F%2Fissuer%2Foffer%2F1",
+                Instant.parse("2030-01-01T10:10:00Z"), "https://sandbox.127.0.0.1.nip.io:4443/t/Zk3q9Xw2",
+                Instant.parse("2030-01-01T10:09:00Z")));
+    }
+
     private static String entitlement() {
-        return new EntitlementRecord(
-                IdentifierType.COLEGIADO, Map.of("license_number", "280000001"),
-                new EntitlementRecord.Preview("DoctorID", List.of(
-                        new EntitlementRecord.Field("Nombre y apellidos", "Lucía Prueba Sintética"),
-                        new EntitlementRecord.Field("Número de colegiado", "280000001")),
-                        "lucia.prueba@example.org", true),
+        return new EntitlementRecord(IdentifierType.COLEGIADO, "lucia.prueba@example.org", List.of(
+                new EntitlementRecord.Request("r1", "SIM-1", EntitlementRecord.Status.AVAILABLE, List.of(), true,
+                        "Hospital Ejemplo", Instant.parse("2026-11-03T08:00:00Z"), "280000001", "Colegio de Prueba",
+                        Map.of("license_number", "280000001"),
+                        new EntitlementRecord.Preview("DoctorID", List.of(
+                                new EntitlementRecord.Field("Nombre y apellidos", "Lucía Prueba Sintética"),
+                                new EntitlementRecord.Field("Número de colegiado", "280000001")))),
+                new EntitlementRecord.Request("r2", "SIM-2", EntitlementRecord.Status.IDENTITY_MISMATCH,
+                        List.of("given_name"), false, null, null, "280000002", null, null, null)),
                 Instant.parse("2026-11-09T10:00:00Z")).toJson();
     }
 

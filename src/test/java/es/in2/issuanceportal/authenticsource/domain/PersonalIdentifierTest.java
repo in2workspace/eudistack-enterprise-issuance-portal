@@ -2,9 +2,6 @@ package es.in2.issuanceportal.authenticsource.domain;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.List;
-import java.util.Map;
-
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -25,11 +22,9 @@ class PersonalIdentifierTest {
     }
 
     @Test
-    void toString_identifierAndRecord_hidePersonalData() {
+    void toString_identifier_hidesPersonalData() {
         PersonalIdentifier dni = new PersonalIdentifier(IdentifierType.PERSONAL_ID, "00000001R");
-        SourceRecord found = new SourceRecord(List.of(dni), true, Map.of("given_name", "Lucía"));
 
         assertThat(dni.toString()).contains("personal_id").doesNotContain("00000001R");
-        assertThat(found.toString()).contains("given_name").doesNotContain("00000001R", "Lucía");
     }
 }

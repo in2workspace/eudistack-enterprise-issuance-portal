@@ -1,7 +1,7 @@
 package es.in2.issuanceportal.journey.infrastructure.systemtoken;
 
-import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
-import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException.Reason;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException.Reason;
 import lombok.extern.slf4j.Slf4j;
 import net.eudistack.verifierclient.binding.CnfBindingValidator;
 import net.eudistack.verifierclient.exception.CredentialKeyMismatchException;

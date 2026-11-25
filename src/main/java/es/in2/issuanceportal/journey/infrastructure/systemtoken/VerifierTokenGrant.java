@@ -2,9 +2,9 @@ package es.in2.issuanceportal.journey.infrastructure.systemtoken;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import es.in2.issuanceportal.journey.application.port.SystemToken;
-import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
-import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException.Reason;
+import es.in2.issuanceportal.shared.systemtoken.SystemToken;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException.Reason;
 import es.in2.issuanceportal.shared.tenant.PublicHostProperties;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import lombok.extern.slf4j.Slf4j;

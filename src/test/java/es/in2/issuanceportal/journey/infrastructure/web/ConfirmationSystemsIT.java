@@ -114,6 +114,46 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
     }
 
     @Test
+    @DisplayName("EUD-359 ES-07 — the ticket fails for the second request: its process is kept, the journey stays completed and the retry renews its offer")
+    void confirm_ticketFailsForTheSecondRequest_keepsItsProcessAndTheRetryRenewsItsOffer() throws Exception {
+        configure(true);
+        everythingWorks();
+        TestHolder holder = entitledJourney();
+        es.in2.issuanceportal.session.api.EntitlementRecord known = es.in2.issuanceportal.session.api.EntitlementRecord
+                .fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ENTITLEMENT).orElseThrow());
+        es.in2.issuanceportal.session.api.EntitlementRecord.Request first = known.requests().getFirst();
+        sessions.write(SANDBOX, journeyOf(holder), Section.ENTITLEMENT, new es.in2.issuanceportal.session.api
+                .EntitlementRecord(known.identifierType(), known.email(), List.of(first,
+                new es.in2.issuanceportal.session.api.EntitlementRecord.Request("r2", "SIM-2", first.status(),
+                        first.mismatchedFields(), false, null, null, null, null, first.claims(), first.preview())),
+                known.checkedAt()).toJson());
+        mvc.perform(confirmation(holder, "r1")).andExpect(status().isOk());
+        WIRE.stubFor(post(urlEqualTo(TICKETS_PATH)).willReturn(aResponse().withStatus(500)));
+
+        mvc.perform(confirmation(holder, "r2"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
+
+        assertThat(rowOf(holder)).containsEntry("state", "completed");
+        assertThat(jdbc.sql("SELECT count(*) FROM \"sandbox_issuance_portal\".journey_issuance WHERE journey_id = :id")
+                .param("id", journeyOf(holder)).query(Long.class).single()).isEqualTo(2L);
+        List<LoggedRequest> issuances = requestsTo(ISSUANCES_PATH);
+        assertThat(issuances).hasSize(2);
+        assertThat(issuances.get(0).getHeader("X-Idempotency-Key"))
+                .isNotEqualTo(issuances.get(1).getHeader("X-Idempotency-Key"));
+        UUID processOfSecond = jdbc.sql("SELECT issuance_process_id FROM \"sandbox_issuance_portal\".journey_issuance "
+                + "WHERE journey_id = :id AND request_id = 'r2'").param("id", journeyOf(holder)).query(UUID.class).single();
+        walletUnitServiceCreatesTicket();
+
+        mvc.perform(confirmation(holder, "r2")).andExpect(status().isOk());
+
+        assertThat(requestsTo(ISSUANCES_PATH)).hasSize(2);
+        assertThat(requestsTo(ISSUANCES_PATH + "/" + processOfSecond + "/credential-offer")).hasSize(1);
+        assertHolderTokenNeverSent();
+        assertThat(logs.text()).doesNotContain(personalAndSecret());
+    }
+
+    @Test
     @DisplayName("EUD-277 AC-01 — without a confirmed entitlement no system is asked and the journey does not change")
     void confirm_noEntitlement_isStepNotAllowedAndNoSystemIsAsked() throws Exception {
         configure(true);
@@ -264,8 +304,9 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         everythingWorks();
         TestHolder completed = entitledJourney();
         mvc.perform(confirmation(completed)).andExpect(status().isOk());
-        mvc.perform(confirmation(completed)).andExpect(status().isGone())
-                .andExpect(jsonPath("$.type").value("journey_closed"));
+        // Completed and active (AD-18), not closed: its address still works, so nothing is asked again.
+        mvc.perform(confirmation(completed)).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.type").value("step_not_allowed"));
         assertThat(requestsTo(ISSUANCES_PATH)).hasSize(1);
 
         WIRE.resetRequests();
@@ -277,12 +318,12 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         assertThat(process).isNotNull();
         walletUnitServiceCreatesTicket();
 
-        mvc.perform(confirmation(withoutTicket))
-                .andExpect(status().isServiceUnavailable())
-                .andExpect(jsonPath("$.type").value("onboarding_unavailable"));
+        // The process exists: the retry asks the Issuer for a new offer of it, never for another process.
+        mvc.perform(confirmation(withoutTicket)).andExpect(status().isOk());
 
         assertThat(requestsTo(ISSUANCES_PATH)).hasSize(1);
-        assertThat(requestsTo(TICKETS_PATH)).hasSize(1);
+        assertThat(requestsTo(ISSUANCES_PATH + "/" + process + "/credential-offer")).hasSize(1);
+        assertThat(requestsTo(TICKETS_PATH)).hasSize(2);
         assertThat(processOf(withoutTicket)).isEqualTo(process);
     }
 
@@ -341,7 +382,7 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
         assertThat(row).containsEntry("state", "in_progress")
                 .containsEntry("step", "email_verified")
                 .containsEntry("issuance_process_id", keyOf(holder));
-        IssuanceRecord stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow());
+        IssuanceRecord.Entry stored = IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).entry("r1").orElseThrow();
         assertThat(stored.offerUri()).isEmpty();
         assertThat(stored.onboarding()).isEmpty();
         assertThat(requestsTo(TICKETS_PATH)).hasSize(1);
@@ -411,11 +452,11 @@ class ConfirmationSystemsIT extends SystemIssuanceITSupport {
     // --- helpers ---
 
     private UUID keyOf(TestHolder holder) {
-        return IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).idempotencyKey();
+        return IssuanceRecord.fromJson(sessions.read(SANDBOX, journeyOf(holder), Section.ISSUANCE).orElseThrow()).entry("r1").orElseThrow().idempotencyKey();
     }
 
     private long processesOfJourney(TestHolder holder) {
-        return jdbc.sql("SELECT count(issuance_process_id) FROM \"sandbox_issuance_portal\".journey WHERE id = :id")
+        return jdbc.sql("SELECT count(*) FROM \"sandbox_issuance_portal\".journey_issuance WHERE journey_id = :id")
                 .param("id", journeyOf(holder)).query(Long.class).single();
     }
 

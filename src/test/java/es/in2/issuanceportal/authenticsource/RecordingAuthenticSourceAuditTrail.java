@@ -10,6 +10,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 public class RecordingAuthenticSourceAuditTrail implements AuthenticSourceAuditTrail {
 
     private final List<Event> events = new CopyOnWriteArrayList<>();
+    private final List<DisputeEvent> disputes = new CopyOnWriteArrayList<>();
 
     @Override
     public void append(TenantId tenant, Event event) {
@@ -18,5 +19,14 @@ public class RecordingAuthenticSourceAuditTrail implements AuthenticSourceAuditT
 
     public List<Event> events() {
         return List.copyOf(events);
+    }
+
+    @Override
+    public void appendDispute(TenantId tenant, DisputeEvent event) {
+        disputes.add(event);
+    }
+
+    public List<DisputeEvent> disputes() {
+        return List.copyOf(disputes);
     }
 }

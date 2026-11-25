@@ -20,14 +20,14 @@ class AttestationTranslationTest {
 
     @Test
     void translate_doctorIdRecord_givesTheFourClaims() {
-        SourceRecord found = new SourceRecord(List.of(), true, Map.of(
+        Map<String, Object> attributes = Map.of(
                 "registration_number", "280000001",
                 "medical_boards", List.of("Madrid"),
                 "specialities", List.of("Pediatría", "Cardiología"),
                 "entitled_to_practise", true,
-                "given_name", "Lucía"));
+                "given_name", "Lucía");
 
-        assertThat(AttestationTranslation.translate(DOCTORID, found)).containsExactly(
+        assertThat(AttestationTranslation.translate(DOCTORID, attributes)).containsExactly(
                 Map.entry("personal_administrative_number", "280000001"),
                 Map.entry("medical_board", List.of("Madrid")),
                 Map.entry("medical_speciality", List.of("Pediatría", "Cardiología")),
@@ -40,7 +40,7 @@ class AttestationTranslationTest {
         attributes.put("registration_number", "280000001");
         attributes.put("medical_boards", null);
 
-        assertThat(AttestationTranslation.translate(DOCTORID, new SourceRecord(List.of(), true, attributes)))
+        assertThat(AttestationTranslation.translate(DOCTORID, attributes))
                 .containsOnlyKeys("personal_administrative_number");
     }
 }

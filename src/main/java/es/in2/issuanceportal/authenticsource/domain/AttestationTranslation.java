@@ -8,9 +8,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Translates the source's attributes into the attestation's claims, generalising {@code transform} and
- * {@code putIfPresent} of {@code MockDataAcquisitionAdapter} in {@code eudistack-enterprise-backend}: the
- * mapping comes from the tenant's configuration instead of four fixed fields.
+ * Places the source's attributes into the attestation's claims (design.md §3.4), generalising {@code transform}
+ * and {@code putIfPresent} of {@code MockDataAcquisitionAdapter} in {@code eudistack-enterprise-backend}: the
+ * mapping comes from the tenant's configuration instead of four fixed fields. Values are copied as the
+ * source gives them: never translated, normalised nor converted.
  */
 public final class AttestationTranslation {
 
@@ -18,10 +19,10 @@ public final class AttestationTranslation {
     }
 
     /** Each mapped attribute the source returned with a value, under its claim name, in mapping order. */
-    public static Map<String, Object> translate(List<AttributeMapping> mapping, SourceRecord source) {
+    public static Map<String, Object> translate(List<AttributeMapping> mapping, Map<String, Object> attributes) {
         Map<String, Object> claims = new LinkedHashMap<>();
         for (AttributeMapping entry : mapping) {
-            Object value = source.attributes().get(entry.attribute());
+            Object value = attributes.get(entry.attribute());
             if (value != null) {
                 claims.put(entry.claim(), value);
             }

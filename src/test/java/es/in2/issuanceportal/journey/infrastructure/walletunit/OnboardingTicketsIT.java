@@ -17,7 +17,7 @@ import es.in2.issuanceportal.journey.application.port.OnboardingTicket;
 import es.in2.issuanceportal.journey.application.port.OnboardingTicketException;
 import es.in2.issuanceportal.journey.application.port.OnboardingTicketException.Reason;
 import es.in2.issuanceportal.journey.application.port.OnboardingTickets;
-import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;

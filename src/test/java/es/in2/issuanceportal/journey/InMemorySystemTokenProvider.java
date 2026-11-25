@@ -1,8 +1,8 @@
 package es.in2.issuanceportal.journey;
 
-import es.in2.issuanceportal.journey.application.port.SystemToken;
-import es.in2.issuanceportal.journey.application.port.SystemTokenProvider;
-import es.in2.issuanceportal.journey.application.port.SystemTokenUnavailableException;
+import es.in2.issuanceportal.shared.systemtoken.SystemToken;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenProvider;
+import es.in2.issuanceportal.shared.systemtoken.SystemTokenUnavailableException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 
 import java.time.Clock;

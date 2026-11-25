@@ -20,6 +20,7 @@ import es.in2.issuanceportal.journey.domain.config.Support;
 import es.in2.issuanceportal.session.InMemoryJourneySessions;
 import es.in2.issuanceportal.session.api.EmailRecord;
 import es.in2.issuanceportal.session.api.EmailVerificationRecord;
+import es.in2.issuanceportal.session.EntitlementRecords;
 import es.in2.issuanceportal.session.api.EntitlementRecord;
 import es.in2.issuanceportal.session.api.HolderIdentity;
 import es.in2.issuanceportal.session.api.IdentifierType;
@@ -170,10 +171,11 @@ class EmailVerificationServiceTest {
     }
 
     @Test
-    @DisplayName("EC-04 — send_offerAlreadyDelivered_isStepNotAllowedAndSendsNothing")
+    @DisplayName("EC-12 — send_offerAlreadyDelivered_isStepNotAllowedAndSendsNothing")
     void send_offerAlreadyDelivered_isStepNotAllowedAndSendsNothing() {
         configs.put(CGCOM, config(Map.of()));
         HolderRef holder = entitledJourney();
+        withIdempotencyKey(holder);
         Journey completed = journeys.findById(CGCOM, journeyId(holder)).orElseThrow();
         completed.complete(clock.instant());
         journeys.update(CGCOM, completed, JourneyState.IN_PROGRESS);
@@ -183,6 +185,40 @@ class EmailVerificationServiceTest {
 
         assertThat(mailer.sent()).isEmpty();
         assertThat(clientLimit.consumed).hasValue(0);
+    }
+
+    @Test
+    @DisplayName("EC-12 — send_aRequestHasItsKeyButNoOfferYet_isStepNotAllowedAndSendsNothing")
+    void send_aRequestHasItsKeyButNoOfferYet_isStepNotAllowedAndSendsNothing() {
+        configs.put(CGCOM, config(Map.of()));
+        HolderRef holder = entitledJourney();
+        withIdempotencyKey(holder);
+
+        assertProblem(() -> service.send(CGCOM, holder, EMAIL, EmailLanguage.ES, CLIENT),
+                ProblemCode.STEP_NOT_ALLOWED);
+
+        assertThat(mailer.sent()).isEmpty();
+        assertThat(clientLimit.consumed).hasValue(0);
+    }
+
+    @Test
+    @DisplayName("EC-12 — send_issuanceSectionThatCannotBeRead_isStepNotAllowed")
+    void send_issuanceSectionThatCannotBeRead_isStepNotAllowed() {
+        configs.put(CGCOM, config(Map.of()));
+        HolderRef holder = entitledJourney();
+        sessions.write(CGCOM, journeyId(holder), Section.ISSUANCE, "{\"idempotency_key\":\"" + UUID.randomUUID() + "\"}");
+
+        assertProblem(() -> service.send(CGCOM, holder, EMAIL, EmailLanguage.ES, CLIENT),
+                ProblemCode.STEP_NOT_ALLOWED);
+
+        assertThat(mailer.sent()).isEmpty();
+    }
+
+    /** A request of the journey has its idempotency key: the first confirmation started. */
+    private void withIdempotencyKey(HolderRef holder) {
+        sessions.write(CGCOM, journeyId(holder), Section.ISSUANCE, es.in2.issuanceportal.session.api.IssuanceRecord.empty()
+                .with("r1", es.in2.issuanceportal.session.api.IssuanceRecord.Entry.withKey(UUID.randomUUID(), EMAIL))
+                .toJson());
     }
 
     @Test
@@ -744,9 +780,9 @@ class EmailVerificationServiceTest {
 
     private HolderRef entitledJourney() {
         HolderRef holder = identifiedJourney();
-        sessions.write(CGCOM, journeyOf(holder), Section.ENTITLEMENT, new EntitlementRecord(IdentifierType.PERSONAL_ID,
+        sessions.write(CGCOM, journeyOf(holder), Section.ENTITLEMENT, EntitlementRecords.available(IdentifierType.PERSONAL_ID,
                 Map.of("legally_entitled", true),
-                new EntitlementRecord.Preview("DoctorID", List.of(), null, true), clock.instant()).toJson());
+                new EntitlementRecord.Preview("DoctorID", List.of()), null, clock.instant()).toJson());
         journey.reach(CGCOM, holder, JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
         return holder;
     }
