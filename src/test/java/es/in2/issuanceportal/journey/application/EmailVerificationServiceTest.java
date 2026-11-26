@@ -34,8 +34,11 @@ import es.in2.issuanceportal.shared.error.ProblemException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.transaction.support.TransactionOperations;
 
 import java.time.Duration;
@@ -50,6 +53,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@ExtendWith(OutputCaptureExtension.class)
 class EmailVerificationServiceTest {
 
     private static final TenantId CGCOM = new TenantId("cgcom");
@@ -786,8 +790,11 @@ class EmailVerificationServiceTest {
         assertThat(stored(holder).attempts()).isZero();
         assertThat(stored(holder).checks()).isEmpty();
         assertThat(sessions.read(CGCOM, journeyOf(holder), Section.EMAIL)).isEmpty();
-        assertThat(trail.emailCodeChecks()).extracting(event -> event.result())
-                .containsExactly(JourneyAuditTrail.EmailCodeCheck.TOO_MANY_REQUESTS);
+        // AC-06: refused before the journey is read, so the event carries no journey but the tenant of the request.
+        assertThat(trail.emailCodeChecks()).extracting(event -> event.result(), event -> event.journeyId())
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(
+                        JourneyAuditTrail.EmailCodeCheck.TOO_MANY_REQUESTS, null));
+        assertThat(trail.emailCodeCheckTenants()).containsExactly(CGCOM);
     }
 
     @Test
@@ -924,7 +931,7 @@ class EmailVerificationServiceTest {
 
     @Test
     @DisplayName("ES-02 — check_trailFailsOnALimitedCheck_stillAnswersTooManyRequests")
-    void check_trailFailsOnALimitedCheck_stillAnswersTooManyRequests() {
+    void check_trailFailsOnALimitedCheck_stillAnswersTooManyRequests(CapturedOutput output) {
         configs.put(CGCOM, config(Map.of()));
         HolderRef holder = entitledJourney();
         String code = sendCode(holder);
@@ -936,6 +943,28 @@ class EmailVerificationServiceTest {
                     assertThat(e.problem()).isEqualTo(ProblemCode.TOO_MANY_REQUESTS);
                     assertThat(e.retryAfter()).contains(Duration.ofSeconds(30));
                 });
+
+        assertThat(output.getOut()).contains("Could not record the email code check of journey")
+                .doesNotContain(EMAIL, code);
+    }
+
+    @Test
+    @DisplayName("ES-02 — check_trailFailsOnACheckLimitedOnTheJourney_stillAnswersTooManyRequests")
+    void check_trailFailsOnACheckLimitedOnTheJourney_stillAnswersTooManyRequests(CapturedOutput output) {
+        configs.put(CGCOM, config(Map.of()));
+        HolderRef holder = entitledJourney();
+        String code = sendCode(holder);
+        writeChecks(holder, START.minusSeconds(600), 10);
+        trail.failFromNowOn();
+
+        assertThatThrownBy(() -> service.check(CGCOM, holder, code, CLIENT))
+                .isInstanceOfSatisfying(ProblemException.class, e -> {
+                    assertThat(e.problem()).isEqualTo(ProblemCode.TOO_MANY_REQUESTS);
+                    assertThat(e.retryAfter()).contains(Duration.ofMinutes(50));
+                });
+
+        assertThat(output.getOut()).contains("Could not record the email code check of journey " + journeyId(holder))
+                .doesNotContain(EMAIL, code);
     }
 
     @Test

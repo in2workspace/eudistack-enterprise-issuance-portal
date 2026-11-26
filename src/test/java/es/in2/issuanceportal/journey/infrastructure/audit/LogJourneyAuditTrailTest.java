@@ -183,11 +183,16 @@ class LogJourneyAuditTrailTest {
     }
 
     @Test
-    void append_emailCodeCheckWithoutJourney_stillWrites() {
+    void append_emailCodeCheckWithoutJourney_writesNoJourneyButTheTenantAndTheResult() {
         trail.append(SANDBOX, new JourneyAuditTrail.EmailCodeChecked(UUID.randomUUID(), null,
                 JourneyAuditTrail.EmailCodeCheck.TOO_MANY_REQUESTS, Instant.now()));
 
-        verify(audit).info(anyString(), any(Object[].class));
+        ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
+        verify(audit).info(anyString(), arguments.capture());
+        assertThat(java.util.Arrays.stream(arguments.getValue()).map(Object::toString))
+                .contains("journey_id=null", "result=too_many_requests", "event=EMAIL_CODE_CHECKED", "tenant=sandbox")
+                .anyMatch(argument -> argument.startsWith("occurred_at="))
+                .noneMatch(argument -> argument.contains("@") || argument.contains("code="));
     }
 
     @Test

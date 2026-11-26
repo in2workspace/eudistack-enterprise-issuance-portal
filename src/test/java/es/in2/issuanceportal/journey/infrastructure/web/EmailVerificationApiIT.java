@@ -807,6 +807,25 @@ class EmailVerificationApiIT {
                 .doesNotContain(EMAIL, code, storedVerification(holder).codeHash());
     }
 
+    @Test
+    @DisplayName("AC-06 — postCode_limitedOnTheAddress_logsTheResultWithoutJourneyEmailNorCode")
+    void postCode_limitedOnTheAddress_logsTheResultWithoutJourneyEmailNorCode() throws Exception {
+        TestHolder holder = entitledJourney();
+        String code = sentCode(holder);
+        for (int i = 0; i < 20; i++) {
+            mvc.perform(check(holder, code("12ab"))).andExpect(status().isBadRequest());
+        }
+        logs.list.clear();
+
+        mvc.perform(check(holder, code(code))).andExpect(status().isTooManyRequests());
+
+        String everything = logs.list.stream().map(ILoggingEvent::getFormattedMessage)
+                .collect(Collectors.joining("\n"));
+        assertThat(everything).contains("EMAIL_CODE_CHECKED", "result=too_many_requests", "journey_id=null",
+                        "tenant=sandbox", "occurred_at=")
+                .doesNotContain(EMAIL, code, storedVerification(holder).codeHash());
+    }
+
     // --- GET /journey: email_verification ---
 
     @Test
