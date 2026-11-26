@@ -200,12 +200,14 @@ class IssuanceServiceTest {
     }
 
     @Test
-    void confirm_auditTrailFails_stillAnswersWithTheOffer() {
+    void confirm_auditTrailFails_failsTheConfirmation() {
+        // Arrange
         configs.put(CGCOM, config("doctorid.sd.1", DOCTORID_PLACEMENT, Onboarding.DISABLED));
         HolderRef holder = entitledJourney();
         trail.failFromNowOn();
 
-        assertThat(service.confirm(CGCOM, holder, "r1").credentialOfferUri()).isNotBlank();
+        // Act & Assert
+        assertThatThrownBy(() -> service.confirm(CGCOM, holder, "r1")).isInstanceOf(IllegalStateException.class);
     }
 
     @Test

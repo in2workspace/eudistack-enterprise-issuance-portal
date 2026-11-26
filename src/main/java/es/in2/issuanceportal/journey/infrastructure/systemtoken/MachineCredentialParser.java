@@ -28,9 +28,20 @@ final class MachineCredentialParser {
             if (credential == null || !credential.isTextual() || key == null || !(key.isObject() || key.isTextual())) {
                 return Optional.empty();
             }
-            String privateKey = key.isObject() ? key.toString() : key.asText();
+            return parse(credential.asText(), key.isObject() ? key.toString() : key.asText());
+        } catch (Exception _) {
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * @param credential the machine credential's JWT
+     * @param privateKey the mandatee's P-256 key, as a JWK or a hex scalar
+     */
+    static Optional<MachineIdentity> parse(String credential, String privateKey) {
+        try {
             return Optional.of(new MachineIdentity(
-                    MachineCredential.parse(credential.asText()), EcKeyLoader.loadPrivateKey(privateKey)));
+                    MachineCredential.parse(credential), EcKeyLoader.loadPrivateKey(privateKey)));
         } catch (Exception _) {
             return Optional.empty();
         }

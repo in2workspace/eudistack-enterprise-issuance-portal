@@ -45,7 +45,7 @@ class SystemTokenConfiguration {
         return new CachingSystemTokenProvider(grant, clock);
     }
 
-    private static RestClient restClient(Duration timeout) {
+    static RestClient restClient(Duration timeout) {
         JdkClientHttpRequestFactory requests = new JdkClientHttpRequestFactory(
                 HttpClient.newBuilder().connectTimeout(timeout).build());
         requests.setReadTimeout(timeout);

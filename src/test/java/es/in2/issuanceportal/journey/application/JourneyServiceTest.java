@@ -441,14 +441,12 @@ class JourneyServiceTest {
     }
 
     @Test
-    void startAndCancel_auditTrailUnavailable_completeNormally() {
+    void open_auditTrailUnavailable_failsTheOpening() {
+        // Arrange
         trail.failFromNowOn();
 
-        Started started = open(service);
-        Journey journey = service.cancel(SANDBOX, started.holder());
-
-        assertThat(journey.state()).isEqualTo(JourneyState.WITHDRAWN);
-        assertThat(sessions.journeyOf(SANDBOX, started.holder())).isEmpty();
+        // Act & Assert
+        assertThatThrownBy(() -> open(service)).isInstanceOf(IllegalStateException.class);
     }
 
     @Test

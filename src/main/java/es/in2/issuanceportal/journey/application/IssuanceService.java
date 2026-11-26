@@ -363,24 +363,24 @@ public class IssuanceService {
     private IssuanceResult askForNewOffer(TenantId tenant, UUID journeyId, Renewal plan) {
         try {
             IssuanceResult renewed = issuance.renewOffer(tenant, plan.processId());
-            traceRenewal(tenant, journeyId, plan.requestId(), JourneyAuditTrail.RenewalOutcome.RENEWED);
+            traceRenewal(tenant, journeyId, plan, JourneyAuditTrail.RenewalOutcome.RENEWED);
             return renewed;
         } catch (OfferNotRenewableException _) {
-            traceRenewal(tenant, journeyId, plan.requestId(), JourneyAuditTrail.RenewalOutcome.REQUEST_SAVED);
-            saveBecauseNotRenewable(tenant, journeyId, plan.requestId());
+            traceRenewal(tenant, journeyId, plan, JourneyAuditTrail.RenewalOutcome.REQUEST_SAVED);
+            saveBecauseNotRenewable(tenant, journeyId, plan);
             // Outside the transaction that saved it, so the answer does not undo it.
             throw new ProblemException(ProblemCode.REQUEST_SAVED);
         } catch (SystemTokenUnavailableException e) {
             log.warn("No system token of tenant {} to renew an offer of journey {}: {}", tenant, journeyId, e.reason());
-            traceRenewal(tenant, journeyId, plan.requestId(), JourneyAuditTrail.RenewalOutcome.UNAVAILABLE);
+            traceRenewal(tenant, journeyId, plan, JourneyAuditTrail.RenewalOutcome.UNAVAILABLE);
             throw new ProblemException(ProblemCode.ISSUANCE_UNAVAILABLE);
         } catch (IssuanceRejectedException e) {
             log.warn("Offer renewal of journey {} rejected: {}", journeyId, e.reason());
-            traceRenewal(tenant, journeyId, plan.requestId(), JourneyAuditTrail.RenewalOutcome.REJECTED);
+            traceRenewal(tenant, journeyId, plan, JourneyAuditTrail.RenewalOutcome.REJECTED);
             throw new ProblemException(ProblemCode.ISSUANCE_REJECTED);
         } catch (IssuanceUnavailableException e) {
             log.warn("Offer renewal of journey {} unavailable: {}", journeyId, e.reason());
-            traceRenewal(tenant, journeyId, plan.requestId(), JourneyAuditTrail.RenewalOutcome.UNAVAILABLE);
+            traceRenewal(tenant, journeyId, plan, JourneyAuditTrail.RenewalOutcome.UNAVAILABLE);
             throw new ProblemException(ProblemCode.ISSUANCE_UNAVAILABLE);
         }
     }
@@ -436,13 +436,14 @@ public class IssuanceService {
      * Its offer and onboarding address are deleted, no other issuance is ever asked for it, and a journey still in
      * progress is completed, as with any request that has its process (design.md §3.4 step 5).
      */
-    private void saveBecauseNotRenewable(TenantId tenant, UUID journeyId, String requestId) {
+    private void saveBecauseNotRenewable(TenantId tenant, UUID journeyId, Renewal plan) {
         transactions.executeWithoutResult(status -> {
             Journey journey = lock(tenant, journeyId);
             if (!journey.isActive()) {
                 throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
             }
-            markSaved(tenant, journeyId, requestId, JourneyAuditTrail.SavedOrigin.OFFER_NOT_RENEWABLE);
+            markSaved(tenant, journeyId, plan.requestId(), plan.processId(),
+                    JourneyAuditTrail.SavedOrigin.OFFER_NOT_RENEWABLE);
             if (journey.isInProgress()) {
                 journey.complete(clock.instant());
                 if (!journeys.update(tenant, journey, JourneyState.IN_PROGRESS)) {
@@ -479,29 +480,27 @@ public class IssuanceService {
             if (process.isSaved() || !delivered) {
                 throw new ProblemException(ProblemCode.STEP_NOT_ALLOWED);
             }
-            markSaved(tenant, journeyId, requestId, JourneyAuditTrail.SavedOrigin.HOLDER_DECLARED);
+            markSaved(tenant, journeyId, requestId, process.issuanceProcessId(),
+                    JourneyAuditTrail.SavedOrigin.HOLDER_DECLARED);
         });
     }
 
     /** Sets {@code saved_at}, deletes the request's offer and onboarding address, and traces why. Journey locked. */
-    private void markSaved(TenantId tenant, UUID journeyId, String requestId, JourneyAuditTrail.SavedOrigin origin) {
+    private void markSaved(TenantId tenant, UUID journeyId, String requestId, UUID processId,
+                           JourneyAuditTrail.SavedOrigin origin) {
         issuances.markSaved(tenant, journeyId, requestId, clock.instant());
         IssuanceRecord section = readIssuance(tenant, journeyId).orElseGet(IssuanceRecord::empty);
         section.entry(requestId).ifPresent(entry -> sessions.write(tenant, journeyId, Section.ISSUANCE,
                 section.with(requestId, IssuanceRecord.Entry.withKey(entry.idempotencyKey(), entry.email())).toJson()));
-        try {
-            trail.append(tenant, new JourneyAuditTrail.RequestSaved(UUID.randomUUID(), journeyId, requestId, origin,
-                    clock.instant()));
-        } catch (RuntimeException e) {
-            log.error("Could not record the saved request of journey {}", journeyId, e);
-        }
+        trail.append(tenant, new JourneyAuditTrail.RequestSaved(UUID.randomUUID(), journeyId, requestId, processId,
+                origin, clock.instant()));
     }
 
-    private void traceRenewal(TenantId tenant, UUID journeyId, String requestId,
+    private void traceRenewal(TenantId tenant, UUID journeyId, Renewal plan,
                               JourneyAuditTrail.RenewalOutcome outcome) {
         try {
-            trail.append(tenant, new JourneyAuditTrail.OfferRenewalRequested(UUID.randomUUID(), journeyId, requestId,
-                    outcome, clock.instant()));
+            trail.append(tenant, new JourneyAuditTrail.OfferRenewalRequested(UUID.randomUUID(), journeyId,
+                    plan.requestId(), plan.processId(), outcome, clock.instant()));
         } catch (RuntimeException e) {
             log.error("Could not record the offer renewal of journey {}", journeyId, e);
         }
@@ -652,12 +651,8 @@ public class IssuanceService {
         }
     }
 
+    /** Within the transaction of the change: a trail kept in the database commits with it or undoes it. */
     private void audit(TenantId tenant, JourneyAuditTrail.Kind kind, Journey journey) {
-        try {
-            trail.append(tenant, new JourneyAuditTrail.Event(UUID.randomUUID(), kind, journey.id(), journey.state(),
-                    journey.step(), journey.withdrawalReason(), clock.instant()));
-        } catch (RuntimeException e) {
-            log.error("Could not record the {} event of journey {}", kind, journey.id(), e);
-        }
+        trail.append(tenant, JourneyAuditTrail.Event.of(kind, journey, clock.instant()));
     }
 }

@@ -12,7 +12,7 @@ plugins {
 group = 'com.eudistack'
 // Plain version, no SNAPSHOT: the ci job tags the release v${version}
 // and refuses to run if that tag already exists.
-version = '0.2.0'
+version = '0.3.0'
 
 java {
     toolchain {
@@ -32,6 +32,15 @@ configurations {
 
 repositories {
     mavenCentral()
+    // Audit starter (private GitHub Packages): reading it needs a token with read:packages.
+    maven {
+        name = 'GitHubPackages'
+        url = uri('https://maven.pkg.github.com/in2workspace/eudistack-platform-audit-starter')
+        credentials {
+            username = System.getenv('GITHUB_ACTOR') ?: findProperty('gpr.user')
+            password = System.getenv('GITHUB_TOKEN') ?: findProperty('gpr.token')
+        }
+    }
 }
 
 dependencies {
@@ -84,6 +93,10 @@ dependencies {
 
     // --- Caching ---
     implementation 'com.github.ben-manes.caffeine:caffeine'
+
+    // --- Audit ---
+    // Outbox of audit events towards the Audit API; publisher and dispatcher are off by default.
+    implementation 'com.eudistack:auditoria-spring-boot-starter:0.1.0'
 
     // --- Observability ---
     implementation 'io.micrometer:micrometer-tracing-bridge-otel'

@@ -5,17 +5,18 @@ import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBooleanProperty;
 import org.springframework.stereotype.Component;
 
 import static net.logstash.logback.argument.StructuredArguments.kv;
 
 /**
- * Provisional trail: each incident event as a structured log line.
- *
- * <p>TODO(EUD-276): send the events to the audit API (EUD-244) instead, together with the journey
- * events of {@link LogJourneyAuditTrail}. Recorded in the review of EUD-276 (review.md, technical debt).
+ * The trail while the audit publisher is off: each incident event as a structured log line. With the publisher on,
+ * {@link OutboxIncidentAuditTrail} replaces it. To be removed once the audit is on in every environment (issue
+ * portal-emision-retirar-trazas-auditoria-en-log).
  */
 @Component
+@ConditionalOnBooleanProperty(name = "auditoria.publisher.enabled", havingValue = false, matchIfMissing = true)
 class LogIncidentAuditTrail implements IncidentAuditTrail {
 
     private final Logger audit;

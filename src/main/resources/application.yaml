@@ -138,6 +138,30 @@ issuance-portal:
   mail:
     # smtp in every environment that sends mail, local where none is sent. Empty: the service does not start.
     provider: ${PORTAL_MAIL_PROVIDER:}
+  audit-token:
+    # Machine token for the Audit API, asked to the Verifier with the portal's audit attestation. Read only with
+    # the audit dispatcher on, and then all of them are required: without one the service does not start.
+    token-url: ${AUDIT_M2M_TOKEN_URL:}
+    # Tenant of the request (X-Tenant): the one of the attestation's power domain.
+    tenant: ${AUDIT_M2M_TENANT:}
+    # The Verifier's URL as it is called, the aud of the client assertion.
+    assertion-audience: ${AUDIT_M2M_ASSERTION_AUDIENCE:}
+    client-id: ${AUDIT_M2M_CLIENT_ID:}
+    credential: ${AUDIT_M2M_CREDENTIAL:}
+    private-key: ${AUDIT_M2M_PRIVATE_KEY:}
+    # How long the Verifier gets to answer.
+    request-timeout: 5s
+
+# Audit outbox (auditoria-spring-boot-starter). Both switches off: the service behaves as without the starter. The
+# Audit API client (auditoria.client.*) comes from the environment, e.g. AUDITORIA_CLIENT_BASEURL.
+auditoria:
+  source: issuance-portal
+  # The first catalogue that declares the portal's events.
+  catalog-version: 2.5.0
+  publisher:
+    enabled: ${AUDIT_PUBLISHER_ENABLED:false}
+  dispatcher:
+    enabled: ${AUDIT_DISPATCHER_ENABLED:false}
 
 # Branding of the code email. The tenants' blocks are not Spring configuration: EmailBrandingConfiguration reads the
 # file at EMAIL_BRANDING_PATH (default classpath:email-branding.yaml; file: and classpath: work) and binds only

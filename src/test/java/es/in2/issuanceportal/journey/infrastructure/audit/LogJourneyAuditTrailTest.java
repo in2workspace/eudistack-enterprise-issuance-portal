@@ -86,7 +86,7 @@ class LogJourneyAuditTrailTest {
         UUID journey = UUID.randomUUID();
 
         trail.append(SANDBOX, new JourneyAuditTrail.RequestSaved(UUID.randomUUID(), journey, "r3",
-                JourneyAuditTrail.SavedOrigin.OFFER_NOT_RENEWABLE, Instant.now()));
+                UUID.randomUUID(), JourneyAuditTrail.SavedOrigin.OFFER_NOT_RENEWABLE, Instant.now()));
 
         ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
         verify(audit).info(anyString(), arguments.capture());
@@ -102,7 +102,7 @@ class LogJourneyAuditTrailTest {
         UUID journey = UUID.randomUUID();
 
         trail.append(SANDBOX, new JourneyAuditTrail.OfferRenewalRequested(UUID.randomUUID(), journey, "r1",
-                JourneyAuditTrail.RenewalOutcome.REQUEST_SAVED, Instant.now()));
+                UUID.randomUUID(), JourneyAuditTrail.RenewalOutcome.REQUEST_SAVED, Instant.now()));
 
         ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
         verify(audit).info(anyString(), arguments.capture());
@@ -180,6 +180,7 @@ class LogJourneyAuditTrailTest {
 
     private static JourneyAuditTrail.Event event() {
         return new JourneyAuditTrail.Event(UUID.randomUUID(), JourneyAuditTrail.Kind.STARTED, UUID.randomUUID(),
-                JourneyState.IN_PROGRESS, JourneyStep.STARTED, Optional.empty(), Instant.now());
+                JourneyState.IN_PROGRESS, JourneyStep.STARTED, Optional.empty(), Optional.empty(), Optional.empty(),
+                Instant.now());
     }
 }

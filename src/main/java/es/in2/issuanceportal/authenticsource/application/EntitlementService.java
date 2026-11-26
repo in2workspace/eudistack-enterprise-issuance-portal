@@ -159,13 +159,12 @@ public class EntitlementService implements AutoCloseable {
         // Only a list of requests has ids and requests under review to keep.
         Optional<EntitlementRecord> previous = answer instanceof SourceRequests.Requests
                 ? previous(tenant, journeyId) : Optional.empty();
-        // The trace says what the source answered before acting on it, so a failure afterwards keeps it.
         EntitlementDecision decision = EntitlementRules.decide(answer, underReview(previous));
         List<Entry> entries = entries(decision.requests(), previous, current, identity);
         return switch (decision) {
             case EntitlementDecision.Confirmed _ -> {
-                trace.write(AuthenticSourceAuditTrail.Result.CONFIRMED, null, decision.requests());
-                confirm(tenant, holder, journeyId, current.hasSource() ? searched.type() : null, identity, entries);
+                confirm(tenant, holder, journeyId, current.hasSource() ? searched.type() : null, identity, entries,
+                        () -> trace.record(AuthenticSourceAuditTrail.Result.CONFIRMED, null, decision.requests()));
                 yield new Outcome.Confirmed(checked(entries));
             }
             case EntitlementDecision.NotConfirmed(var reason, var requests) ->
@@ -245,7 +244,7 @@ public class EntitlementService implements AutoCloseable {
         HolderIdentity identity = identity(tenant, journeyId);
         AuthenticSourceConfigs.Current current = current(tenant);
         AuthenticSourceAuditTrail.DisputeResult result = tell(tenant, current, identity, request.sourceRef());
-        writeDispute(tenant, journeyId, current, result, started);
+        writeDispute(tenant, journeyId, requestId, current, result, started);
         markUnderReview(tenant, journeyId, requestId);
     }
 
@@ -280,11 +279,12 @@ public class EntitlementService implements AutoCloseable {
         }
     }
 
-    private void writeDispute(TenantId tenant, UUID journeyId, AuthenticSourceConfigs.Current current,
+    private void writeDispute(TenantId tenant, UUID journeyId, String requestId,
+                              AuthenticSourceConfigs.Current current,
                               AuthenticSourceAuditTrail.DisputeResult result, long started) {
         try {
             trail.appendDispute(tenant, new AuthenticSourceAuditTrail.DisputeEvent(UUID.randomUUID(), journeyId,
-                    current == null ? null : current.attestationType(),
+                    requestId, current == null ? null : current.attestationType(),
                     current != null && current.hasSource() ? current.adapter().type()
                             : AuthenticSourceAuditTrail.NO_ADAPTER,
                     result, Duration.ofNanos(System.nanoTime() - started), clock.instant()));
@@ -333,17 +333,25 @@ public class EntitlementService implements AutoCloseable {
             this.started = started;
         }
 
-        /** The trail never decides the outcome of a check: a failure is logged and the check goes on. */
+        /**
+         * A check that writes nothing: the trail never decides its outcome, a failure is only logged and the check
+         * goes on.
+         */
         void write(AuthenticSourceAuditTrail.Result result, NotConfirmedReason reason, List<SourceRequest> requests) {
             try {
-                trail.append(tenant, new AuthenticSourceAuditTrail.Event(UUID.randomUUID(), journeyId,
-                        current.attestationType(),
-                        current.hasSource() ? current.adapter().type() : AuthenticSourceAuditTrail.NO_ADAPTER,
-                        identifierType, result, Optional.ofNullable(reason), countByStatus(requests),
-                        Duration.ofNanos(System.nanoTime() - started), clock.instant()));
+                record(result, reason, requests);
             } catch (RuntimeException e) {
                 log.error("Could not record the entitlement check of journey {}", journeyId, e);
             }
+        }
+
+        /** For the transaction of what a check writes: a trail kept in the database commits with it or undoes it. */
+        void record(AuthenticSourceAuditTrail.Result result, NotConfirmedReason reason, List<SourceRequest> requests) {
+            trail.append(tenant, new AuthenticSourceAuditTrail.Event(UUID.randomUUID(), journeyId,
+                    current.attestationType(),
+                    current.hasSource() ? current.adapter().type() : AuthenticSourceAuditTrail.NO_ADAPTER,
+                    identifierType, result, Optional.ofNullable(reason), countByStatus(requests),
+                    Duration.ofNanos(System.nanoTime() - started), clock.instant()));
         }
     }
 
@@ -525,18 +533,20 @@ public class EntitlementService implements AutoCloseable {
     }
 
     /**
-     * The entitlement and the step commit together: a journey never reaches the step without its data.
+     * The entitlement, the step and the check's trace commit together: a journey never reaches the step without its
+     * data. The trace goes first, so a log keeps what the source answered when the writes fail.
      *
      * @param searchedBy the identity's identifier type, {@code null} when the attestation type has no source
      */
     private void confirm(TenantId tenant, HolderRef holder, UUID journeyId, IdentifierType searchedBy,
-                         HolderIdentity identity, List<Entry> entries) {
+                         HolderIdentity identity, List<Entry> entries, Runnable trace) {
         // The email the Email step is prefilled with: the identity's, else the first one a source request gave.
         String email = entries.stream().map(Entry::preview).filter(Objects::nonNull)
                 .map(AttestationPreview::email).filter(Objects::nonNull).findFirst().orElse(identity.email());
         EntitlementRecord entitlement = new EntitlementRecord(toSection(searchedBy), email,
                 entries.stream().map(EntitlementService::toSection).toList(), clock.instant());
         transactions.executeWithoutResult(status -> {
+            trace.run();
             sessions.write(tenant, journeyId, Section.ENTITLEMENT, entitlement.toJson());
             progress.reach(tenant, holder, JourneyProgress.Step.ENTITLEMENT_CONFIRMED);
         });
