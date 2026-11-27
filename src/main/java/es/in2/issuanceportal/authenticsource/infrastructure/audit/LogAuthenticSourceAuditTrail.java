@@ -7,6 +7,7 @@ import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBooleanProperty;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
@@ -15,11 +16,12 @@ import java.util.Map;
 import static net.logstash.logback.argument.StructuredArguments.kv;
 
 /**
- * Provisional trail: each check as a structured log line, like the journey's trail.
- *
- * <p>TODO(EUD-275): send the events to the audit API (EUD-244) instead, together with the journey's.
+ * The trail while the audit publisher is off: each check as a structured log line, like the journey's trail. With
+ * the publisher on, {@link OutboxAuthenticSourceAuditTrail} replaces it. To be removed once the audit is on in every
+ * environment (issue portal-emision-retirar-trazas-auditoria-en-log).
  */
 @Component
+@ConditionalOnBooleanProperty(name = "auditoria.publisher.enabled", havingValue = false, matchIfMissing = true)
 class LogAuthenticSourceAuditTrail implements AuthenticSourceAuditTrail {
 
     private final Logger audit;

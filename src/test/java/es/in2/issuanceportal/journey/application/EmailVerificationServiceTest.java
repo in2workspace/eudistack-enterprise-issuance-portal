@@ -503,14 +503,15 @@ class EmailVerificationServiceTest {
     }
 
     @Test
-    void send_trailFails_stillSendsTheCode() {
+    void send_trailFails_failsTheSend() {
+        // Arrange
         configs.put(CGCOM, config(Map.of()));
         HolderRef holder = entitledJourney();
         trail.failFromNowOn();
 
-        service.send(CGCOM, holder, EMAIL, EmailLanguage.ES, CLIENT);
-
-        assertThat(mailer.sent()).hasSize(1);
+        // Act & Assert
+        assertThatThrownBy(() -> service.send(CGCOM, holder, EMAIL, EmailLanguage.ES, CLIENT))
+                .isInstanceOf(IllegalStateException.class);
     }
 
     @Test
@@ -738,15 +739,15 @@ class EmailVerificationServiceTest {
     }
 
     @Test
-    void check_trailFails_stillVerifies() {
+    void check_trailFails_failsTheCheck() {
+        // Arrange
         configs.put(CGCOM, config(Map.of()));
         HolderRef holder = entitledJourney();
         String code = sendCode(holder);
         trail.failFromNowOn();
 
-        service.check(CGCOM, holder, code);
-
-        assertThat(sessions.read(CGCOM, journeyOf(holder), Section.EMAIL)).isPresent();
+        // Act & Assert
+        assertThatThrownBy(() -> service.check(CGCOM, holder, code)).isInstanceOf(IllegalStateException.class);
     }
 
     // --- helpers ---

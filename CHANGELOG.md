@@ -93,6 +93,18 @@ Revisión de la orden:
 - Un elemento vacío en la traducción de la configuración (`"mapping": [null]`) es una configuración no válida (503 `config_unavailable`, con el campo en el log), no un error 500.
 - La respuesta de `POST /entitlement` y los documentos JSON de la configuración y de las secciones `identity` y `entitlement` no muestran datos personales, direcciones ni secretos en su representación de texto.
 
+## [0.3.0] - 2026-11-26
+
+### Added
+
+- **EUD-382 — auditoría en la bandeja de salida** con `auditoria-spring-boot-starter` 0.1.0, apagada por defecto (`AUDIT_PUBLISHER_ENABLED` y `AUDIT_DISPATCHER_ENABLED`). Con el publicador encendido, el recorrido, la fuente auténtica y las incidencias dejan sus eventos en `public.audit_outbox`, con los tipos de la categoría `issuance_portal` del catálogo 2.5.0.
+- **EUD-382 — token de la API de auditoría**: con el dispatcher encendido, el portal lo pide al Verifier con su atestación de auditoría (`AUDIT_M2M_*`) y no arranca si falta alguna variable.
+
+### Changed
+
+- **EUD-382 — trazas de auditoría según el publicador**: apagado, los loggers `audit.journey`, `audit.authentic_source` y `audit.incident` siguen como hasta ahora; encendido, los sustituye la bandeja, y un fallo al guardar el evento de un cambio deshace la operación.
+- **EUD-382 — compilación**: descargar el starter exige credenciales de lectura de GitHub Packages (`GITHUB_ACTOR` y `GITHUB_TOKEN`).
+
 ## [0.2.0] - 2026-10-27
 
 ### Added

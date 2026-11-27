@@ -553,8 +553,8 @@ class EntitlementServiceTest {
     }
 
     @Test
-    @DisplayName("ES-05 — check_trailFails_answersTheSame")
-    void check_trailFails_answersTheSame(CapturedOutput output) {
+    @DisplayName("EUD-382 ES-01 — check_trailFailsOnConfirmation_failsTheCheck")
+    void check_trailFailsOnConfirmation_failsTheCheck() {
         HolderRef holder = journeyWithDni("00000001R");
         EntitlementService failingTrail = new EntitlementService(journey, journey, journey, sessions,
                 new AuthenticSourceConfigs(tenant -> Optional.ofNullable(rows.get(tenant)),
@@ -571,9 +571,7 @@ class EntitlementServiceTest {
                     }
                 }, TransactionOperations.withoutTransaction(), clock, new LookupSlots(100, 100), (t, j, r) -> false);
 
-        assertThat(failingTrail.check(CGCOM, holder)).isInstanceOf(EntitlementService.Outcome.Confirmed.class);
-        assertThat(output.getOut()).contains("Could not record the entitlement check of journey")
-                .doesNotContain("00000001R", "Lucía");
+        assertThatThrownBy(() -> failingTrail.check(CGCOM, holder)).isInstanceOf(IllegalStateException.class);
         failingTrail.close();
     }
 

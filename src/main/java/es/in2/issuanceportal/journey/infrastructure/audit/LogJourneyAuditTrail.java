@@ -6,6 +6,7 @@ import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBooleanProperty;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -13,13 +14,12 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import static net.logstash.logback.argument.StructuredArguments.kv;
 
 /**
- * Provisional trail: each event as a structured log line, written once the change is committed.
- *
- * <p>TODO(EUD-275): send the events to the audit API (EUD-244) instead. That needs journey event
- * types in the audit catalogue, the system token of the portal (EUD-277) and the producer outbox
- * (DT-002). Recorded in the feature's tech-debt.md.
+ * The trail while the audit publisher is off: each event as a structured log line, a change of the journey once it
+ * is committed. With the publisher on, {@link OutboxJourneyAuditTrail} replaces it. To be removed once the audit is
+ * on in every environment (issue portal-emision-retirar-trazas-auditoria-en-log).
  */
 @Component
+@ConditionalOnBooleanProperty(name = "auditoria.publisher.enabled", havingValue = false, matchIfMissing = true)
 class LogJourneyAuditTrail implements JourneyAuditTrail {
 
     private static final String EVENT = "event";

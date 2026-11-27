@@ -1,5 +1,6 @@
 package es.in2.issuanceportal.journey.application.port;
 
+import es.in2.issuanceportal.journey.domain.Journey;
 import es.in2.issuanceportal.journey.domain.JourneyState;
 import es.in2.issuanceportal.journey.domain.JourneyStep;
 import es.in2.issuanceportal.journey.domain.WithdrawalReason;
@@ -17,6 +18,27 @@ public interface JourneyAuditTrail {
 
     enum Kind { STARTED, STEP_REACHED, COMPLETED, WITHDRAWN, ENDED }
 
+    /** Why a completed journey ended. */
+    enum EndCause {
+
+        HOLDER("holder"),
+        EXPIRED("expired");
+
+        private final String code;
+
+        EndCause(String code) {
+            this.code = code;
+        }
+
+        public String code() {
+            return code;
+        }
+    }
+
+    /**
+     * @param identificationMethod how the holder logged in; empty when it is not known
+     * @param endCause             only in an {@link Kind#ENDED} event
+     */
     record Event(
             UUID eventId,
             Kind kind,
@@ -24,7 +46,24 @@ public interface JourneyAuditTrail {
             JourneyState state,
             JourneyStep step,
             Optional<WithdrawalReason> withdrawalReason,
+            Optional<String> identificationMethod,
+            Optional<EndCause> endCause,
             Instant occurredAt) {
+
+        /** A change of a journey, as the journey is after it. */
+        public static Event of(Kind kind, Journey journey, Instant occurredAt) {
+            return of(kind, journey, Optional.empty(), occurredAt);
+        }
+
+        /** The end of a completed journey. */
+        public static Event ended(Journey journey, EndCause cause, Instant occurredAt) {
+            return of(Kind.ENDED, journey, Optional.of(cause), occurredAt);
+        }
+
+        private static Event of(Kind kind, Journey journey, Optional<EndCause> endCause, Instant occurredAt) {
+            return new Event(UUID.randomUUID(), kind, journey.id(), journey.state(), journey.step(),
+                    journey.withdrawalReason(), journey.identificationMethod(), endCause, occurredAt);
+        }
     }
 
     /** What came of a request to the issuance API. */
@@ -169,8 +208,8 @@ public interface JourneyAuditTrail {
      * A request for a new offer (design.md §3.5): the request of the journey by its opaque id and the result. No
      * email, offer, address or token.
      */
-    record OfferRenewalRequested(UUID eventId, UUID journeyId, String requestId, RenewalOutcome result,
-                                 Instant occurredAt) {
+    record OfferRenewalRequested(UUID eventId, UUID journeyId, String requestId, UUID issuanceProcessId,
+                                 RenewalOutcome result, Instant occurredAt) {
     }
 
     /** Why a request became saved (design.md §3.4, §3.8). */
@@ -192,8 +231,9 @@ public interface JourneyAuditTrail {
         }
     }
 
-    /** A request became saved (design.md §3.5): the opaque id and why. No offer, address or data. */
-    record RequestSaved(UUID eventId, UUID journeyId, String requestId, SavedOrigin origin, Instant occurredAt) {
+    /** A request became saved (design.md §3.5): the opaque id, its process and why. No offer, address or data. */
+    record RequestSaved(UUID eventId, UUID journeyId, String requestId, UUID issuanceProcessId, SavedOrigin origin,
+                        Instant occurredAt) {
     }
 
     void append(TenantId tenant, Event event);

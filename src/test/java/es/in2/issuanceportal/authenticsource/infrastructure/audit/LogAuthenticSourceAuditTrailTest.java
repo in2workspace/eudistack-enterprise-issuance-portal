@@ -83,7 +83,7 @@ class LogAuthenticSourceAuditTrailTest {
         UUID journeyId = UUID.randomUUID();
 
         trail.appendDispute(CGCOM, new AuthenticSourceAuditTrail.DisputeEvent(UUID.randomUUID(), journeyId,
-                "doctorid.sd.1", "http", AuthenticSourceAuditTrail.DisputeResult.NOT_SUPPORTED, Duration.ofMillis(7),
+                "r1", "doctorid.sd.1", "http", AuthenticSourceAuditTrail.DisputeResult.NOT_SUPPORTED, Duration.ofMillis(7),
                 Instant.parse("2026-10-28T10:00:00Z")));
 
         ArgumentCaptor<Object[]> arguments = ArgumentCaptor.forClass(Object[].class);
@@ -104,7 +104,7 @@ class LogAuthenticSourceAuditTrailTest {
         doThrow(new IllegalStateException("log sink down")).when(audit).info(anyString(), any(Object[].class));
 
         assertThatNoException().isThrownBy(() -> trail.appendDispute(CGCOM,
-                new AuthenticSourceAuditTrail.DisputeEvent(UUID.randomUUID(), UUID.randomUUID(), "doctorid.sd.1",
-                        "none", AuthenticSourceAuditTrail.DisputeResult.FAILED, Duration.ZERO, Instant.now())));
+                new AuthenticSourceAuditTrail.DisputeEvent(UUID.randomUUID(), UUID.randomUUID(), "r1",
+                        "doctorid.sd.1", "none", AuthenticSourceAuditTrail.DisputeResult.FAILED, Duration.ZERO, Instant.now())));
     }
 }

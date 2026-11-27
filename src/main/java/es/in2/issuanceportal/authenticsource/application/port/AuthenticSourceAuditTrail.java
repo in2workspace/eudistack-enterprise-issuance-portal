@@ -65,10 +65,14 @@ public interface AuthenticSourceAuditTrail {
         }
     }
 
-    /** One notice of data not correct: no identity, no reference of the request, no data. */
+    /**
+     * One notice of data not correct: no identity, no reference of the source, no data. The request goes by the
+     * opaque id the journey gave it.
+     */
     record DisputeEvent(
             UUID eventId,
             UUID journeyId,
+            String requestId,
             String attestationType,
             String adapter,
             DisputeResult result,

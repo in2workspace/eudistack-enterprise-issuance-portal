@@ -247,8 +247,9 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
             journey.end(now);
         }
         if (journeys.updateIfInactive(tenant, journey, readIn, cutoff)) {
-            audit(tenant, journey.state() == JourneyState.WITHDRAWN ? JourneyAuditTrail.Kind.WITHDRAWN
-                    : JourneyAuditTrail.Kind.ENDED, journey);
+            trail.append(tenant, journey.state() == JourneyState.WITHDRAWN
+                    ? JourneyAuditTrail.Event.of(JourneyAuditTrail.Kind.WITHDRAWN, journey, clock.instant())
+                    : JourneyAuditTrail.Event.ended(journey, JourneyAuditTrail.EndCause.EXPIRED, clock.instant()));
         }
     }
 
@@ -264,7 +265,8 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
         journey.end(clock.instant());
         save(tenant, journey, JourneyState.COMPLETED);
         sessions.close(tenant, journey.id());
-        audit(tenant, JourneyAuditTrail.Kind.ENDED, journey);
+        trail.append(tenant, JourneyAuditTrail.Event.ended(journey, JourneyAuditTrail.EndCause.HOLDER,
+                clock.instant()));
     }
 
     private void withdraw(TenantId tenant, Journey journey, WithdrawalReason reason) {
@@ -274,14 +276,9 @@ public class JourneyService implements JourneyAccess, JourneyProgress, JourneyWi
         audit(tenant, JourneyAuditTrail.Kind.WITHDRAWN, journey);
     }
 
-    /** The trail never decides the outcome of a request: a failure is logged and the journey goes on. */
+    /** Within the transaction of the change: a trail kept in the database commits with it or undoes it. */
     private void audit(TenantId tenant, JourneyAuditTrail.Kind kind, Journey journey) {
-        try {
-            trail.append(tenant, new JourneyAuditTrail.Event(UUID.randomUUID(), kind, journey.id(), journey.state(),
-                    journey.step(), journey.withdrawalReason(), clock.instant()));
-        } catch (RuntimeException e) {
-            log.error("Could not record the {} event of journey {}", kind, journey.id(), e);
-        }
+        trail.append(tenant, JourneyAuditTrail.Event.of(kind, journey, clock.instant()));
     }
 
     /** Someone else changed the journey first (another request or the expiry job): it is closed now. */

@@ -94,8 +94,14 @@ public class EmailVerificationService {
         access.requireActive(tenant, holder);
         UUID journeyId = sessions.journeyOf(tenant, holder)
                 .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
-        return Objects.requireNonNull(transactions.execute(
-                status -> sendLocked(tenant, journeyId, rawEmail, language, clientAddress)));
+        try {
+            return Objects.requireNonNull(transactions.execute(
+                    status -> sendLocked(tenant, journeyId, rawEmail, language, clientAddress)));
+        } catch (RefusedSend refused) {
+            // Traced once the transaction, which wrote nothing, is over: inside it the trace would be undone too.
+            trace(tenant, journeyId, refused.outcome);
+            throw refused.problem;
+        }
     }
 
     private EmailVerification sendLocked(TenantId tenant, UUID journeyId, String rawEmail,
@@ -108,13 +114,13 @@ public class EmailVerificationService {
 
         Optional<EmailVerification.Refusal> refusal = EmailVerification.refusal(previous.orElse(null), clock.instant());
         if (refusal.isPresent()) {
-            throw refused(tenant, journeyId, refusal.get());
+            throw refused(refusal.get());
         }
         String portalName = portalName(tenant, language);
         Optional<Duration> wait = clientLimit.tryConsume(clientAddress);
         if (wait.isPresent()) {
-            trace(tenant, journeyId, EmailCodeOutcome.TOO_MANY_REQUESTS);
-            throw new ProblemException(ProblemCode.TOO_MANY_REQUESTS, wait.get());
+            throw new RefusedSend(EmailCodeOutcome.TOO_MANY_REQUESTS,
+                    new ProblemException(ProblemCode.TOO_MANY_REQUESTS, wait.get()));
         }
 
         String code = EmailVerification.newCode();
@@ -124,8 +130,8 @@ public class EmailVerificationService {
         } catch (EmailCodeDeliveryException e) {
             clientLimit.giveBack(clientAddress);
             log.warn("Code email of journey {} not sent: {}", journeyId, e.getMessage());
-            trace(tenant, journeyId, EmailCodeOutcome.EMAIL_UNAVAILABLE);
-            throw new ProblemException(ProblemCode.EMAIL_UNAVAILABLE);
+            throw new RefusedSend(EmailCodeOutcome.EMAIL_UNAVAILABLE,
+                    new ProblemException(ProblemCode.EMAIL_UNAVAILABLE));
         } catch (RuntimeException e) {
             clientLimit.giveBack(clientAddress);
             throw e;
@@ -136,7 +142,8 @@ public class EmailVerificationService {
         sessions.write(tenant, journeyId, Section.EMAIL_VERIFICATION, toRecord(sent).toJson());
         // The email verified before stops being the journey's: the new one is only verified with its code (ac.md decision 2).
         sessions.clear(tenant, journeyId, Section.EMAIL);
-        trace(tenant, journeyId, EmailCodeOutcome.SENT);
+        trail.append(tenant, new JourneyAuditTrail.EmailCodeRequested(UUID.randomUUID(), journeyId,
+                EmailCodeOutcome.SENT, clock.instant()));
         return sent;
     }
 
@@ -159,12 +166,6 @@ public class EmailVerificationService {
                 .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
         EmailVerification.Check.Outcome outcome = Objects.requireNonNull(
                 transactions.execute(status -> checkLocked(tenant, journeyId, code)));
-        traceCheck(tenant, journeyId, switch (outcome) {
-            case VERIFIED -> EmailCodeCheck.VERIFIED;
-            case INVALID_CODE -> EmailCodeCheck.INVALID_CODE;
-            case EXPIRED_CODE -> EmailCodeCheck.EXPIRED_CODE;
-            case TOO_MANY_ATTEMPTS -> EmailCodeCheck.TOO_MANY_ATTEMPTS;
-        });
         switch (outcome) {
             case VERIFIED -> {
                 // Nothing to refuse: the caller answers success.
@@ -196,7 +197,18 @@ public class EmailVerificationService {
                 // Nothing to store: the stored record already says it is expired or exhausted.
             }
         }
+        trail.append(tenant, new JourneyAuditTrail.EmailCodeChecked(UUID.randomUUID(), journeyId,
+                resultOf(check.outcome()), clock.instant()));
         return check.outcome();
+    }
+
+    private static EmailCodeCheck resultOf(EmailVerification.Check.Outcome outcome) {
+        return switch (outcome) {
+            case VERIFIED -> EmailCodeCheck.VERIFIED;
+            case INVALID_CODE -> EmailCodeCheck.INVALID_CODE;
+            case EXPIRED_CODE -> EmailCodeCheck.EXPIRED_CODE;
+            case TOO_MANY_ATTEMPTS -> EmailCodeCheck.TOO_MANY_ATTEMPTS;
+        };
     }
 
     /**
@@ -210,13 +222,8 @@ public class EmailVerificationService {
             throw new ProblemException(ProblemCode.JOURNEY_CLOSED);
         }
         if (journey.step() != before) {
-            try {
-                trail.append(tenant, new JourneyAuditTrail.Event(UUID.randomUUID(),
-                        JourneyAuditTrail.Kind.STEP_REACHED, journey.id(), journey.state(), journey.step(),
-                        journey.withdrawalReason(), clock.instant()));
-            } catch (RuntimeException e) {
-                log.error("Could not record the STEP_REACHED event of journey {}", journey.id(), e);
-            }
+            trail.append(tenant, JourneyAuditTrail.Event.of(JourneyAuditTrail.Kind.STEP_REACHED, journey,
+                    clock.instant()));
         }
     }
 
@@ -271,16 +278,12 @@ public class EmailVerificationService {
         }
     }
 
-    private ProblemException refused(TenantId tenant, UUID journeyId, EmailVerification.Refusal refusal) {
+    private static RefusedSend refused(EmailVerification.Refusal refusal) {
         return switch (refusal.reason()) {
-            case TOO_MANY_CODES -> {
-                trace(tenant, journeyId, EmailCodeOutcome.TOO_MANY_CODES);
-                yield new ProblemException(ProblemCode.TOO_MANY_CODES);
-            }
-            case RESEND_TOO_SOON -> {
-                trace(tenant, journeyId, EmailCodeOutcome.RESEND_TOO_SOON);
-                yield new ProblemException(ProblemCode.RESEND_TOO_SOON, refusal.retryAfter().orElseThrow());
-            }
+            case TOO_MANY_CODES -> new RefusedSend(EmailCodeOutcome.TOO_MANY_CODES,
+                    new ProblemException(ProblemCode.TOO_MANY_CODES));
+            case RESEND_TOO_SOON -> new RefusedSend(EmailCodeOutcome.RESEND_TOO_SOON,
+                    new ProblemException(ProblemCode.RESEND_TOO_SOON, refusal.retryAfter().orElseThrow()));
         };
     }
 
@@ -327,22 +330,26 @@ public class EmailVerificationService {
                 .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
     }
 
-    private void traceCheck(TenantId tenant, UUID journeyId, EmailCodeCheck result) {
-        try {
-            trail.append(tenant, new JourneyAuditTrail.EmailCodeChecked(UUID.randomUUID(), journeyId, result,
-                    clock.instant()));
-        } catch (RuntimeException e) {
-            log.error("Could not record the email code check of journey {}", journeyId, e);
-        }
-    }
-
-    /** The trail never decides the outcome of a request: a failure is logged and the request goes on. */
+    /** The trail never decides the outcome of a refused send: a failure is logged and the refusal is answered. */
     private void trace(TenantId tenant, UUID journeyId, EmailCodeOutcome outcome) {
         try {
             trail.append(tenant, new JourneyAuditTrail.EmailCodeRequested(UUID.randomUUID(), journeyId, outcome,
                     clock.instant()));
         } catch (RuntimeException e) {
             log.error("Could not record the email code request of journey {}", journeyId, e);
+        }
+    }
+
+    /** A send that is refused or does not go out: what to answer and what to trace. */
+    private static final class RefusedSend extends RuntimeException {
+
+        private final transient EmailCodeOutcome outcome;
+        private final transient ProblemException problem;
+
+        RefusedSend(EmailCodeOutcome outcome, ProblemException problem) {
+            super("Email code send refused", null, false, false);
+            this.outcome = outcome;
+            this.problem = problem;
         }
     }
 }
