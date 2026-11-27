@@ -2,7 +2,6 @@ package es.in2.issuanceportal.shared.audit;
 
 import com.eudistack.auditoria.application.AuditPublisher;
 import com.eudistack.auditoria.autoconfigure.AuditoriaProperties;
-import com.eudistack.auditoria.context.AuditContextScope;
 import com.eudistack.auditoria.context.AuditContexts;
 import com.eudistack.auditoria.domain.AuditDraft;
 import com.eudistack.auditoria.domain.AuditFact;
@@ -35,7 +34,7 @@ public class AuditOutbox {
 
     /** An event the current request causes: its actor, and the journey as the operation it belongs to. */
     public void stage(UUID journeyId, AuditDraft draft) {
-        try (AuditContextScope _ = AuditContexts.withCorrelationId(journeyId.toString())) {
+        try (var _ = AuditContexts.withCorrelationId(journeyId.toString())) {
             insert(draft);
         }
     }
@@ -47,7 +46,7 @@ public class AuditOutbox {
      */
     public void stageAsSystem(TenantId tenant, UUID journeyId, AuditDraft draft) {
         String correlationId = journeyId == null ? null : journeyId.toString();
-        try (AuditContextScope _ = AuditContexts.system(tenant.value(), properties.getSource(), correlationId)) {
+        try (var _ = AuditContexts.system(tenant.value(), properties.getSource(), correlationId)) {
             insert(draft);
         }
     }

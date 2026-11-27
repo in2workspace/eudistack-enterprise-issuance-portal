@@ -164,7 +164,7 @@ public class EntitlementService implements AutoCloseable {
         return switch (decision) {
             case EntitlementDecision.Confirmed _ -> {
                 confirm(tenant, holder, journeyId, current.hasSource() ? searched.type() : null, identity, entries,
-                        () -> trace.record(AuthenticSourceAuditTrail.Result.CONFIRMED, null, decision.requests()));
+                        () -> trace.append(AuthenticSourceAuditTrail.Result.CONFIRMED, null, decision.requests()));
                 yield new Outcome.Confirmed(checked(entries));
             }
             case EntitlementDecision.NotConfirmed(var reason, var requests) ->
@@ -339,14 +339,14 @@ public class EntitlementService implements AutoCloseable {
          */
         void write(AuthenticSourceAuditTrail.Result result, NotConfirmedReason reason, List<SourceRequest> requests) {
             try {
-                record(result, reason, requests);
+                append(result, reason, requests);
             } catch (RuntimeException e) {
                 log.error("Could not record the entitlement check of journey {}", journeyId, e);
             }
         }
 
         /** For the transaction of what a check writes: a trail kept in the database commits with it or undoes it. */
-        void record(AuthenticSourceAuditTrail.Result result, NotConfirmedReason reason, List<SourceRequest> requests) {
+        void append(AuthenticSourceAuditTrail.Result result, NotConfirmedReason reason, List<SourceRequest> requests) {
             trail.append(tenant, new AuthenticSourceAuditTrail.Event(UUID.randomUUID(), journeyId,
                     current.attestationType(),
                     current.hasSource() ? current.adapter().type() : AuthenticSourceAuditTrail.NO_ADAPTER,

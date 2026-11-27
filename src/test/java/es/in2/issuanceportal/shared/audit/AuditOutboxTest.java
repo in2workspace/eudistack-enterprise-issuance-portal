@@ -2,7 +2,6 @@ package es.in2.issuanceportal.shared.audit;
 
 import com.eudistack.auditoria.application.AuditPublisher;
 import com.eudistack.auditoria.autoconfigure.AuditoriaProperties;
-import com.eudistack.auditoria.context.AuditContextScope;
 import com.eudistack.auditoria.context.AuditContexts;
 import com.eudistack.auditoria.context.ThreadLocalAuditContextAccessor;
 import com.eudistack.auditoria.domain.AuditActor;
@@ -60,7 +59,7 @@ class AuditOutboxTest {
             AuditOutbox outbox = recordingOutbox();
 
             // Act
-            try (AuditContextScope _ = AuditContexts.open(HOLDER_REQUEST)) {
+            try (var _ = AuditContexts.open(HOLDER_REQUEST)) {
                 outbox.stage(JOURNEY, draft);
             }
 
@@ -75,7 +74,7 @@ class AuditOutboxTest {
                 throw new IllegalStateException("outbox unavailable");
             });
 
-            try (AuditContextScope _ = AuditContexts.open(HOLDER_REQUEST)) {
+            try (var _ = AuditContexts.open(HOLDER_REQUEST)) {
                 // Act & Assert
                 assertThatThrownBy(() -> outbox.stage(JOURNEY, draft))
                         .isInstanceOf(IllegalStateException.class)
@@ -94,7 +93,7 @@ class AuditOutboxTest {
             // Arrange
             AuditOutbox outbox = recordingOutbox();
 
-            try (AuditContextScope _ = AuditContexts.open(HOLDER_REQUEST)) {
+            try (var _ = AuditContexts.open(HOLDER_REQUEST)) {
                 // Act
                 outbox.stageAsSystem(SANDBOX, JOURNEY, draft);
 
