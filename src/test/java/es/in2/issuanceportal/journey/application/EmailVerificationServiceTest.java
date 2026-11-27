@@ -5,6 +5,7 @@ import es.in2.issuanceportal.journey.InMemoryJourneyRepository;
 import es.in2.issuanceportal.journey.RecordingEmailCodeMailer;
 import es.in2.issuanceportal.journey.RecordingJourneyAuditTrail;
 import es.in2.issuanceportal.journey.api.JourneyProgress;
+import es.in2.issuanceportal.journey.application.port.EmailCodeCheckRateLimit;
 import es.in2.issuanceportal.journey.application.port.EmailCodeRateLimit;
 import es.in2.issuanceportal.journey.application.port.JourneyAuditTrail;
 import es.in2.issuanceportal.journey.application.port.JourneyAuditTrail.EmailCodeOutcome;
@@ -33,8 +34,11 @@ import es.in2.issuanceportal.shared.error.ProblemException;
 import es.in2.issuanceportal.shared.tenant.TenantId;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.transaction.support.TransactionOperations;
 
 import java.time.Duration;
@@ -49,6 +53,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+@ExtendWith(OutputCaptureExtension.class)
 class EmailVerificationServiceTest {
 
     private static final TenantId CGCOM = new TenantId("cgcom");
@@ -78,6 +83,22 @@ class EmailVerificationServiceTest {
         }
     }
 
+    /** The limit of checks per client address, in the hands of the test. */
+    private static final class CheckLimit implements EmailCodeCheckRateLimit {
+
+        private final AtomicInteger consumed = new AtomicInteger();
+        private volatile Duration deniedFor;
+
+        @Override
+        public Optional<Duration> tryConsume(String clientAddress) {
+            if (deniedFor != null) {
+                return Optional.of(deniedFor);
+            }
+            consumed.incrementAndGet();
+            return Optional.empty();
+        }
+    }
+
     private final InMemoryJourneySessions sessions = new InMemoryJourneySessions();
     private final InMemoryJourneyRepository journeys = new InMemoryJourneyRepository(sessions);
     private final MutableClock clock = new MutableClock(START);
@@ -86,9 +107,10 @@ class EmailVerificationServiceTest {
             TransactionOperations.withoutTransaction(), TransactionOperations.withoutTransaction(), clock);
     private final RecordingEmailCodeMailer mailer = new RecordingEmailCodeMailer();
     private final ClientLimit clientLimit = new ClientLimit();
+    private final CheckLimit checkLimit = new CheckLimit();
     private final Map<TenantId, PortalConfig> configs = new HashMap<>();
     private final EmailVerificationService service = new EmailVerificationService(journey, journeys, sessions,
-            new PortalConfigService(tenant -> Optional.ofNullable(configs.get(tenant))), mailer, clientLimit, trail,
+            new PortalConfigService(tenant -> Optional.ofNullable(configs.get(tenant))), mailer, clientLimit, checkLimit, trail,
             TransactionOperations.withoutTransaction(), clock);
 
     // --- AC-01, EC-01, EC-07 ---
@@ -544,7 +566,7 @@ class EmailVerificationServiceTest {
         String code = sendCode(holder);
         clock.advance(Duration.ofSeconds(30));
 
-        service.check(CGCOM, holder, code);
+        service.check(CGCOM, holder, code, CLIENT);
 
         assertThat(EmailRecord.fromJson(sessions.read(CGCOM, journeyOf(holder), Section.EMAIL).orElseThrow()).address())
                 .isEqualTo(EMAIL);
@@ -567,9 +589,9 @@ class EmailVerificationServiceTest {
         configs.put(CGCOM, config(Map.of()));
         HolderRef holder = entitledJourney();
         String code = sendCode(holder);
-        service.check(CGCOM, holder, code);
+        service.check(CGCOM, holder, code, CLIENT);
 
-        assertProblem(() -> service.check(CGCOM, holder, code), ProblemCode.STEP_NOT_ALLOWED);
+        assertProblem(() -> service.check(CGCOM, holder, code, CLIENT), ProblemCode.STEP_NOT_ALLOWED);
     }
 
     @Test
@@ -579,7 +601,7 @@ class EmailVerificationServiceTest {
         HolderRef holder = entitledJourney();
         String code = sendCode(holder);
 
-        assertProblem(() -> service.check(CGCOM, holder, wrongCodeFor(code)), ProblemCode.INVALID_CODE);
+        assertProblem(() -> service.check(CGCOM, holder, wrongCodeFor(code), CLIENT), ProblemCode.INVALID_CODE);
 
         assertThat(stored(holder).attempts()).isEqualTo(1);
         assertThat(sessions.read(CGCOM, journeyOf(holder), Section.EMAIL)).isEmpty();
@@ -596,10 +618,10 @@ class EmailVerificationServiceTest {
         HolderRef holder = entitledJourney();
         String code = sendCode(holder);
         for (int i = 0; i < 5; i++) {
-            assertProblem(() -> service.check(CGCOM, holder, wrongCodeFor(code)), ProblemCode.INVALID_CODE);
+            assertProblem(() -> service.check(CGCOM, holder, wrongCodeFor(code), CLIENT), ProblemCode.INVALID_CODE);
         }
 
-        assertProblem(() -> service.check(CGCOM, holder, code), ProblemCode.TOO_MANY_ATTEMPTS);
+        assertProblem(() -> service.check(CGCOM, holder, code, CLIENT), ProblemCode.TOO_MANY_ATTEMPTS);
 
         assertThat(stored(holder).attempts()).isEqualTo(5);
         assertThat(sessions.read(CGCOM, journeyOf(holder), Section.EMAIL)).isEmpty();
@@ -615,7 +637,7 @@ class EmailVerificationServiceTest {
         // The journey stays active: the holder keeps using the page.
         journey.current(CGCOM, holder);
 
-        assertProblem(() -> service.check(CGCOM, holder, code), ProblemCode.EXPIRED_CODE);
+        assertProblem(() -> service.check(CGCOM, holder, code, CLIENT), ProblemCode.EXPIRED_CODE);
 
         assertThat(stored(holder).attempts()).isZero();
         assertThat(sessions.read(CGCOM, journeyOf(holder), Section.EMAIL)).isEmpty();
@@ -631,9 +653,9 @@ class EmailVerificationServiceTest {
         String second = sendCode(holder);
 
         if (!first.equals(second)) {
-            assertProblem(() -> service.check(CGCOM, holder, first), ProblemCode.EXPIRED_CODE);
+            assertProblem(() -> service.check(CGCOM, holder, first, CLIENT), ProblemCode.EXPIRED_CODE);
         }
-        service.check(CGCOM, holder, second);
+        service.check(CGCOM, holder, second, CLIENT);
 
         assertThat(sessions.read(CGCOM, journeyOf(holder), Section.EMAIL)).isPresent();
     }
@@ -643,12 +665,12 @@ class EmailVerificationServiceTest {
     void check_newCodeToAnotherEmail_verifiesTheNewEmailAndItIsTheOneKept() {
         configs.put(CGCOM, config(Map.of()));
         HolderRef holder = entitledJourney();
-        service.check(CGCOM, holder, sendCode(holder));
+        service.check(CGCOM, holder, sendCode(holder), CLIENT);
         clock.advance(Duration.ofSeconds(181));
         service.send(CGCOM, holder, "new.address@example.test", EmailLanguage.ES, CLIENT);
         assertThat(sessions.read(CGCOM, journeyOf(holder), Section.EMAIL)).isEmpty();
 
-        service.check(CGCOM, holder, RecordingEmailCodeMailer.codeOf(mailer.last()));
+        service.check(CGCOM, holder, RecordingEmailCodeMailer.codeOf(mailer.last()), CLIENT);
 
         assertThat(EmailRecord.fromJson(sessions.read(CGCOM, journeyOf(holder), Section.EMAIL).orElseThrow()).address())
                 .isEqualTo("new.address@example.test");
@@ -662,7 +684,7 @@ class EmailVerificationServiceTest {
     void check_afterANewCodeWasSent_theStepNeverGoesBack() {
         configs.put(CGCOM, config(Map.of()));
         HolderRef holder = entitledJourney();
-        service.check(CGCOM, holder, sendCode(holder));
+        service.check(CGCOM, holder, sendCode(holder), CLIENT);
         clock.advance(Duration.ofSeconds(181));
 
         service.send(CGCOM, holder, "new.address@example.test", EmailLanguage.ES, CLIENT);
@@ -678,7 +700,7 @@ class EmailVerificationServiceTest {
         configs.put(CGCOM, config(Map.of()));
         HolderRef holder = entitledJourney();
 
-        assertProblem(() -> service.check(CGCOM, holder, "123456"), ProblemCode.STEP_NOT_ALLOWED);
+        assertProblem(() -> service.check(CGCOM, holder, "123456", CLIENT), ProblemCode.STEP_NOT_ALLOWED);
 
         assertThat(trail.emailCodeChecks()).isEmpty();
     }
@@ -691,8 +713,8 @@ class EmailVerificationServiceTest {
         HolderRef holder = entitledJourney();
         sendCode(holder);
 
-        assertProblem(() -> service.check(CGCOM, holder, code), ProblemCode.BAD_REQUEST);
-        assertProblem(() -> service.check(CGCOM, holder, null), ProblemCode.BAD_REQUEST);
+        assertProblem(() -> service.check(CGCOM, holder, code, CLIENT), ProblemCode.BAD_REQUEST);
+        assertProblem(() -> service.check(CGCOM, holder, null, CLIENT), ProblemCode.BAD_REQUEST);
 
         assertThat(stored(holder).attempts()).isZero();
         assertThat(trail.emailCodeChecks()).isEmpty();
@@ -706,7 +728,7 @@ class EmailVerificationServiceTest {
         sendCode(holder);
         journey.cancel(CGCOM, holder);
 
-        assertThatThrownBy(() -> service.check(CGCOM, holder, "123456")).isInstanceOf(JourneyClosedException.class);
+        assertThatThrownBy(() -> service.check(CGCOM, holder, "123456", CLIENT)).isInstanceOf(JourneyClosedException.class);
     }
 
     @Test
@@ -719,7 +741,7 @@ class EmailVerificationServiceTest {
         completed.complete(clock.instant());
         journeys.update(CGCOM, completed, JourneyState.IN_PROGRESS);
 
-        assertProblem(() -> service.check(CGCOM, holder, code), ProblemCode.STEP_NOT_ALLOWED);
+        assertProblem(() -> service.check(CGCOM, holder, code, CLIENT), ProblemCode.STEP_NOT_ALLOWED);
     }
 
     @Test
@@ -729,8 +751,8 @@ class EmailVerificationServiceTest {
         HolderRef holder = entitledJourney();
         String code = sendCode(holder);
         String hash = stored(holder).codeHash();
-        assertProblem(() -> service.check(CGCOM, holder, wrongCodeFor(code)), ProblemCode.INVALID_CODE);
-        service.check(CGCOM, holder, code);
+        assertProblem(() -> service.check(CGCOM, holder, wrongCodeFor(code), CLIENT), ProblemCode.INVALID_CODE);
+        service.check(CGCOM, holder, code, CLIENT);
 
         assertThat(trail.emailCodeChecks()).hasSize(2).allSatisfy(event ->
                 assertThat(event.toString()).doesNotContain(EMAIL, code, hash));
@@ -744,12 +766,234 @@ class EmailVerificationServiceTest {
         String code = sendCode(holder);
         trail.failFromNowOn();
 
-        service.check(CGCOM, holder, code);
+        service.check(CGCOM, holder, code, CLIENT);
 
         assertThat(sessions.read(CGCOM, journeyOf(holder), Section.EMAIL)).isPresent();
     }
 
+    // --- EUD-375: limits of the checks (AC-02, AC-03, AC-06, EC-01 to EC-05, ES-01, ES-02) ---
+
+    @Test
+    @DisplayName("AC-02 — check_clientAddressOverItsLimit_isTooManyRequestsBeforeLookingAtAnything")
+    void check_clientAddressOverItsLimit_isTooManyRequestsBeforeLookingAtAnything() {
+        configs.put(CGCOM, config(Map.of()));
+        HolderRef holder = entitledJourney();
+        String code = sendCode(holder);
+        checkLimit.deniedFor = Duration.ofMinutes(42);
+
+        assertThatThrownBy(() -> service.check(CGCOM, holder, code, CLIENT))
+                .isInstanceOfSatisfying(ProblemException.class, e -> {
+                    assertThat(e.problem()).isEqualTo(ProblemCode.TOO_MANY_REQUESTS);
+                    assertThat(e.retryAfter()).contains(Duration.ofMinutes(42));
+                });
+
+        assertThat(stored(holder).attempts()).isZero();
+        assertThat(stored(holder).checks()).isEmpty();
+        assertThat(sessions.read(CGCOM, journeyOf(holder), Section.EMAIL)).isEmpty();
+        // AC-06: refused before the journey is read, so the event carries no journey but the tenant of the request.
+        assertThat(trail.emailCodeChecks()).extracting(event -> event.result(), event -> event.journeyId())
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(
+                        JourneyAuditTrail.EmailCodeCheck.TOO_MANY_REQUESTS, null));
+        assertThat(trail.emailCodeCheckTenants()).containsExactly(CGCOM);
+    }
+
+    @Test
+    @DisplayName("EC-03 — check_malformedCodeOverTheClientLimit_isTooManyRequestsNotBadRequest")
+    void check_malformedCodeOverTheClientLimit_isTooManyRequestsNotBadRequest() {
+        configs.put(CGCOM, config(Map.of()));
+        HolderRef holder = entitledJourney();
+        sendCode(holder);
+        checkLimit.deniedFor = Duration.ofSeconds(5);
+
+        assertProblem(() -> service.check(CGCOM, holder, "12ab", CLIENT), ProblemCode.TOO_MANY_REQUESTS);
+    }
+
+    @Test
+    @DisplayName("EC-03 — check_malformedCodeWithinTheClientLimit_isBadRequestCountsForTheClientNotTheJourney")
+    void check_malformedCodeWithinTheClientLimit_isBadRequestCountsForTheClientNotTheJourney() {
+        configs.put(CGCOM, config(Map.of()));
+        HolderRef holder = entitledJourney();
+        sendCode(holder);
+
+        assertProblem(() -> service.check(CGCOM, holder, "12ab", CLIENT), ProblemCode.BAD_REQUEST);
+
+        assertThat(checkLimit.consumed).hasValue(1);
+        assertThat(stored(holder).checks()).isEmpty();
+        assertThat(stored(holder).attempts()).isZero();
+    }
+
+    @Test
+    @DisplayName("ES-01 — check_noCodePending_isStepNotAllowedAndCountsForTheClientAddress")
+    void check_noCodePending_isStepNotAllowedAndCountsForTheClientAddress() {
+        configs.put(CGCOM, config(Map.of()));
+        HolderRef holder = entitledJourney();
+
+        assertProblem(() -> service.check(CGCOM, holder, "123456", CLIENT), ProblemCode.STEP_NOT_ALLOWED);
+
+        assertThat(checkLimit.consumed).hasValue(1);
+    }
+
+    @Test
+    @DisplayName("AC-03 — check_eleventhCheckOfTheJourney_isTooManyRequestsWithoutComparingNorSpendingAttempts")
+    void check_eleventhCheckOfTheJourney_isTooManyRequestsWithoutComparingNorSpendingAttempts() {
+        configs.put(CGCOM, config(Map.of()));
+        HolderRef holder = entitledJourney();
+        String code = sendCode(holder);
+        writeChecks(holder, START.minusSeconds(600), 10);
+
+        assertThatThrownBy(() -> service.check(CGCOM, holder, code, CLIENT))
+                .isInstanceOfSatisfying(ProblemException.class, e -> {
+                    assertThat(e.problem()).isEqualTo(ProblemCode.TOO_MANY_REQUESTS);
+                    // The oldest check, 10 minutes ago, leaves the hour in 50 minutes.
+                    assertThat(e.retryAfter()).contains(Duration.ofMinutes(50));
+                });
+
+        assertThat(stored(holder).attempts()).isZero();
+        assertThat(stored(holder).checks()).hasSize(10);
+        assertThat(sessions.read(CGCOM, journeyOf(holder), Section.EMAIL)).isEmpty();
+        assertThat(trail.emailCodeChecks()).extracting(event -> event.result(), event -> event.journeyId())
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(
+                        JourneyAuditTrail.EmailCodeCheck.TOO_MANY_REQUESTS, journeyId(holder)));
+    }
+
+    @Test
+    @DisplayName("EC-01 — check_limitedWithFourAttemptsSpent_theRightCodeVerifiesOnceTheLimitIsOver")
+    void check_limitedWithFourAttemptsSpent_theRightCodeVerifiesOnceTheLimitIsOver() {
+        configs.put(CGCOM, config(Map.of()));
+        HolderRef holder = entitledJourney();
+        String code = sendCode(holder);
+        for (int i = 0; i < 4; i++) {
+            assertProblem(() -> service.check(CGCOM, holder, wrongCodeFor(code), CLIENT), ProblemCode.INVALID_CODE);
+        }
+        writeChecks(holder, START, 10);
+
+        assertProblem(() -> service.check(CGCOM, holder, code, CLIENT), ProblemCode.TOO_MANY_REQUESTS);
+        assertThat(stored(holder).attempts()).isEqualTo(4);
+
+        // Once the window has slid past those checks, the right code still has its last attempt (EC-05).
+        writeChecks(holder, START.minus(Duration.ofHours(1)).minusSeconds(30), 10);
+        service.check(CGCOM, holder, code, CLIENT);
+
+        assertThat(sessions.read(CGCOM, journeyOf(holder), Section.EMAIL)).isPresent();
+    }
+
+    @Test
+    @DisplayName("EC-02 — check_exhaustedOrExpiredCode_stillCountsAndTheCountIsKeptWhenTheAnswerIsAnError")
+    void check_exhaustedOrExpiredCode_stillCountsAndTheCountIsKeptWhenTheAnswerIsAnError() {
+        configs.put(CGCOM, config(Map.of()));
+        HolderRef holder = entitledJourney();
+        String code = sendCode(holder);
+        for (int i = 0; i < 5; i++) {
+            assertProblem(() -> service.check(CGCOM, holder, wrongCodeFor(code), CLIENT), ProblemCode.INVALID_CODE);
+        }
+
+        assertProblem(() -> service.check(CGCOM, holder, code, CLIENT), ProblemCode.TOO_MANY_ATTEMPTS);
+        assertThat(stored(holder).checks()).hasSize(6);
+
+
+        HolderRef other = entitledJourney();
+        String otherCode = sendCode(other);
+        clock.advance(Duration.ofMinutes(11));
+        assertProblem(() -> service.check(CGCOM, other, otherCode, CLIENT), ProblemCode.EXPIRED_CODE);
+        assertThat(stored(other).checks()).hasSize(1);
+    }
+
+    @Test
+    @DisplayName("EC-02 — check_exhaustedCodeAtTheEleventhCheck_isTooManyRequestsNotTooManyAttempts")
+    void check_exhaustedCodeAtTheEleventhCheck_isTooManyRequestsNotTooManyAttempts() {
+        configs.put(CGCOM, config(Map.of()));
+        HolderRef holder = entitledJourney();
+        String code = sendCode(holder);
+        for (int i = 0; i < 5; i++) {
+            assertProblem(() -> service.check(CGCOM, holder, wrongCodeFor(code), CLIENT), ProblemCode.INVALID_CODE);
+        }
+        for (int i = 0; i < 5; i++) {
+            assertProblem(() -> service.check(CGCOM, holder, code, CLIENT), ProblemCode.TOO_MANY_ATTEMPTS);
+        }
+
+        assertProblem(() -> service.check(CGCOM, holder, code, CLIENT), ProblemCode.TOO_MANY_REQUESTS);
+    }
+
+    @Test
+    @DisplayName("EC-04 — send_newCode_keepsTheCountOfChecksOfTheJourney")
+    void send_newCode_keepsTheCountOfChecksOfTheJourney() {
+        configs.put(CGCOM, config(Map.of()));
+        HolderRef holder = entitledJourney();
+        String code = sendCode(holder);
+        assertProblem(() -> service.check(CGCOM, holder, wrongCodeFor(code), CLIENT), ProblemCode.INVALID_CODE);
+        clock.advance(Duration.ofSeconds(181));
+
+        service.send(CGCOM, holder, EMAIL, EmailLanguage.ES, CLIENT);
+
+        assertThat(stored(holder).checks()).containsExactly(START);
+        assertThat(stored(holder).attempts()).isZero();
+    }
+
+    @Test
+    @DisplayName("ES-02 — check_trailFailsOnALimitedCheck_stillAnswersTooManyRequests")
+    void check_trailFailsOnALimitedCheck_stillAnswersTooManyRequests(CapturedOutput output) {
+        configs.put(CGCOM, config(Map.of()));
+        HolderRef holder = entitledJourney();
+        String code = sendCode(holder);
+        checkLimit.deniedFor = Duration.ofSeconds(30);
+        trail.failFromNowOn();
+
+        assertThatThrownBy(() -> service.check(CGCOM, holder, code, CLIENT))
+                .isInstanceOfSatisfying(ProblemException.class, e -> {
+                    assertThat(e.problem()).isEqualTo(ProblemCode.TOO_MANY_REQUESTS);
+                    assertThat(e.retryAfter()).contains(Duration.ofSeconds(30));
+                });
+
+        assertThat(output.getOut()).contains("Could not record the email code check of journey")
+                .doesNotContain(EMAIL, code);
+    }
+
+    @Test
+    @DisplayName("ES-02 — check_trailFailsOnACheckLimitedOnTheJourney_stillAnswersTooManyRequests")
+    void check_trailFailsOnACheckLimitedOnTheJourney_stillAnswersTooManyRequests(CapturedOutput output) {
+        configs.put(CGCOM, config(Map.of()));
+        HolderRef holder = entitledJourney();
+        String code = sendCode(holder);
+        writeChecks(holder, START.minusSeconds(600), 10);
+        trail.failFromNowOn();
+
+        assertThatThrownBy(() -> service.check(CGCOM, holder, code, CLIENT))
+                .isInstanceOfSatisfying(ProblemException.class, e -> {
+                    assertThat(e.problem()).isEqualTo(ProblemCode.TOO_MANY_REQUESTS);
+                    assertThat(e.retryAfter()).contains(Duration.ofMinutes(50));
+                });
+
+        assertThat(output.getOut()).contains("Could not record the email code check of journey " + journeyId(holder))
+                .doesNotContain(EMAIL, code);
+    }
+
+    @Test
+    @DisplayName("AC-02 — check_limitedOnTheJourney_leavesTheClientBudgetSpentNotGivenBack")
+    void check_limitedOnTheJourney_leavesTheClientBudgetSpentNotGivenBack() {
+        configs.put(CGCOM, config(Map.of()));
+        HolderRef holder = entitledJourney();
+        String code = sendCode(holder);
+        writeChecks(holder, START, 10);
+
+        assertProblem(() -> service.check(CGCOM, holder, code, CLIENT), ProblemCode.TOO_MANY_REQUESTS);
+
+        assertThat(checkLimit.consumed).hasValue(1);
+        assertThat(clientLimit.consumed).hasValue(1);
+    }
+
     // --- helpers ---
+
+    /** Rewrites the stored section as if the journey had made {@code count} checks, one a second from {@code from}. */
+    private void writeChecks(HolderRef holder, Instant from, int count) {
+        EmailVerificationRecord section = stored(holder);
+        List<Instant> checks = new java.util.ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            checks.add(from.plusSeconds(i));
+        }
+        sessions.write(CGCOM, journeyOf(holder), Section.EMAIL_VERIFICATION, new EmailVerificationRecord(
+                section.pendingEmail(), section.codeHash(), section.codeExpiresAt(), section.attempts(),
+                section.sends(), section.lastSentAt(), section.voidedCodeHashes(), checks).toJson());
+    }
 
     private void assertNothingSent(HolderRef holder) {
         assertThat(mailer.sent()).isEmpty();

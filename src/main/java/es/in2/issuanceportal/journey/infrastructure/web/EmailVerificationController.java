@@ -79,7 +79,7 @@ class EmailVerificationController {
                           @RequestBody(required = false) CheckRequest body) {
         TenantId tenant = CurrentTenant.of(request);
         HolderRef holder = holders.of(principal);
-        service.check(tenant, holder, body == null ? null : body.codeText());
+        service.check(tenant, holder, body == null ? null : body.codeText(), request.getRemoteAddr());
         return JourneyResponse.of(views.current(tenant, holder));
     }
 }

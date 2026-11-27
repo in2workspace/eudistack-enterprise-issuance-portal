@@ -29,7 +29,7 @@ class EmailVerificationRecordTest {
     @Test
     void toString_record_hidesTheAddressAndTheHash() {
         assertThat(RECORD.toString()).doesNotContain(ADDRESS, "lucia", "abc123");
-        assertThat(new EmailVerificationRecord.Document(ADDRESS, "abc123", SENT, 0, 1, SENT, null).toString())
+        assertThat(new EmailVerificationRecord.Document(ADDRESS, "abc123", SENT, 0, 1, SENT, null, null).toString())
                 .doesNotContain(ADDRESS, "lucia", "abc123");
     }
 
@@ -74,6 +74,27 @@ class EmailVerificationRecordTest {
 
         assertThat(EmailVerificationRecord.fromJson(withVoided.toJson()).voidedCodeHashes())
                 .containsExactly("old1", "old2");
+    }
+
+    @Test
+    void fromJson_checks_areKept() {
+        EmailVerificationRecord withChecks = new EmailVerificationRecord(ADDRESS, "abc123", SENT.plusSeconds(600), 0, 1,
+                SENT, java.util.List.of(), java.util.List.of(SENT, SENT.plusSeconds(5)));
+
+        String json = withChecks.toJson();
+
+        assertThat(json).contains("\"checks\":[\"2026-11-11T10:00:00Z\",\"2026-11-11T10:00:05Z\"]");
+        assertThat(EmailVerificationRecord.fromJson(json).checks()).containsExactly(SENT, SENT.plusSeconds(5));
+    }
+
+    @Test
+    void fromJson_sectionWrittenBeforeTheLimit_readsNoChecks() {
+        String json = "{\"pending_email\":\"" + ADDRESS + "\",\"code_hash\":\"abc123\","
+                + "\"code_expires_at\":\"2026-11-11T10:10:00Z\",\"attempts\":2,\"sends\":1,"
+                + "\"last_sent_at\":\"2026-11-11T10:00:00Z\"}";
+
+        assertThat(EmailVerificationRecord.fromJson(json).checks()).isEmpty();
+        assertThat(RECORD.toJson()).doesNotContain("checks");
     }
 
     @Test

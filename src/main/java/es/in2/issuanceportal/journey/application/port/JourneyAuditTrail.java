@@ -125,7 +125,9 @@ public interface JourneyAuditTrail {
         /** More than 10 minutes old, or voided by a newer code. */
         EXPIRED_CODE("expired_code"),
         /** The 5 attempts of the code are spent. */
-        TOO_MANY_ATTEMPTS("too_many_attempts");
+        TOO_MANY_ATTEMPTS("too_many_attempts"),
+        /** Refused by the limit per client address or per journey, before the code was looked at. */
+        TOO_MANY_REQUESTS("too_many_requests");
 
         private final String code;
 

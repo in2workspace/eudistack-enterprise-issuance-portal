@@ -3,6 +3,7 @@ package es.in2.issuanceportal.journey.application;
 import es.in2.issuanceportal.journey.api.JourneyAccess;
 import es.in2.issuanceportal.journey.application.port.EmailCodeDeliveryException;
 import es.in2.issuanceportal.journey.application.port.EmailCodeMailer;
+import es.in2.issuanceportal.journey.application.port.EmailCodeCheckRateLimit;
 import es.in2.issuanceportal.journey.application.port.EmailCodeMessage;
 import es.in2.issuanceportal.journey.application.port.EmailCodeRateLimit;
 import es.in2.issuanceportal.journey.application.port.JourneyAuditTrail;
@@ -48,6 +49,10 @@ import java.util.UUID;
  * The limit per client address is consumed last, only once nothing else refuses the send, and given back
  * when the email does not go out.
  *
+ * <p>The checks have two limits of their own (design.md §3.6): per client address, consumed before anything
+ * else and never given back, and per journey, counted in the locked row. Every check that reaches the second
+ * counts, whatever its answer, so what it counts is committed also when it answers an error.
+ *
  * <p>Neither the email, the code nor its hash reaches a log or the trail.
  */
 @Slf4j
@@ -63,19 +68,21 @@ public class EmailVerificationService {
     private final PortalConfigService configs;
     private final EmailCodeMailer mailer;
     private final EmailCodeRateLimit clientLimit;
+    private final EmailCodeCheckRateLimit checkLimit;
     private final JourneyAuditTrail trail;
     private final TransactionOperations transactions;
     private final Clock clock;
 
     EmailVerificationService(JourneyAccess access, JourneyRepository journeys, JourneySessions sessions,
                              PortalConfigService configs, EmailCodeMailer mailer, EmailCodeRateLimit clientLimit,
-                             JourneyAuditTrail trail, TransactionOperations transactions, Clock clock) {
+                             EmailCodeCheckRateLimit checkLimit, JourneyAuditTrail trail, TransactionOperations transactions, Clock clock) {
         this.access = access;
         this.journeys = journeys;
         this.sessions = sessions;
         this.configs = configs;
         this.mailer = mailer;
         this.clientLimit = clientLimit;
+        this.checkLimit = checkLimit;
         this.trail = trail;
         this.transactions = transactions;
         this.clock = clock;
@@ -143,22 +150,37 @@ public class EmailVerificationService {
     /**
      * Checks the code the holder typed. The right code makes the pending email the journey's verified email, drops
      * the code and moves the journey to {@code email_verified}; a wrong one spends an attempt. The journey's row is
-     * locked, so two checks at the same time cannot spend more than the 5 attempts (EC-03).
+     * locked, so two checks at the same time cannot spend more than the 5 attempts (EC-03) nor miss each other
+     * in the limit per journey (EC-07).
      *
      * <p>What a check changes is committed before it answers an error: the transaction returns its result and the
-     * failure is raised outside it, otherwise the rollback would give the attempt back.
+     * failure is raised outside it, otherwise the rollback would give the attempt, and the count, back. A check
+     * refused by the limit per journey changes nothing and spends no attempt (EC-01).
      *
-     * @param code what the interface sent; anything that is not 6 digits is {@code bad_request} and spends nothing
+     * @param code          what the interface sent; anything that is not 6 digits is {@code bad_request} and spends
+     *                      nothing, but counts for the limit per client address (EC-03)
+     * @param clientAddress the client as the platform's proxies saw it, for the limit per address
      */
-    public void check(TenantId tenant, HolderRef holder, String code) {
+    public void check(TenantId tenant, HolderRef holder, String code, String clientAddress) {
+        Optional<Duration> clientWait = checkLimit.tryConsume(clientAddress);
+        if (clientWait.isPresent()) {
+            // The journey is not looked at: the limit refuses before anything else (design.md §3.6 step 1).
+            traceCheck(tenant, null, EmailCodeCheck.TOO_MANY_REQUESTS);
+            throw new ProblemException(ProblemCode.TOO_MANY_REQUESTS, clientWait.get());
+        }
         if (!EmailVerification.isWellFormed(code)) {
             throw new ProblemException(ProblemCode.BAD_REQUEST);
         }
         access.requireActive(tenant, holder);
         UUID journeyId = sessions.journeyOf(tenant, holder)
                 .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
-        EmailVerification.Check.Outcome outcome = Objects.requireNonNull(
+        Checked checked = Objects.requireNonNull(
                 transactions.execute(status -> checkLocked(tenant, journeyId, code)));
+        if (checked instanceof Checked.Limited(Duration retryAfter)) {
+            traceCheck(tenant, journeyId, EmailCodeCheck.TOO_MANY_REQUESTS);
+            throw new ProblemException(ProblemCode.TOO_MANY_REQUESTS, retryAfter);
+        }
+        EmailVerification.Check.Outcome outcome = ((Checked.Answered) checked).outcome();
         traceCheck(tenant, journeyId, switch (outcome) {
             case VERIFIED -> EmailCodeCheck.VERIFIED;
             case INVALID_CODE -> EmailCodeCheck.INVALID_CODE;
@@ -175,28 +197,35 @@ public class EmailVerificationService {
         }
     }
 
-    private EmailVerification.Check.Outcome checkLocked(TenantId tenant, UUID journeyId,
-                                                        String code) {
+    /** What the locked part of a check came to: it was answered, or the limit per journey refused it. */
+    private sealed interface Checked {
+
+        record Answered(EmailVerification.Check.Outcome outcome) implements Checked {
+        }
+
+        record Limited(Duration retryAfter) implements Checked {
+        }
+    }
+
+    private Checked checkLocked(TenantId tenant, UUID journeyId, String code) {
         Journey journey = lock(tenant, journeyId);
         requireInProgress(journey);
         // No code pending: never sent, or already verified (ES-03).
         EmailVerification pending = readVerification(tenant, journeyId)
                 .filter(EmailVerification::isPending)
                 .orElseThrow(() -> new ProblemException(ProblemCode.STEP_NOT_ALLOWED));
-        EmailVerification.Check check = pending.check(journeyId, code, clock.instant());
-        switch (check.outcome()) {
-            case VERIFIED -> {
-                sessions.write(tenant, journeyId, Section.EMAIL, new EmailRecord(pending.pendingEmail()).toJson());
-                sessions.write(tenant, journeyId, Section.EMAIL_VERIFICATION, toRecord(check.next()).toJson());
-                reachEmailVerified(tenant, journey);
-            }
-            case INVALID_CODE ->
-                    sessions.write(tenant, journeyId, Section.EMAIL_VERIFICATION, toRecord(check.next()).toJson());
-            case EXPIRED_CODE, TOO_MANY_ATTEMPTS -> {
-                // Nothing to store: the stored record already says it is expired or exhausted.
-            }
+        EmailVerification.CheckCount count = pending.countCheck(clock.instant());
+        if (count.retryAfter().isPresent()) {
+            return new Checked.Limited(count.retryAfter().get());
         }
-        return check.outcome();
+        EmailVerification.Check check = count.next().check(journeyId, code, clock.instant());
+        // Whatever the outcome, the section is written: the check was counted (EC-02).
+        sessions.write(tenant, journeyId, Section.EMAIL_VERIFICATION, toRecord(check.next()).toJson());
+        if (check.outcome() == EmailVerification.Check.Outcome.VERIFIED) {
+            sessions.write(tenant, journeyId, Section.EMAIL, new EmailRecord(pending.pendingEmail()).toJson());
+            reachEmailVerified(tenant, journey);
+        }
+        return new Checked.Answered(check.outcome());
     }
 
     /**
@@ -313,13 +342,13 @@ public class EmailVerificationService {
 
     static EmailVerification fromRecord(EmailVerificationRecord stored) {
         return new EmailVerification(stored.pendingEmail(), stored.codeHash(), stored.codeExpiresAt(),
-                stored.attempts(), stored.sends(), stored.lastSentAt(), stored.voidedCodeHashes());
+                stored.attempts(), stored.sends(), stored.lastSentAt(), stored.voidedCodeHashes(), stored.checks());
     }
 
     private static EmailVerificationRecord toRecord(EmailVerification verification) {
         return new EmailVerificationRecord(verification.pendingEmail(), verification.codeHash(),
                 verification.codeExpiresAt(), verification.attempts(), verification.sends(),
-                verification.lastSentAt(), verification.voidedCodeHashes());
+                verification.lastSentAt(), verification.voidedCodeHashes(), verification.checks());
     }
 
     private Journey lock(TenantId tenant, UUID journeyId) {
