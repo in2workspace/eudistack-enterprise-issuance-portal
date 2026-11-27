@@ -985,14 +985,14 @@ class EmailVerificationServiceTest {
 
     /** Rewrites the stored section as if the journey had made {@code count} checks, one a second from {@code from}. */
     private void writeChecks(HolderRef holder, Instant from, int count) {
-        EmailVerificationRecord record = stored(holder);
+        EmailVerificationRecord section = stored(holder);
         List<Instant> checks = new java.util.ArrayList<>();
         for (int i = 0; i < count; i++) {
             checks.add(from.plusSeconds(i));
         }
         sessions.write(CGCOM, journeyOf(holder), Section.EMAIL_VERIFICATION, new EmailVerificationRecord(
-                record.pendingEmail(), record.codeHash(), record.codeExpiresAt(), record.attempts(), record.sends(),
-                record.lastSentAt(), record.voidedCodeHashes(), checks).toJson());
+                section.pendingEmail(), section.codeHash(), section.codeExpiresAt(), section.attempts(),
+                section.sends(), section.lastSentAt(), section.voidedCodeHashes(), checks).toJson());
     }
 
     private void assertNothingSent(HolderRef holder) {

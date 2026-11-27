@@ -176,9 +176,9 @@ public class EmailVerificationService {
                 .orElseThrow(() -> new ProblemException(ProblemCode.JOURNEY_CLOSED));
         Checked checked = Objects.requireNonNull(
                 transactions.execute(status -> checkLocked(tenant, journeyId, code)));
-        if (checked instanceof Checked.Limited limited) {
+        if (checked instanceof Checked.Limited(Duration retryAfter)) {
             traceCheck(tenant, journeyId, EmailCodeCheck.TOO_MANY_REQUESTS);
-            throw new ProblemException(ProblemCode.TOO_MANY_REQUESTS, limited.retryAfter());
+            throw new ProblemException(ProblemCode.TOO_MANY_REQUESTS, retryAfter);
         }
         EmailVerification.Check.Outcome outcome = ((Checked.Answered) checked).outcome();
         traceCheck(tenant, journeyId, switch (outcome) {
